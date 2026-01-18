@@ -111,7 +111,7 @@ val create_binding_request : ?transaction_id:bytes -> unit -> message
 val create_binding_response :
   transaction_id:bytes ->
   mapped_address:address ->
-  message
+  (message, string) result
 
 (** Create an error response *)
 val create_error_response :
@@ -125,8 +125,8 @@ val create_error_response :
 
 (** Encode message to bytes.
     @param message STUN message
-    @return Encoded bytes *)
-val encode : message -> bytes
+    @return Encoded bytes or error *)
+val encode : message -> (bytes, string) result
 
 (** Decode bytes to message.
     @param data Raw bytes
@@ -138,14 +138,14 @@ val decode : bytes -> (message, string) result
 (** XOR an address with transaction ID (for XOR-MAPPED-ADDRESS).
     @param addr Original address
     @param transaction_id 12-byte transaction ID
-    @return XORed address *)
-val xor_address : address -> bytes -> address
+    @return XORed address or error *)
+val xor_address : address -> bytes -> (address, string) result
 
 (** Reverse XOR to get original address.
     @param xored XORed address
     @param transaction_id 12-byte transaction ID
-    @return Original address *)
-val unxor_address : address -> bytes -> address
+    @return Original address or error *)
+val unxor_address : address -> bytes -> (address, string) result
 
 (** {1 Message Integrity} *)
 

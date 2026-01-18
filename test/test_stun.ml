@@ -10,6 +10,10 @@
 
 open Masc_mcp
 
+let unwrap_result label = function
+  | Ok v -> v
+  | Error e -> Alcotest.failf "%s failed: %s" label e
+
 (* ============================================
    Unit Tests: Message Encoding/Decoding
    ============================================ *)
@@ -41,7 +45,7 @@ let test_create_binding_request () =
 (** Test message encode/decode roundtrip *)
 let test_encode_decode_roundtrip () =
   let original = Stun.create_binding_request () in
-  let encoded = Stun.encode original in
+  let encoded = unwrap_result "encode" (Stun.encode original) in
   let decoded = Stun.decode encoded in
 
   match decoded with
@@ -62,13 +66,14 @@ let test_binding_response () =
     port = 12345;
     ip = "203.0.113.42";
   } in
-  let msg = Stun.create_binding_response ~transaction_id ~mapped_address:addr in
+  let msg = unwrap_result "create_binding_response"
+    (Stun.create_binding_response ~transaction_id ~mapped_address:addr) in
 
   Alcotest.(check bool) "msg_class is Success_response"
     true (msg.msg_class = Stun.Success_response);
 
   (* Encode and decode *)
-  let encoded = Stun.encode msg in
+  let encoded = unwrap_result "encode" (Stun.encode msg) in
   match Stun.decode encoded with
   | Error e -> Alcotest.failf "decode failed: %s" e
   | Ok decoded_msg ->
@@ -83,7 +88,7 @@ let test_binding_response () =
 let test_magic_cookie () =
   (* Create a message with invalid magic cookie *)
   let msg = Stun.create_binding_request () in
-  let encoded = Stun.encode msg in
+  let encoded = unwrap_result "encode" (Stun.encode msg) in
 
   (* Corrupt magic cookie (bytes 4-7) *)
   Bytes.set encoded 4 '\x00';
@@ -101,7 +106,7 @@ let test_magic_cookie () =
 (** Test is_stun_message detection *)
 let test_is_stun_message () =
   let msg = Stun.create_binding_request () in
-  let encoded = Stun.encode msg in
+  let encoded = unwrap_result "encode" (Stun.encode msg) in
 
   Alcotest.(check bool) "valid STUN message detected"
     true (Stun.is_stun_message encoded);
@@ -129,8 +134,8 @@ let test_xor_address_roundtrip () =
   } in
   let transaction_id = Stun.generate_transaction_id () in
 
-  let xored = Stun.xor_address original transaction_id in
-  let unxored = Stun.unxor_address xored transaction_id in
+  let xored = unwrap_result "xor_address" (Stun.xor_address original transaction_id) in
+  let unxored = unwrap_result "unxor_address" (Stun.unxor_address xored transaction_id) in
 
   Alcotest.(check int) "port matches" original.port unxored.port;
   Alcotest.(check string) "ip matches" original.ip unxored.ip
@@ -144,7 +149,7 @@ let test_fingerprint () =
   let msg = Stun.create_binding_request () in
 
   (* Fingerprint should be consistent *)
-  let encoded = Stun.encode msg in
+  let encoded = unwrap_result "encode" (Stun.encode msg) in
   let fp1 = Stun.calculate_fingerprint encoded in
   let fp2 = Stun.calculate_fingerprint encoded in
 

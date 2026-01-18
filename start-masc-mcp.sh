@@ -23,10 +23,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # Resolve executable path
-# Priority: 1. Release binary  2. Workspace build  3. Local build  4. Auto-download
+# Priority: 1. Release binary  2. Workspace build  3. Local build  4. Installed  5. Auto-download
 RELEASE_BINARY="$SCRIPT_DIR/masc-mcp-macos-arm64"
 WORKSPACE_EXE="$SCRIPT_DIR/../_build/default/masc-mcp/bin/main.exe"
 LOCAL_EXE="$SCRIPT_DIR/_build/default/bin/main.exe"
+INSTALLED_EXE="$(command -v masc-mcp || true)"
 # Eio-based server (main_eio.exe) - for PostgresNative backend
 WORKSPACE_EIO_EXE="$SCRIPT_DIR/../_build/default/masc-mcp/bin/main_eio.exe"
 LOCAL_EIO_EXE="$SCRIPT_DIR/_build/default/bin/main_eio.exe"
@@ -42,6 +43,9 @@ elif [ -x "$WORKSPACE_EXE" ]; then
 # 3. Local build
 elif [ -x "$LOCAL_EXE" ]; then
     MASC_EXE="$LOCAL_EXE"
+# 4. System-installed
+elif [ -n "$INSTALLED_EXE" ]; then
+    MASC_EXE="$INSTALLED_EXE"
 fi
 
 if [ -x "$WORKSPACE_EIO_EXE" ]; then
@@ -50,7 +54,7 @@ elif [ -x "$LOCAL_EIO_EXE" ]; then
     MASC_EIO_EXE="$LOCAL_EIO_EXE"
 fi
 
-# 4. Auto-download from GitHub releases if nothing found
+# 5. Auto-download from GitHub releases if nothing found
 if [ -z "$MASC_EXE" ]; then
     echo "No binary found. Downloading from GitHub releases..." >&2
     RELEASE_URL="https://github.com/jeong-sik/masc-mcp/releases/latest/download/masc-mcp-macos-arm64"

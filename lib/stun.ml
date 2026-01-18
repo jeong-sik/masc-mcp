@@ -290,20 +290,18 @@ let decode_address data off =
     Error (Printf.sprintf "Unknown address family: 0x%02X" family_byte)
 
 let encode_address addr =
-  let buf = match addr.family with
-    | IPv4 ->
-      let b = Bytes.create 8 in
-      Bytes.set b 0 '\x00';  (* Reserved *)
-      Bytes.set b 1 '\x01';  (* IPv4 *)
-      set_uint16_be b 2 addr.port;
-      let ip_bytes = encode_ipv4 addr.ip in
-      Bytes.blit ip_bytes 0 b 4 4;
-      b
-    | IPv6 ->
-      (* TODO: Implement IPv6 *)
-      failwith "IPv6 not yet implemented"
-  in
-  buf
+  match addr.family with
+  | IPv4 ->
+    let b = Bytes.create 8 in
+    Bytes.set b 0 '\x00';  (* Reserved *)
+    Bytes.set b 1 '\x01';  (* IPv4 *)
+    set_uint16_be b 2 addr.port;
+    let ip_bytes = encode_ipv4 addr.ip in
+    Bytes.blit ip_bytes 0 b 4 4;
+    Ok b
+  | IPv6 ->
+    (* TODO: Implement IPv6 *)
+    Error "IPv6 not yet implemented"
 
 (* ============================================
    XOR operations
@@ -324,11 +322,11 @@ let xor_address addr transaction_id =
         (Char.code (Bytes.get mc_bytes i))
       ))
     done;
-    { family = IPv4; port = xored_port; ip = parse_ipv4 ip_bytes 0 }
+    Ok { family = IPv4; port = xored_port; ip = parse_ipv4 ip_bytes 0 }
   | IPv6 ->
     (* XOR with magic cookie + transaction_id *)
     let _ = transaction_id in
-    failwith "IPv6 XOR not yet implemented"
+    Error "IPv6 XOR not yet implemented"
 
 let unxor_address = xor_address  (* XOR is symmetric *)
 
@@ -338,17 +336,17 @@ let unxor_address = xor_address  (* XOR is symmetric *)
 
 let encode_attribute attr =
   let type_code = attr_type_to_int attr.attr_type in
-  let value_bytes = match attr.value with
+  let value_result = match attr.value with
     | Mapped_address addr | Xor_mapped_address addr ->
       encode_address addr
     | Username s | Software s | Realm s | Nonce s ->
-      Bytes.of_string s
+      Ok (Bytes.of_string s)
     | Message_integrity b ->
-      b
+      Ok b
     | Fingerprint fp ->
       let b = Bytes.create 4 in
       set_uint32_be b 0 fp;
-      b
+      Ok b
     | Error_code { code; reason } ->
       let reason_bytes = Bytes.of_string reason in
       let len = 4 + Bytes.length reason_bytes in
@@ -358,21 +356,24 @@ let encode_attribute attr =
       Bytes.set b 2 (Char.chr (code / 100));  (* Class *)
       Bytes.set b 3 (Char.chr (code mod 100));  (* Number *)
       Bytes.blit reason_bytes 0 b 4 (Bytes.length reason_bytes);
-      b
+      Ok b
     | Unknown_attr b ->
-      b
+      Ok b
   in
-  let value_len = Bytes.length value_bytes in
-  (* Pad to 4-byte boundary *)
-  let padded_len = (value_len + 3) land (lnot 3) in
-  let header = Bytes.create 4 in
-  set_uint16_be header 0 type_code;
-  set_uint16_be header 2 value_len;
-  let result = Bytes.create (4 + padded_len) in
-  Bytes.blit header 0 result 0 4;
-  Bytes.blit value_bytes 0 result 4 value_len;
-  (* Padding bytes are already 0 *)
-  result
+  match value_result with
+  | Error _ as err -> err
+  | Ok value_bytes ->
+      let value_len = Bytes.length value_bytes in
+      (* Pad to 4-byte boundary *)
+      let padded_len = (value_len + 3) land (lnot 3) in
+      let header = Bytes.create 4 in
+      set_uint16_be header 0 type_code;
+      set_uint16_be header 2 value_len;
+      let result = Bytes.create (4 + padded_len) in
+      Bytes.blit header 0 result 0 4;
+      Bytes.blit value_bytes 0 result 4 value_len;
+      (* Padding bytes are already 0 *)
+      Ok result
 
 let decode_attribute data off =
   if Bytes.length data < off + 4 then
@@ -417,25 +418,33 @@ let decode_attribute data off =
 
 let encode msg =
   (* Encode attributes first *)
-  let attr_bytes = List.map encode_attribute msg.attributes in
-  let attr_len = List.fold_left (fun acc b -> acc + Bytes.length b) 0 attr_bytes in
+  let rec encode_attrs acc len = function
+    | [] -> Ok (List.rev acc, len)
+    | attr :: rest ->
+        (match encode_attribute attr with
+        | Error _ as err -> err
+        | Ok bytes ->
+            encode_attrs (bytes :: acc) (len + Bytes.length bytes) rest)
+  in
+  match encode_attrs [] 0 msg.attributes with
+  | Error _ as err -> err
+  | Ok (attr_bytes, attr_len) ->
+      (* Header: 20 bytes *)
+      let header = Bytes.create 20 in
+      let msg_type = encode_message_type msg.msg_class msg.msg_method in
+      set_uint16_be header 0 msg_type;
+      set_uint16_be header 2 attr_len;
+      set_uint32_be header 4 magic_cookie;
+      Bytes.blit msg.transaction_id 0 header 8 12;
 
-  (* Header: 20 bytes *)
-  let header = Bytes.create 20 in
-  let msg_type = encode_message_type msg.msg_class msg.msg_method in
-  set_uint16_be header 0 msg_type;
-  set_uint16_be header 2 attr_len;
-  set_uint32_be header 4 magic_cookie;
-  Bytes.blit msg.transaction_id 0 header 8 12;
-
-  (* Combine *)
-  let result = Bytes.create (20 + attr_len) in
-  Bytes.blit header 0 result 0 20;
-  let _ = List.fold_left (fun off attr_b ->
-    Bytes.blit attr_b 0 result off (Bytes.length attr_b);
-    off + Bytes.length attr_b
-  ) 20 attr_bytes in
-  result
+      (* Combine *)
+      let result = Bytes.create (20 + attr_len) in
+      Bytes.blit header 0 result 0 20;
+      let _ = List.fold_left (fun off attr_b ->
+        Bytes.blit attr_b 0 result off (Bytes.length attr_b);
+        off + Bytes.length attr_b
+      ) 20 attr_bytes in
+      Ok result
 
 let decode data =
   if Bytes.length data < 20 then
@@ -491,15 +500,17 @@ let create_binding_request ?transaction_id () =
 
 let create_binding_response ~transaction_id ~mapped_address =
   (* XOR the address *)
-  let xored = xor_address mapped_address transaction_id in
-  {
-    msg_class = Success_response;
-    msg_method = Binding;
-    transaction_id;
-    attributes = [
-      { attr_type = XOR_MAPPED_ADDRESS; value = Xor_mapped_address xored };
-    ];
-  }
+  match xor_address mapped_address transaction_id with
+  | Error _ as err -> err
+  | Ok xored ->
+      Ok {
+        msg_class = Success_response;
+        msg_method = Binding;
+        transaction_id;
+        attributes = [
+          { attr_type = XOR_MAPPED_ADDRESS; value = Xor_mapped_address xored };
+        ];
+      }
 
 let create_error_response ~transaction_id ~error ?reason () =
   let code = error_code_to_int error in
@@ -529,14 +540,17 @@ let create_error_response ~transaction_id ~error ?reason () =
 (* Real HMAC-SHA1 using digestif *)
 let calculate_integrity msg ~key =
   (* Encode message, adjust length to include MESSAGE-INTEGRITY (24 bytes) *)
-  let encoded = encode msg in
-  let adjusted_len = (get_uint16_be encoded 2) + 24 in
-  set_uint16_be encoded 2 adjusted_len;
+  match encode msg with
+  | Error _ ->
+      Bytes.create 20
+  | Ok encoded ->
+      let adjusted_len = (get_uint16_be encoded 2) + 24 in
+      set_uint16_be encoded 2 adjusted_len;
 
-  (* HMAC-SHA1 per RFC 5389 Section 15.4 *)
-  let mac = Digestif.SHA1.hmac_bytes ~key encoded in
-  (* Convert digestif SHA1.t to bytes (20 bytes) *)
-  Bytes.of_string (Digestif.SHA1.to_raw_string mac)
+      (* HMAC-SHA1 per RFC 5389 Section 15.4 *)
+      let mac = Digestif.SHA1.hmac_bytes ~key encoded in
+      (* Convert digestif SHA1.t to bytes (20 bytes) *)
+      Bytes.of_string (Digestif.SHA1.to_raw_string mac)
 
 let verify_integrity msg ~key =
   (* Find MESSAGE-INTEGRITY attribute and split attributes before it *)
@@ -596,12 +610,14 @@ let verify_fingerprint msg =
     (* Encode without fingerprint, add fingerprint length *)
     let attrs_without_fp = List.filter (fun a -> a.attr_type <> FINGERPRINT) msg.attributes in
     let msg_without_fp = { msg with attributes = attrs_without_fp } in
-    let encoded = encode msg_without_fp in
-    (* Adjust length to include FINGERPRINT (8 bytes) *)
-    let adjusted_len = (get_uint16_be encoded 2) + 8 in
-    set_uint16_be encoded 2 adjusted_len;
-    let calculated = calculate_fingerprint encoded in
-    expected = calculated
+    (match encode msg_without_fp with
+    | Error _ -> false
+    | Ok encoded ->
+        (* Adjust length to include FINGERPRINT (8 bytes) *)
+        let adjusted_len = (get_uint16_be encoded 2) + 8 in
+        set_uint16_be encoded 2 adjusted_len;
+        let calculated = calculate_fingerprint encoded in
+        expected = calculated)
 
 (* ============================================
    Utilities
@@ -649,20 +665,26 @@ let pp_message fmt msg =
    Client Functions (Lwt-based)
    ============================================ *)
 
+let parse_server_address server =
+  match String.split_on_char ':' server with
+  | [h; p] ->
+      (try Ok (h, int_of_string p) with _ -> Error "Invalid server port")
+  | [h] -> Ok (h, default_port)
+  | _ -> Error "Invalid server address"
+
 let binding_request_lwt ~server ?timeout () =
   let open Lwt.Infix in
   let timeout_s = Option.value ~default:3.0 timeout in
 
   (* Parse server address *)
-  let (host, port) = match String.split_on_char ':' server with
-    | [h; p] -> (h, int_of_string p)
-    | [h] -> (h, default_port)
-    | _ -> failwith "Invalid server address"
-  in
-
+  match parse_server_address server with
+  | Error e -> Lwt.return (Error e)
+  | Ok (host, port) ->
   (* Create request *)
   let request = create_binding_request () in
-  let request_bytes = encode request in
+  match encode request with
+  | Error e -> Lwt.return (Error e)
+  | Ok request_bytes ->
 
   (* Resolve address *)
   Lwt_unix.getaddrinfo host (string_of_int port) [Unix.AI_FAMILY Unix.PF_INET; Unix.AI_SOCKTYPE Unix.SOCK_DGRAM]
@@ -715,7 +737,7 @@ let binding_request_lwt ~server ?timeout () =
           | { value = Xor_mapped_address addr; _ } :: _ ->
             Some (unxor_address addr request.transaction_id)
           | { value = Mapped_address addr; _ } :: _ ->
-            Some addr
+            Some (Ok addr)
           | _ :: rest -> find_addr rest
         in
         let rec find_software = function
@@ -725,7 +747,8 @@ let binding_request_lwt ~server ?timeout () =
         in
         match find_addr response.attributes with
         | None -> Lwt.return (Error "No mapped address in response")
-        | Some mapped_address ->
+        | Some (Error e) -> Lwt.return (Error e)
+        | Some (Ok mapped_address) ->
           Lwt.return (Ok {
             local_address = { family = IPv4; port = 0; ip = "0.0.0.0" };  (* TODO: Get actual local *)
             mapped_address;
@@ -756,32 +779,32 @@ let binding_request_eio ~net ~sw ~server ?timeout () =
   let timeout_sec = Option.value ~default:3.0 timeout in
 
   (* Parse server address *)
-  let (host, port) = match String.split_on_char ':' server with
-    | [h; p] -> (h, int_of_string p)
-    | [h] -> (h, default_port)
-    | _ -> failwith "Invalid server address format"
-  in
+  match parse_server_address server with
+  | Error e -> Error e
+  | Ok (host, port) ->
+    (* Create request *)
+    let request = create_binding_request () in
+    (match encode request with
+    | Error e -> Error e
+    | Ok request_bytes ->
+      (* Resolve address *)
+      let server_addr =
+        let addrs = Eio.Net.getaddrinfo_datagram net host ~service:(string_of_int port) in
+        match addrs with
+        | [] -> Error ("Could not resolve: " ^ host)
+        | addr :: _ -> Ok addr
+      in
+      match server_addr with
+      | Error e -> Error e
+      | Ok server_addr ->
+        (* Create UDP socket *)
+        let sock = Eio.Net.datagram_socket ~sw net `UdpV4 in
 
-  (* Create request *)
-  let request = create_binding_request () in
-  let request_bytes = encode request in
+        let start_time = Unix.gettimeofday () in
 
-  (* Resolve address *)
-  let server_addr =
-    let addrs = Eio.Net.getaddrinfo_datagram net host ~service:(string_of_int port) in
-    match addrs with
-    | [] -> failwith ("Could not resolve: " ^ host)
-    | addr :: _ -> addr
-  in
-
-  (* Create UDP socket *)
-  let sock = Eio.Net.datagram_socket ~sw net `UdpV4 in
-
-  let start_time = Unix.gettimeofday () in
-
-  (* Send request *)
-  let buf = Cstruct.of_bytes request_bytes in
-  Eio.Net.send sock ~dst:server_addr [buf];
+        (* Send request *)
+        let buf = Cstruct.of_bytes request_bytes in
+        Eio.Net.send sock ~dst:server_addr [buf];
 
   (* Receive response with timeout *)
   let response_buf = Cstruct.create 576 in  (* Max STUN message size *)
@@ -823,7 +846,7 @@ let binding_request_eio ~net ~sw ~server ?timeout () =
           | { value = Xor_mapped_address addr; _ } :: _ ->
             Some (unxor_address addr request.transaction_id)
           | { value = Mapped_address addr; _ } :: _ ->
-            Some addr
+            Some (Ok addr)
           | _ :: rest -> find_addr rest
         in
         let rec find_software = function
@@ -833,13 +856,14 @@ let binding_request_eio ~net ~sw ~server ?timeout () =
         in
         match find_addr response.attributes with
         | None -> Error "No mapped address in response"
-        | Some mapped_address ->
+        | Some (Error e) -> Error e
+        | Some (Ok mapped_address) ->
           Ok {
             local_address = { family = IPv4; port = 0; ip = "0.0.0.0" };
             mapped_address;
             server_software = find_software response.attributes;
             rtt_ms;
-          }
+          })
 
 (** Convenience wrapper to run Eio binding request.
     Creates its own Eio environment - useful for simple scripts/tests.

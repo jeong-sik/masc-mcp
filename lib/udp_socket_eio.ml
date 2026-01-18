@@ -263,29 +263,30 @@ let stats_to_json stats =
 let stun_request t server timeout_sec =
   (* Generate STUN binding request *)
   let request = Stun.create_binding_request () in
-  let request_bytes = Stun.encode request in
+  match Stun.encode request with
+  | Error e -> Error e
+  | Ok request_bytes ->
+      (* Send request *)
+      let _ = send_to t request_bytes server in
 
-  (* Send request *)
-  let _ = send_to t request_bytes server in
-
-  (* Wait for response with timeout using Fiber.first *)
-  let result = ref (Error "Timeout") in
-  begin
-    try
-      Eio.Fiber.first
-        (fun () ->
-          let dgram = recv t in
-          if dgram.source.addr = server.addr && dgram.source.port = server.port then
-            result := Ok dgram.data
-          else
-            result := Error "Response from unexpected source")
-        (fun () ->
-          Eio_unix.sleep timeout_sec;
-          result := Error "STUN request timeout")
-    with exn ->
-      result := Error (Printexc.to_string exn)
-  end;
-  !result
+      (* Wait for response with timeout using Fiber.first *)
+      let result = ref (Error "Timeout") in
+      begin
+        try
+          Eio.Fiber.first
+            (fun () ->
+              let dgram = recv t in
+              if dgram.source.addr = server.addr && dgram.source.port = server.port then
+                result := Ok dgram.data
+              else
+                result := Error "Response from unexpected source")
+            (fun () ->
+              Eio_unix.sleep timeout_sec;
+              result := Error "STUN request timeout")
+        with exn ->
+          result := Error (Printexc.to_string exn)
+      end;
+      !result
 
 (** {1 Pretty Printing} *)
 

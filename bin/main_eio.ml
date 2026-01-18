@@ -327,13 +327,51 @@ let base_path =
   let doc = "Base path for MASC data (.masc folder location)" in
   Arg.(value & opt string (default_base_path ()) & info ["base-path"] ~docv:"PATH" ~doc)
 
+(** Graceful shutdown exception *)
+exception Shutdown
+
 let run_cmd port base_path =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
+
+  (* Graceful shutdown setup *)
+  let switch_ref = ref None in
+  let shutdown_initiated = ref false in
+  let initiate_shutdown signal_name =
+    if not !shutdown_initiated then begin
+      shutdown_initiated := true;
+      Printf.eprintf "\n🚀 MASC MCP: Received %s, shutting down gracefully...\n%!" signal_name;
+
+      (* Broadcast shutdown notification to all SSE clients *)
+      let shutdown_data = Printf.sprintf
+        {|{"jsonrpc":"2.0","method":"notifications/shutdown","params":{"reason":"%s","message":"Server is shutting down, please reconnect"}}|}
+        signal_name
+      in
+      broadcast_sse_event "notification" shutdown_data;
+      Printf.eprintf "🚀 MASC MCP: Sent shutdown notification to %d SSE clients\n%!" (Hashtbl.length sse_clients);
+
+      (* Give clients 500ms to receive the notification before killing connections *)
+      Unix.sleepf 0.5;
+
+      match !switch_ref with
+      | Some sw -> Eio.Switch.fail sw Shutdown
+      | None -> ()
+    end
+  in
+  Sys.set_signal Sys.sigterm (Sys.Signal_handle (fun _ -> initiate_shutdown "SIGTERM"));
+  Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ -> initiate_shutdown "SIGINT"));
+
   (* Initialize Lwt event loop for Lwt_eio bridge *)
   Lwt_eio.with_event_loop ~clock @@ fun _ ->
-  Eio.Switch.run @@ fun sw ->
-  run_server ~sw ~env ~port ~base_path
+  (try
+    Eio.Switch.run @@ fun sw ->
+    switch_ref := Some sw;
+    run_server ~sw ~env ~port ~base_path
+  with
+  | Shutdown ->
+      Printf.eprintf "🚀 MASC MCP: Shutdown complete.\n%!"
+  | Eio.Cancel.Cancelled _ ->
+      Printf.eprintf "🚀 MASC MCP: Shutdown complete.\n%!")
 
 let cmd =
   let doc = "MASC MCP Server (Eio native)" in

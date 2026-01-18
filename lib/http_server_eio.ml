@@ -277,7 +277,8 @@ let run ~sw ~net config routes =
   in
   let addr = `Tcp (ip, config.port) in
   let socket = Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:config.max_connections addr in
-  Printf.printf "🚀 MASC MCP Server (Eio) listening on http://%s:%d\n%!" config.host config.port;
+  Printf.printf "🚀 MASC MCP Server (Eio) listening on http://%s:%d\n" config.host config.port;
+  Printf.printf "   Graceful shutdown: SIGTERM/SIGINT supported\n%!";
 
   let rec accept_loop () =
     let flow, client_addr = Eio.Net.accept ~sw socket in
@@ -296,9 +297,35 @@ let run ~sw ~net config routes =
   in
   accept_loop ()
 
+(** Graceful shutdown exception *)
+exception Shutdown
+
 (** Convenience function to start server *)
 let start ?(config = default_config) ?(routes = default_routes) () =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
-  Eio.Switch.run @@ fun sw ->
-  run ~sw ~net config routes
+
+  (* Graceful shutdown setup *)
+  let switch_ref = ref None in
+  let shutdown_initiated = ref false in
+  let initiate_shutdown signal_name =
+    if not !shutdown_initiated then begin
+      shutdown_initiated := true;
+      Printf.eprintf "\n🚀 MASC MCP: Received %s, shutting down gracefully...\n%!" signal_name;
+      match !switch_ref with
+      | Some sw -> Eio.Switch.fail sw Shutdown
+      | None -> ()
+    end
+  in
+  Sys.set_signal Sys.sigterm (Sys.Signal_handle (fun _ -> initiate_shutdown "SIGTERM"));
+  Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ -> initiate_shutdown "SIGINT"));
+
+  (try
+    Eio.Switch.run @@ fun sw ->
+    switch_ref := Some sw;
+    run ~sw ~net config routes
+  with
+  | Shutdown ->
+      Printf.eprintf "🚀 MASC MCP: Shutdown complete.\n%!"
+  | Eio.Cancel.Cancelled _ ->
+      Printf.eprintf "🚀 MASC MCP: Shutdown complete.\n%!")

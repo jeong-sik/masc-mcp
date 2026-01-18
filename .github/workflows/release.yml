@@ -48,7 +48,7 @@ jobs:
           chmod +x dist/masc-mcp-${{ matrix.arch }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: masc-mcp-${{ matrix.arch }}
           path: dist/masc-mcp-${{ matrix.arch }}

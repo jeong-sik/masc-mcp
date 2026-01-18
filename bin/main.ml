@@ -965,7 +965,7 @@ let run_http ~port ~base_path =
     stop_sse_conn_by_key (sse_conn_key conn)
   in
 
-  (* Wrap callback to track active requests and reject during shutdown *)
+  (* Wrap callback to track active requests, reject during shutdown, and handle errors *)
   let callback_with_tracking conn req body =
     let open Lwt.Syntax in
     if Shutdown.is_shutting_down () then begin
@@ -979,7 +979,27 @@ let run_http ~port ~base_path =
     end else begin
       Shutdown.incr_requests ();
       Lwt.finalize
-        (fun () -> callback conn req body)
+        (fun () ->
+          Lwt.catch
+            (fun () -> callback conn req body)
+            (fun exn ->
+              (* Log the error with details for debugging *)
+              let path = Uri.path (Cohttp.Request.uri req) in
+              let meth = Cohttp.Code.string_of_method (Cohttp.Request.meth req) in
+              let error_msg = Printexc.to_string exn in
+              let backtrace = Printexc.get_backtrace () in
+              Printf.eprintf "[MASC ERROR] %s %s: %s\n%s%!" meth path error_msg backtrace;
+              (* Return 500 Internal Server Error instead of crashing *)
+              let headers = Cohttp.Header.of_list [
+                ("Content-Type", "application/json");
+                ("Access-Control-Allow-Origin", "*");
+              ] in
+              let error_body = Printf.sprintf
+                {|{"jsonrpc":"2.0","error":{"code":-32603,"message":"Internal error: %s"}}|}
+                (String.escaped error_msg)
+              in
+              let* rsp = Server.respond_string ~status:`Internal_server_error ~headers ~body:error_body () in
+              Lwt.return (`Response rsp)))
         (fun () -> Shutdown.decr_requests (); Lwt.return_unit)
     end
   in
@@ -996,24 +1016,39 @@ let run_http ~port ~base_path =
   let server_loop () =
     let open Lwt.Syntax in
     setup_signal_handlers ();
-    let server = Server.create ~mode:(`TCP (`Port port))
-      (Server.make_response_action ~callback:callback_with_tracking ~conn_closed ())
-    in
-    (* Wait for either server completion or shutdown signal *)
-    let* () = Lwt.pick [
-      server;
-      (let* () = Shutdown.wait_for_shutdown () in
-       Printf.eprintf "📤 Notifying SSE clients of shutdown...\n%!";
-       Sse.broadcast (`Assoc [
-         ("type", `String "shutdown");
-         ("message", `String "Server is shutting down");
-       ]);
-       Printf.eprintf "⏳ Waiting for %d pending requests (max 30s)...\n%!" (Shutdown.active_count ());
-       let* () = Shutdown.wait_for_pending ~timeout_sec:30.0 in
-       Printf.eprintf "✅ Graceful shutdown complete\n%!";
-       Lwt.return_unit)
-    ] in
-    Lwt.return_unit
+    Lwt.catch
+      (fun () ->
+        let server = Server.create ~mode:(`TCP (`Port port))
+          (Server.make_response_action ~callback:callback_with_tracking ~conn_closed ())
+        in
+        (* Wait for either server completion or shutdown signal *)
+        let* () = Lwt.pick [
+          server;
+          (let* () = Shutdown.wait_for_shutdown () in
+           Printf.eprintf "📤 Notifying SSE clients of shutdown...\n%!";
+           Sse.broadcast (`Assoc [
+             ("type", `String "shutdown");
+             ("message", `String "Server is shutting down");
+           ]);
+           Printf.eprintf "⏳ Waiting for %d pending requests (max 30s)...\n%!" (Shutdown.active_count ());
+           let* () = Shutdown.wait_for_pending ~timeout_sec:30.0 in
+           Printf.eprintf "✅ Graceful shutdown complete\n%!";
+           Lwt.return_unit)
+        ] in
+        Lwt.return_unit)
+      (fun exn ->
+        let error_msg = Printexc.to_string exn in
+        (match exn with
+        | Unix.Unix_error (Unix.EADDRINUSE, _, _) ->
+            Printf.eprintf "❌ [MASC FATAL] Port %d is already in use. Another instance may be running.\n%!" port;
+            Printf.eprintf "   Try: lsof -i :%d | grep LISTEN\n%!" port
+        | Unix.Unix_error (Unix.EACCES, _, _) ->
+            Printf.eprintf "❌ [MASC FATAL] Permission denied binding to port %d.\n%!" port;
+            Printf.eprintf "   Try a port > 1024 or run with elevated privileges.\n%!"
+        | _ ->
+            Printf.eprintf "❌ [MASC FATAL] Server crashed: %s\n%!" error_msg;
+            Printf.eprintf "   Backtrace: %s\n%!" (Printexc.get_backtrace ()));
+        Lwt.return_unit)
   in
 
   Lwt_main.run (server_loop ())

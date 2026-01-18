@@ -162,21 +162,6 @@ type server_state = {
 
 let create_state ~base_path =
   let config = Room.default_config base_path in
-  (* Recover locks on startup - clean expired, restore active *)
-  let recovery_result = Room.recover_locks config in
-  (match recovery_result with
-   | `Assoc fields ->
-       let get_int key = match List.assoc_opt key fields with
-         | Some (`Int n) -> n | _ -> 0 in
-       let get_str key = match List.assoc_opt key fields with
-         | Some (`String s) -> s | _ -> "" in
-       let status = get_str "status" in
-       if status = "recovered" then
-         Log.Mcp.info "Locks recovered: %d cleaned, %d active"
-           (get_int "cleaned") (get_int "active")
-       else if status <> "not_initialized" && status <> "no_locks_dir" then
-         Log.Mcp.warn "Lock recovery status: %s" status
-   | _ -> ());
   let registry = Session.create () in
   (* Restore sessions from disk for persistence across restarts *)
   let agents_path = Filename.concat base_path ".masc/agents" in
@@ -191,21 +176,6 @@ let create_state ~base_path =
 (** Create state with Eio context - required for PostgresNative backend *)
 let create_state_eio ~sw ~env ~base_path =
   let config = Room.default_config_eio ~sw ~env base_path in
-  (* Recover locks on startup - clean expired, restore active *)
-  let recovery_result = Room.recover_locks config in
-  (match recovery_result with
-   | `Assoc fields ->
-       let get_int key = match List.assoc_opt key fields with
-         | Some (`Int n) -> n | _ -> 0 in
-       let get_str key = match List.assoc_opt key fields with
-         | Some (`String s) -> s | _ -> "" in
-       let status = get_str "status" in
-       if status = "recovered" then
-         Log.Mcp.info "Locks recovered (Eio): %d cleaned, %d active"
-           (get_int "cleaned") (get_int "active")
-       else if status <> "not_initialized" && status <> "no_locks_dir" then
-         Log.Mcp.warn "Lock recovery status: %s" status
-   | _ -> ());
   let registry = Session.create () in
   let agents_path = Filename.concat base_path ".masc/agents" in
   Session.restore_from_disk registry ~agents_path;
@@ -877,14 +847,6 @@ let execute_tool state ~name ~arguments =
       let limit = get_int "limit" 10 in
       Lwt.return (true, Room.get_messages config ~since_seq ~limit)
 
-  | "masc_lock" ->
-      let file_path = get_string "file_path" "" in
-      Lwt.return (result_to_response (Room.lock_file_r config ~agent_name ~file_path))
-
-  | "masc_unlock" ->
-      let file_path = get_string "file_path" "" in
-      Lwt.return (result_to_response (Room.unlock_file_r config ~agent_name ~file_path))
-
   | "masc_listen" ->
       let timeout = float_of_int (get_int "timeout" 300) in
       Log.Mcp.info "%s is now listening (timeout: %.0fs)..." agent_name timeout;
@@ -1464,8 +1426,7 @@ Expires: %s
       Buffer.add_string buf (Printf.sprintf "Burst allowed: %d\n\n" cfg.burst_allowed);
       Buffer.add_string buf "Category limits:\n";
       Buffer.add_string buf (Printf.sprintf "  • Broadcast: %d/min\n" cfg.broadcast_per_minute);
-      Buffer.add_string buf (Printf.sprintf "  • Task ops: %d/min\n" cfg.task_ops_per_minute);
-      Buffer.add_string buf (Printf.sprintf "  • File locks: %d/min\n\n" cfg.file_lock_per_minute);
+      Buffer.add_string buf (Printf.sprintf "  • Task ops: %d/min\n\n" cfg.task_ops_per_minute);
       Buffer.add_string buf "Role multipliers:\n";
       Buffer.add_string buf (Printf.sprintf "  • Reader: %.1fx\n" cfg.reader_multiplier);
       Buffer.add_string buf (Printf.sprintf "  • Worker: %.1fx\n" cfg.worker_multiplier);
@@ -2707,22 +2668,11 @@ let run_stdio state =
 
 (** Health check response *)
 let health_response state =
-  let active_locks = Room.get_all_active_locks state.room_config in
-  let lock_count = List.length active_locks in
   Yojson.Safe.to_string (`Assoc [
     ("status", `String "ok");
     ("server", `String "masc-mcp");
     ("room", `String state.room_config.base_path);
     ("language", `String "ocaml");
-    ("locks", `Assoc [
-      ("active", `Int lock_count);
-      ("files", `List (List.map (fun (lock : Types.file_lock) ->
-        `Assoc [
-          ("file", `String lock.file_path);
-          ("holder", `String lock.locked_by);
-        ]
-      ) active_locks));
-    ]);
   ])
 
 (** REST API helper - Execute tool and return JSON result

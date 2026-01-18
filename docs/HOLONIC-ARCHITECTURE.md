@@ -110,7 +110,7 @@ type room = {
   agents: agent list;
   messages: message list;
   tasks: task list;
-  locks: file_lock list;
+  (* Isolation via Git worktree, not file locks *)
 }
 ```
 

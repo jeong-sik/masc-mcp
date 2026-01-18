@@ -37,7 +37,6 @@ type handover_record = {
 
   (* Files and resources *)
   modified_files: string list;
-  locked_files: string list;
 
   (* Metadata *)
   created_at: float;
@@ -83,7 +82,6 @@ let create_handover ~from_agent ~task_id ~session_id ~reason : handover_record =
     warnings = [];
     unresolved_errors = [];
     modified_files = [];
-    locked_files = [];
     created_at = Unix.gettimeofday ();
     context_usage_percent = 0;
     handover_reason = trigger_reason_to_string reason;
@@ -106,7 +104,6 @@ let handover_to_json (h : handover_record) : Yojson.Safe.t =
     ("warnings", `List (List.map (fun s -> `String s) h.warnings));
     ("unresolved_errors", `List (List.map (fun s -> `String s) h.unresolved_errors));
     ("modified_files", `List (List.map (fun s -> `String s) h.modified_files));
-    ("locked_files", `List (List.map (fun s -> `String s) h.locked_files));
     ("created_at", `Float h.created_at);
     ("context_usage_percent", `Int h.context_usage_percent);
     ("handover_reason", `String h.handover_reason);
@@ -136,7 +133,6 @@ let handover_of_json (json : Yojson.Safe.t) : handover_record option =
       warnings = str_list "warnings";
       unresolved_errors = str_list "unresolved_errors";
       modified_files = str_list "modified_files";
-      locked_files = str_list "locked_files";
       created_at = float_val "created_at";
       context_usage_percent = int_val "context_usage_percent";
       handover_reason = str "handover_reason";
@@ -305,10 +301,6 @@ let create_from_planning config ~from_agent ~task_id ~session_id ~reason
     warnings = warnings;
     unresolved_errors = errors;
     modified_files = files;
-    locked_files =
-      Room.get_all_active_locks config
-      |> List.filter (fun (lock : Types.file_lock) -> lock.locked_by = from_agent)
-      |> List.map (fun (lock : Types.file_lock) -> lock.file_path);
     context_usage_percent = context_pct;
   } in
   let* result = save_handover config h in

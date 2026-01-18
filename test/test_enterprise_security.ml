@@ -186,20 +186,6 @@ let test_anomaly_low_success_rate () =
 
   Printf.printf "[PASS] Low success rate detected as anomaly\n%!"
 
-let test_anomaly_excessive_locks () =
-  Printf.printf "[TEST] Anomaly detection - excessive file locks...\n%!";
-
-  let config = enterprise_config in
-  let agent = "lock_hoarder" in
-
-  let behavior = get_agent_behavior agent in
-  behavior.locked_files <- List.init 15 (fun i -> Printf.sprintf "file_%d.ml" i);
-
-  let anomalies = detect_anomalies config agent in
-  assert (List.exists (function ExcessiveFileLocks _ -> true | _ -> false) anomalies);
-
-  Printf.printf "[PASS] Excessive file locks detected as anomaly\n%!"
-
 (* ============================================ *)
 (* Agent Isolation Tests (Putin)                *)
 (* ============================================ *)
@@ -402,7 +388,6 @@ let all_tests = [
   (* Anomaly Detection *)
   { name = "anomaly_auth_failures"; intent = AnomalyDetection; run = test_anomaly_auth_failures };
   { name = "anomaly_low_success_rate"; intent = AnomalyDetection; run = test_anomaly_low_success_rate };
-  { name = "anomaly_excessive_locks"; intent = AnomalyDetection; run = test_anomaly_excessive_locks };
 
   (* Agent Isolation *)
   { name = "agent_quarantine"; intent = AgentIsolation; run = test_agent_quarantine };

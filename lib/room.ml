@@ -5,97 +5,6 @@ open Types
 (* Include all utilities from Room_utils *)
 include Room_utils
 
-(* ============================================ *)
-(* Lock Persistence - Server restart recovery   *)
-(* ============================================ *)
-
-(** Get all active (non-expired) locks *)
-let get_all_active_locks config =
-  let locks_path = locks_dir config in
-  if not (Sys.file_exists locks_path) then []
-  else begin
-    let now = Unix.gettimeofday () in
-    Sys.readdir locks_path
-    |> Array.to_list
-    |> List.filter_map (fun name ->
-        if Filename.check_suffix name ".lock" then begin
-          let path = Filename.concat locks_path name in
-          let json = read_json config path in
-          match file_lock_of_yojson json with
-          | Ok lock when now < lock.expires_at -> Some lock
-          | Ok _ -> None  (* Expired - expected *)
-          | Error e ->
-              Log.Room.warn "Invalid lock file %s: %s" name e;
-              None  (* Invalid schema - log for debugging *)
-        end else None)
-  end
-
-(** Update locks summary file (for health check / monitoring) *)
-let update_locks_summary config =
-  try
-    let locks = get_all_active_locks config in
-    let summary = `Assoc [
-      ("updated_at", `String (now_iso ()));
-      ("count", `Int (List.length locks));
-      ("locks", `List (List.map file_lock_to_yojson locks));
-    ] in
-    write_json config (locks_summary_path config) summary
-  with e ->
-    Log.Room.warn "Failed to update locks summary: %s" (Printexc.to_string e)
-
-(** Recover locks on server startup - clean expired, return active *)
-let recover_locks config =
-  if not (is_initialized config) then
-    `Assoc [("status", `String "not_initialized")]
-  else begin
-    let locks_path = locks_dir config in
-    if not (Sys.file_exists locks_path) then
-      `Assoc [("status", `String "no_locks_dir"); ("cleaned", `Int 0); ("active", `Int 0)]
-    else begin
-      let now = Unix.gettimeofday () in
-      let cleaned = ref 0 in
-      let active = ref 0 in
-
-      (* Safe remove helper - never crashes *)
-      let safe_remove path =
-        try Sys.remove path; true
-        with e ->
-          Log.Room.warn "Failed to remove %s: %s" path (Printexc.to_string e);
-          false
-      in
-
-      Sys.readdir locks_path |> Array.iter (fun name ->
-        if Filename.check_suffix name ".lock" then begin
-          let path = Filename.concat locks_path name in
-          let json = read_json config path in
-          match file_lock_of_yojson json with
-          | Ok lock when now >= lock.expires_at ->
-              (* Expired - remove it *)
-              if safe_remove path then incr cleaned
-          | Ok _ -> incr active  (* Still valid *)
-          | Error e ->
-              (* Invalid - log and remove it *)
-              Log.Room.warn "Invalid lock file %s: %s" name e;
-              if safe_remove path then incr cleaned
-        end
-      );
-
-      (* Update summary after cleanup *)
-      update_locks_summary config;
-
-      (* Log event *)
-      log_event config (Printf.sprintf
-        "{\"type\":\"locks_recovered\",\"cleaned\":%d,\"active\":%d,\"ts\":\"%s\"}"
-        !cleaned !active (now_iso ()));
-
-      `Assoc [
-        ("status", `String "recovered");
-        ("cleaned", `Int !cleaned);
-        ("active", `Int !active);
-      ]
-    end
-  end
-
 (** Read room state *)
 let read_state config =
   let json = read_json config (state_path config) in
@@ -242,7 +151,6 @@ let rec init config ~agent_name =
     List.iter mkdir_p [
       agents_dir config;
       tasks_dir config;
-      locks_dir config;
       messages_dir config;
     ];
 
@@ -1165,156 +1073,6 @@ let get_messages config ~since_seq ~limit =
 
   Buffer.contents buf
 
-(** Lock file - with retry limit to prevent infinite recursion *)
-let lock_file config ~agent_name ~file_path =
-  ensure_initialized config;
-
-  (* Validate inputs *)
-  match validate_agent_name agent_name, validate_file_path file_path with
-  | Error e, _ -> Printf.sprintf "❌ %s" e
-  | _, Error e -> Printf.sprintf "❌ %s" e
-  | Ok _, Ok _ ->
-
-  let lock_name = String.map (function '/' -> '_' | '.' -> '_' | c -> c) file_path in
-  let lock_path = Filename.concat (locks_dir config) (lock_name ^ ".lock") in
-  mkdir_p (Filename.dirname lock_path);
-
-  let max_retries = 3 in
-  let rec try_lock retries =
-    if retries <= 0 then
-      Printf.sprintf "❌ Failed to acquire lock on %s after %d retries" file_path max_retries
-    else if Sys.file_exists lock_path then begin
-      let json = read_json config lock_path in
-      match file_lock_of_yojson json with
-      | Ok lock ->
-          (* Check expiry - expires_at is now epoch time, no parsing needed *)
-          let now = Unix.gettimeofday () in
-          if now < lock.expires_at then
-            Printf.sprintf "⚠ %s is locked by %s" file_path lock.locked_by
-          else begin
-            (* Lock expired, remove it *)
-            (try Sys.remove lock_path with _ -> ());
-            try_lock (retries - 1)
-          end
-      | Error _ ->
-          (try Sys.remove lock_path with _ -> ());
-          try_lock (retries - 1)
-    end else begin
-      (* Create lock with O_CREAT|O_EXCL for atomicity *)
-      let expires_at = Unix.gettimeofday () +. (float_of_int config.lock_expiry_minutes *. 60.0) in
-
-      let lock = {
-        file_path;
-        locked_by = agent_name;
-        locked_at = now_iso ();
-        expires_at;  (* epoch time - no timezone issues *)
-      } in
-
-      try
-        let fd = Unix.openfile lock_path [Unix.O_CREAT; Unix.O_EXCL; Unix.O_WRONLY] 0o644 in
-        let content = Yojson.Safe.pretty_to_string (file_lock_to_yojson lock) in
-        let _ = Unix.write_substring fd content 0 (String.length content) in
-        Unix.close fd;
-        update_locks_summary config;  (* Persist for health check / recovery *)
-        Printf.sprintf "🔒 %s locked %s" agent_name file_path
-      with Unix.Unix_error (Unix.EEXIST, _, _) ->
-        (* Race condition - another process created it first, retry *)
-        try_lock (retries - 1)
-    end
-  in
-  try_lock max_retries
-
-(** Result-returning version of lock_file for type-safe error handling *)
-let lock_file_r config ~agent_name ~file_path : string Types.masc_result =
-  if not (is_initialized config) then Error Types.NotInitialized
-  else match validate_agent_name_r agent_name, validate_file_path_r file_path with
-  | Error e, _ -> Error e
-  | _, Error e -> Error e
-  | Ok _, Ok _ ->
-    let lock_name = String.map (function '/' -> '_' | '.' -> '_' | c -> c) file_path in
-    let lock_path = Filename.concat (locks_dir config) (lock_name ^ ".lock") in
-    mkdir_p (Filename.dirname lock_path);
-
-    let max_retries = 3 in
-    let rec try_lock retries =
-      if retries <= 0 then
-        Error (Types.IoError (Printf.sprintf "Failed to acquire lock on %s after %d retries" file_path max_retries))
-      else if Sys.file_exists lock_path then begin
-        let json = read_json config lock_path in
-        match file_lock_of_yojson json with
-        | Ok lock ->
-            let now = Unix.gettimeofday () in
-            if now < lock.expires_at then Error (Types.FileLocked { file = file_path; by = lock.locked_by })
-            else begin (try Sys.remove lock_path with _ -> ()); try_lock (retries - 1) end
-        | Error _ -> (try Sys.remove lock_path with _ -> ()); try_lock (retries - 1)
-      end else begin
-        let expires_at = Unix.gettimeofday () +. (float_of_int config.lock_expiry_minutes *. 60.0) in
-        let lock = { file_path; locked_by = agent_name; locked_at = now_iso (); expires_at } in
-        try
-          let fd = Unix.openfile lock_path [Unix.O_CREAT; Unix.O_EXCL; Unix.O_WRONLY] 0o644 in
-          let content = Yojson.Safe.pretty_to_string (file_lock_to_yojson lock) in
-          let _ = Unix.write_substring fd content 0 (String.length content) in
-          Unix.close fd;
-          update_locks_summary config;
-          Ok (Printf.sprintf "🔒 %s locked %s" agent_name file_path)
-        with Unix.Unix_error (Unix.EEXIST, _, _) ->
-          (* Race condition - retry *)
-          try_lock (retries - 1)
-      end
-    in
-    try_lock max_retries
-
-(** Unlock file *)
-let unlock_file config ~agent_name ~file_path =
-  ensure_initialized config;
-
-  let lock_name = String.map (function '/' -> '_' | '.' -> '_' | c -> c) file_path in
-  let lock_path = Filename.concat (locks_dir config) (lock_name ^ ".lock") in
-
-  if Sys.file_exists lock_path then begin
-    let json = read_json config lock_path in
-    match file_lock_of_yojson json with
-    | Ok lock ->
-        if lock.locked_by <> agent_name then
-          Printf.sprintf "⚠ Cannot unlock: locked by %s" lock.locked_by
-        else begin
-          Sys.remove lock_path;
-          update_locks_summary config;  (* Persist for health check / recovery *)
-          Printf.sprintf "🔓 Unlocked %s" file_path
-        end
-    | Error _ ->
-        Sys.remove lock_path;
-        update_locks_summary config;  (* Persist for health check / recovery *)
-        Printf.sprintf "🔓 Unlocked %s (cleanup)" file_path
-  end else
-    Printf.sprintf "⚠ %s was not locked" file_path
-
-(** Result-returning version of unlock_file for type-safe error handling *)
-let unlock_file_r config ~agent_name ~file_path : string Types.masc_result =
-  if not (is_initialized config) then Error Types.NotInitialized
-  else match validate_agent_name_r agent_name, validate_file_path_r file_path with
-  | Error e, _ -> Error e
-  | _, Error e -> Error e
-  | Ok _, Ok _ ->
-    let lock_name = String.map (function '/' -> '_' | '.' -> '_' | c -> c) file_path in
-    let lock_path = Filename.concat (locks_dir config) (lock_name ^ ".lock") in
-    if Sys.file_exists lock_path then begin
-      let json = read_json config lock_path in
-      match file_lock_of_yojson json with
-      | Ok lock ->
-          if lock.locked_by <> agent_name then Error (Types.FileLocked { file = file_path; by = lock.locked_by })
-          else begin
-            Sys.remove lock_path;
-            update_locks_summary config;
-            Ok (Printf.sprintf "🔓 Unlocked %s" file_path)
-          end
-      | Error _ ->
-          Sys.remove lock_path;
-          update_locks_summary config;
-          Ok (Printf.sprintf "🔓 Unlocked %s (cleanup)" file_path)
-    end else
-      Error (Types.FileNotLocked file_path)
-
 (* ============================================================ *)
 (* Portal / A2A Protocol - Extracted to Room_portal module      *)
 (* ============================================================ *)
@@ -1388,7 +1146,7 @@ let is_zombie_agent last_seen_iso =
   let now = Unix.gettimeofday () in
   (now -. last_seen) > heartbeat_timeout_seconds
 
-(** Cleanup zombie agents - removes stale agents and releases their locks *)
+(** Cleanup zombie agents - removes stale agents *)
 let cleanup_zombies config =
   ensure_initialized config;
 
@@ -1397,7 +1155,6 @@ let cleanup_zombies config =
     "📋 No agents directory"
   else begin
     let zombies = ref [] in
-    let released_locks = ref [] in
 
     (* Find zombie agents *)
     Sys.readdir agents_path |> Array.iter (fun name ->
@@ -1408,21 +1165,7 @@ let cleanup_zombies config =
         | Ok agent when is_zombie_agent agent.last_seen ->
             zombies := agent.name :: !zombies;
             (* Remove agent file *)
-            Sys.remove path;
-            (* Release any locks held by this agent *)
-            let locks_path = locks_dir config in
-            if Sys.file_exists locks_path then
-              Sys.readdir locks_path |> Array.iter (fun lock_name ->
-                if Filename.check_suffix lock_name ".lock" then begin
-                  let lock_path = Filename.concat locks_path lock_name in
-                  let lock_json = read_json config lock_path in
-                  match file_lock_of_yojson lock_json with
-                  | Ok lock when lock.locked_by = agent.name ->
-                      Sys.remove lock_path;
-                      released_locks := lock.file_path :: !released_locks
-                  | _ -> ()
-                end
-              )
+            Sys.remove path
         | _ -> ()
       end
     );
@@ -1435,14 +1178,12 @@ let cleanup_zombies config =
 
       (* Log event *)
       log_event config (Printf.sprintf
-        "{\"type\":\"zombie_cleanup\",\"agents\":%s,\"released_locks\":%s,\"ts\":\"%s\"}"
+        "{\"type\":\"zombie_cleanup\",\"agents\":%s,\"ts\":\"%s\"}"
         (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) !zombies)))
-        (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) !released_locks)))
         (now_iso ()));
 
-      Printf.sprintf "🧟 Cleaned up %d zombie agent(s): %s\n🔓 Released %d lock(s): %s"
+      Printf.sprintf "🧟 Cleaned up %d zombie agent(s): %s"
         (List.length !zombies) (String.concat ", " !zombies)
-        (List.length !released_locks) (String.concat ", " !released_locks)
     end else
       "✅ No zombie agents found"
   end

@@ -110,13 +110,10 @@ print(response.agents)
 // 1. Task 시작
 await masc_claim({ task_id: "implement-feature-x" })
 
-// 2. 파일 락 (worktree 미사용 시)
-await masc_lock({ files: ["src/main.ts"] })
-
-// 3. 작업 완료
+// 2. 작업 완료
 await masc_done({ task_id: "implement-feature-x" })
 
-// 4. 브로드캐스트
+// 3. 브로드캐스트
 await masc_broadcast({ message: "@gemini 다음 차례야" })
 ```
 

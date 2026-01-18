@@ -113,15 +113,6 @@ let test_tasks_section_empty () =
   Alcotest.(check string) "empty_msg" "(no tasks)" section.empty_msg;
   cleanup_dir dir
 
-let test_locks_section_empty () =
-  let dir = test_dir () in
-  let config = Lib.Room_utils.default_config dir in
-  setup_room config;
-  let section = Lib.Dashboard.locks_section config in
-  Alcotest.(check string) "title" "File Locks" section.title;
-  Alcotest.(check string) "empty_msg" "(no locks)" section.empty_msg;
-  cleanup_dir dir
-
 let test_messages_section_empty () =
   let dir = test_dir () in
   let config = Lib.Room_utils.default_config dir in
@@ -160,7 +151,6 @@ let generate_tests = [
 let section_tests = [
   "agents section empty", `Quick, test_agents_section_empty;
   "tasks section empty", `Quick, test_tasks_section_empty;
-  "locks section empty", `Quick, test_locks_section_empty;
   "messages section empty", `Quick, test_messages_section_empty;
   "worktrees section empty", `Quick, test_worktrees_section_empty;
 ]

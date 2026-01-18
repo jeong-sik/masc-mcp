@@ -21,7 +21,6 @@ let test_resource_type_roundtrip () =
     Subscriptions.Agents;
     Subscriptions.Messages;
     Subscriptions.Votes;
-    Subscriptions.FileLocks;
     Subscriptions.Custom "custom_resource";
   ] in
   List.iter (fun t ->

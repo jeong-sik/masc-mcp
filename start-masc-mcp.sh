@@ -22,8 +22,9 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# Resolve executable path (prefer workspace build dir)
-# Lwt-based server (main.exe) - default
+# Resolve executable path
+# Priority: 1. Release binary  2. Workspace build  3. Local build  4. Auto-download
+RELEASE_BINARY="$SCRIPT_DIR/masc-mcp-macos-arm64"
 WORKSPACE_EXE="$SCRIPT_DIR/../_build/default/masc-mcp/bin/main.exe"
 LOCAL_EXE="$SCRIPT_DIR/_build/default/bin/main.exe"
 # Eio-based server (main_eio.exe) - for PostgresNative backend
@@ -32,8 +33,13 @@ LOCAL_EIO_EXE="$SCRIPT_DIR/_build/default/bin/main_eio.exe"
 MASC_EXE=""
 MASC_EIO_EXE=""
 
-if [ -x "$WORKSPACE_EXE" ]; then
+# 1. Pre-downloaded release binary (fastest, no build needed)
+if [ -x "$RELEASE_BINARY" ]; then
+    MASC_EXE="$RELEASE_BINARY"
+# 2. Workspace build
+elif [ -x "$WORKSPACE_EXE" ]; then
     MASC_EXE="$WORKSPACE_EXE"
+# 3. Local build
 elif [ -x "$LOCAL_EXE" ]; then
     MASC_EXE="$LOCAL_EXE"
 fi
@@ -44,22 +50,28 @@ elif [ -x "$LOCAL_EIO_EXE" ]; then
     MASC_EIO_EXE="$LOCAL_EIO_EXE"
 fi
 
-# Build if needed (requires dune on PATH)
+# 4. Auto-download from GitHub releases if nothing found
 if [ -z "$MASC_EXE" ]; then
-    echo "Building MASC MCP server (bin/main.exe only)..." >&2
-    if ! command -v dune >/dev/null 2>&1; then
-        echo "Error: dune not found. Install dune or build masc-mcp binary first." >&2
-        exit 1
-    fi
-    dune build ./bin/main.exe 1>&2
-
-    if [ -x "$WORKSPACE_EXE" ]; then
-        MASC_EXE="$WORKSPACE_EXE"
-    elif [ -x "$LOCAL_EXE" ]; then
-        MASC_EXE="$LOCAL_EXE"
+    echo "No binary found. Downloading from GitHub releases..." >&2
+    RELEASE_URL="https://github.com/jeong-sik/masc-mcp/releases/latest/download/masc-mcp-macos-arm64"
+    if curl -fsSL -o "$RELEASE_BINARY" "$RELEASE_URL" 2>/dev/null; then
+        chmod +x "$RELEASE_BINARY"
+        MASC_EXE="$RELEASE_BINARY"
+        echo "Downloaded: $RELEASE_BINARY" >&2
     else
-        echo "Error: build succeeded but masc-mcp executable not found." >&2
-        exit 1
+        # Fallback: build from source
+        echo "Download failed. Building from source..." >&2
+        if ! command -v dune >/dev/null 2>&1; then
+            echo "Error: dune not found. Install dune or download binary manually." >&2
+            exit 1
+        fi
+        dune build ./bin/main.exe 1>&2
+        if [ -x "$LOCAL_EXE" ]; then
+            MASC_EXE="$LOCAL_EXE"
+        else
+            echo "Error: build failed." >&2
+            exit 1
+        fi
     fi
 fi
 

@@ -1,0 +1,184 @@
+; ============================================================
+; Test Environment Configuration
+; Force filesystem backend to avoid Redis connection timeouts
+; ============================================================
+(env
+ (_
+  (env-vars
+   (MASC_STORAGE_TYPE filesystem))))
+
+; ============================================================
+; Pure synchronous tests (NO Lwt dependency)
+; ============================================================
+(tests
+ (names test_room test_types test_checkpoint test_auth test_http_negotiation
+        test_sse test_encryption test_retry test_backend test_cancellation
+        test_subscriptions test_session test_progress test_mitosis test_spawn
+        test_validation test_response test_turn_queue test_voice_session_manager
+        test_voice_conference test_voice_stream test_voice_e2e test_swarm
+        test_ice test_sctp test_datachannel_rfc test_dtls_crypto test_dashboard
+        test_multi_room test_worktree_detection)
+ (modules test_room test_types test_checkpoint test_auth test_http_negotiation
+          test_sse test_encryption test_retry test_backend test_cancellation
+          test_subscriptions test_session test_progress test_mitosis test_spawn
+          test_validation test_response test_turn_queue test_voice_session_manager
+          test_voice_conference test_voice_stream test_voice_e2e test_swarm
+          test_ice test_sctp test_datachannel_rfc test_dtls_crypto test_dashboard
+          test_multi_room test_worktree_detection)
+ (libraries masc_mcp mcp_protocol alcotest str yojson mirage-crypto
+            mirage-crypto-rng cohttp cstruct))
+
+; ============================================================
+; Eio module tests (Pure sync - Cache_eio, Metrics_store_eio, Hebbian_eio)
+; ============================================================
+(test
+ (name test_cache_eio)
+ (modules test_cache_eio)
+ (libraries masc_mcp alcotest str yojson))
+
+(test
+ (name test_metrics_store_eio)
+ (modules test_metrics_store_eio)
+ (libraries masc_mcp alcotest str yojson))
+
+(test
+ (name test_hebbian_eio)
+ (modules test_hebbian_eio)
+ (libraries masc_mcp alcotest str yojson))
+
+(test
+ (name test_planning_eio)
+ (modules test_planning_eio)
+ (libraries masc_mcp alcotest str yojson))
+
+; ============================================================
+; Lwt-based tests (remaining - others migrated to Eio)
+; ============================================================
+(tests
+ (names test_mcp_server test_checkpoint_fs test_shutdown test_planning
+        test_handover test_execution_memory test_tempo
+        test_fitness test_drift_guard
+        test_integration_level2 test_level2_magi test_voice_bridge
+        test_webrtc_datachannel test_webrtc_integration)
+ (modules test_mcp_server test_checkpoint_fs test_shutdown test_planning
+          test_handover test_execution_memory test_tempo
+          test_fitness test_drift_guard
+          test_integration_level2 test_level2_magi test_voice_bridge
+          test_webrtc_datachannel test_webrtc_integration)
+ (libraries masc_mcp mcp_protocol alcotest alcotest-lwt lwt lwt.unix str
+            yojson mirage-crypto mirage-crypto-rng mirage-crypto-rng-lwt
+            cohttp cstruct)
+ (preprocess (pps lwt_ppx)))
+
+; ============================================================
+; Eio-native working tests (Mcp_server_eio, Session_eio)
+; ============================================================
+(test
+ (name test_mcp_server_eio)
+ (modules test_mcp_server_eio)
+ (libraries masc_mcp alcotest eio eio_main lwt_eio yojson))
+
+(test
+ (name test_session_eio)
+ (modules test_session_eio)
+ (libraries masc_mcp alcotest eio eio_main yojson))
+
+; ============================================================
+; STUN/ICE Protocol Tests (Eio-native)
+; ============================================================
+(test
+ (name test_stun)
+ (modules test_stun)
+ (libraries masc_mcp alcotest eio eio_main eio_posix cstruct))
+
+(test
+ (name test_ice_eio)
+ (modules test_ice_eio)
+ (libraries masc_mcp alcotest eio eio_main str yojson))
+
+; DataChannel Eio test (DCEP + SCTP integration)
+(test
+ (name test_datachannel_eio)
+ (modules test_datachannel_eio)
+ (libraries masc_mcp alcotest eio eio_main yojson))
+
+; TODO: These tests need to be created
+; - test_dtls_eio
+; - test_sctp_eio
+; - test_webrtc_stack_eio
+
+; ============================================================
+; Eio-native tests (OCaml 5.x concurrency)
+; ============================================================
+
+; UDP Socket Eio test - real network testing
+(test
+ (name test_udp_socket_eio)
+ (modules test_udp_socket_eio)
+ (libraries masc_mcp alcotest eio eio_main eio_posix fmt yojson ipaddr))
+
+; Backend_eio test (Eio-native storage backend)
+(test
+ (name test_backend_eio)
+ (modules test_backend_eio)
+ (libraries masc_mcp alcotest eio eio_main fmt yojson))
+
+; Room_eio test (Eio-native room operations)
+(test
+ (name test_room_eio)
+ (modules test_room_eio)
+ (libraries masc_mcp alcotest eio eio_main fmt yojson))
+
+; Http_server_eio test (Compact Protocol v4 compression)
+(test
+ (name test_http_server_eio)
+ (modules test_http_server_eio)
+ (libraries masc_mcp alcotest eio eio_main httpun zstd yojson))
+
+; Compression tests (Compact Protocol v4 - Backend_eio, DataChannel)
+(test
+ (name test_compression)
+ (modules test_compression)
+ (libraries masc_mcp alcotest zstd))
+
+; ============================================================
+; Performance Benchmarks
+; ============================================================
+; TODO: bench_webrtc_stack - module needs to be created
+; TODO: bench_network_real - module needs to be created
+
+; UDP throughput benchmark (the honest test)
+(executable
+ (name bench_udp_throughput)
+ (modules bench_udp_throughput)
+ (libraries masc_mcp eio eio_main eio_posix mtime mtime.clock.os yojson cstruct ipaddr))
+
+; Fair UDP benchmark (echo pattern with flow control)
+(executable
+ (name bench_udp_fair)
+ (modules bench_udp_fair)
+ (libraries masc_mcp eio eio_main eio_posix unix mtime mtime.clock.os yojson cstruct ipaddr))
+
+; One-way UDP benchmark (Miuda.ai compatible methodology)
+(executable
+ (name bench_udp_oneway)
+ (modules bench_udp_oneway)
+ (libraries masc_mcp eio eio_main eio_posix unix yojson cstruct ipaddr))
+
+; SCTP transport benchmark
+(executable
+ (name bench_sctp_transport)
+ (modules bench_sctp_transport)
+ (libraries masc_mcp eio eio_main eio_posix unix))
+
+; SCTP batch I/O benchmark
+(executable
+ (name bench_sctp_batch)
+ (modules bench_sctp_batch)
+ (libraries masc_mcp eio eio_main eio_posix unix))
+
+; Burst send benchmark
+(executable
+ (name bench_burst_send)
+ (modules bench_burst_send)
+ (libraries masc_mcp eio eio_main eio_posix unix))

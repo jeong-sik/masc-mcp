@@ -1,0 +1,16 @@
+(executable
+ (name level5_9_real_world)
+ (libraries masc_mcp alcotest str yojson unix))
+
+; Temporarily disabled - Webrtc module refactoring in progress
+; (executable
+;  (name turn_relay_example)
+;  (libraries masc_mcp eio eio_main eio_posix))
+
+; (executable
+;  (name turn_tls_example)
+;  (libraries masc_mcp eio eio_main eio_posix))
+
+; (executable
+;  (name turn_relay_data_example)
+;  (libraries masc_mcp eio eio_main eio_posix unix))

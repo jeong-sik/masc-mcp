@@ -1,0 +1,241 @@
+# DTLS RFC 6347 Compliance Analysis
+
+**Date**: 2026-01-12
+**Reviewer**: BALTHASAR (Claude Opus 4.5)
+**Project**: ocaml-webrtc DTLS Implementation
+
+---
+
+## Executive Summary
+
+| Metric | Value |
+|--------|-------|
+| **Total LOC** | 1,774 lines |
+| **Overall Compliance** | **48%** |
+| **Record Layer** | 90% ✅ |
+| **Crypto (AES-GCM)** | 95% ✅ |
+| **Handshake Protocol** | 35% ⚠️ |
+| **Certificate/PKI** | 10% ❌ |
+| **Server-side** | 0% ❌ |
+
+---
+
+## File Structure
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `lib/webrtc/dtls.ml` | 851 | Full protocol with Effect handlers |
+| `lib/dtls.ml` | 555 | Record layer, replay protection |
+| `lib/dtls_crypto.ml` | 368 | AES-GCM encryption, key derivation |
+| **Total** | **1,774** | |
+
+---
+
+## RFC 6347 Section-by-Section Analysis
+
+### Section 3: DTLS Design Rationale
+
+| Requirement | Status | Notes |
+|-------------|--------|-------|
+| Handle packet loss | ⚠️ Partial | Message seq tracking, no timeout retransmit |
+| Handle reordering | ✅ Done | Sliding window replay detection |
+| Handle fragmentation | ⚠️ Partial | Structures defined, reassembly incomplete |
+
+### Section 4.1: Record Layer
+
+| Requirement | Status | Notes |
+|-------------|--------|-------|
+| Record header (13 bytes) | ✅ Done | content_type, version, epoch, seq, length |
+| Epoch field (2 bytes) | ✅ Done | Tracked in `t.epoch` |
+| Sequence number (6 bytes) | ✅ Done | `read_seq_num`, `write_seq_num` |
+| Anti-replay (Section 4.1.2.6) | ✅ Done | Sliding window in dtls.ml |
+| MAC calculation with seq | ✅ Done | AAD includes epoch+seq |
+
+### Section 4.2: Handshake Protocol
+
+| Requirement | Status | Notes |
+|-------------|--------|-------|
+| Message sequence numbers | ✅ Done | `message_seq`, `next_receive_seq` |
+| Retransmission timer | ❌ Missing | No timeout/retransmit logic |
+| Fragment offset/length | ⚠️ Partial | Header parsing done, reassembly incomplete |
+| HelloVerifyRequest (DoS) | ✅ Done | Cookie support implemented |
+| Handshake message types | ✅ Done | All 11 types defined |
+
+### Section 4.2.1: ClientHello
+
+| Requirement | Status | Notes |
+|-------------|--------|-------|
+| client_random (32 bytes) | ✅ Done | Generated and stored |
+| session_id support | ⚠️ Partial | Parsed, not used for resumption |
+| cipher_suites list | ✅ Done | 4 suites defined |
+| compression_methods | ✅ Done | NULL compression only |
+| cookie field | ✅ Done | From HelloVerifyRequest |
+
+### Section 4.2.4-4.2.6: Key Exchange
+
+| Requirement | Status | Notes |
+|-------------|--------|-------|
+| ServerHello parsing | ✅ Done | server_random, cipher extracted |
+| Certificate parsing | ❌ **Placeholder** | Just stores raw bytes |
+| ServerKeyExchange | ❌ **Missing** | No ECDHE params parsing |
+| ClientKeyExchange | ❌ **Placeholder** | Sends 65 random bytes |
+| ECDHE curve operations | ❌ **Missing** | No P-256/X25519 |
+| PreMasterSecret derivation | ❌ **Missing** | Never computed from ECDHE |
+
+### Section 4.2.8: Finished Message
+
+| Requirement | Status | Notes |
+|-------------|--------|-------|
+| verify_data computation | ❌ **Placeholder** | Uses random bytes |
+| PRF("client finished") | ✅ Done | `prf_sha256` implemented |
+| Hash of handshake messages | ⚠️ Partial | Messages stored, not hashed |
+| Finished verification | ❌ **Missing** | Just sets state to Established |
+
+### Section 5: Security Considerations
+
+| Requirement | Status | Notes |
+|-------------|--------|-------|
+| Replay protection | ✅ Done | Sliding window |
+| Certificate chain validation | ❌ Missing | No X.509 parsing |
+| CRL/OCSP checking | ❌ Missing | Not implemented |
+| Cipher suite negotiation | ✅ Done | Downgrade protection |
+
+---
+
+## Crypto Implementation (RFC 5288)
+
+### AES-GCM (dtls_crypto.ml)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| AES-128-GCM | ✅ Done | Using mirage-crypto |
+| AES-256-GCM | ✅ Done | Using mirage-crypto |
+| 12-byte GCM nonce | ✅ Done | 4 implicit + 8 explicit |
+| 16-byte auth tag | ✅ Done | GCM tag appended |
+| AAD construction | ✅ Done | epoch + seq + type + version + length |
+
+### Key Derivation
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| PRF-SHA256 | ✅ Done | TLS 1.2 PRF |
+| Master secret (48 bytes) | ✅ Done | From pre-master |
+| Key material expansion | ✅ Done | client/server keys + IVs |
+| Key size selection | ✅ Done | Based on cipher suite |
+
+---
+
+## Missing Critical Features
+
+### 1. ECDHE Key Exchange (Priority: HIGH)
+
+**Current**: `ClientKeyExchange` sends 65 random bytes
+**Required**:
+- Generate ephemeral EC key pair (P-256 or X25519)
+- Parse server's EC public key from ServerKeyExchange
+- Compute shared secret via ECDH
+- Derive premaster_secret from shared secret
+
+**Effort**: ~200 LOC
+**Dependencies**: mirage-crypto-ec
+
+### 2. Certificate Validation (Priority: HIGH)
+
+**Current**: `handle_certificate` stores raw bytes
+**Required**:
+- Parse X.509 certificate chain
+- Verify signature chain to trusted root
+- Check validity period (notBefore, notAfter)
+- Verify hostname/SAN matching
+
+**Effort**: ~300 LOC
+**Dependencies**: x509, pem
+
+### 3. Finished Verification (Priority: HIGH)
+
+**Current**: `handle_finished` just sets state
+**Required**:
+- Hash all handshake messages (SHA-256)
+- Compute: `verify_data = PRF(master_secret, "client finished", Hash(handshake_messages))[0..11]`
+- Compare with received verify_data
+
+**Effort**: ~50 LOC
+**Dependencies**: None (PRF already implemented)
+
+### 4. Server-Side Handshake (Priority: MEDIUM)
+
+**Current**: Only client-side implemented
+**Required**:
+- Handle ClientHello, send HelloVerifyRequest
+- Send ServerHello, Certificate, ServerKeyExchange, ServerHelloDone
+- Receive ClientKeyExchange, ChangeCipherSpec, Finished
+- Send ChangeCipherSpec, Finished
+
+**Effort**: ~400 LOC
+**Dependencies**: None (reuse existing structures)
+
+### 5. Retransmission Timer (Priority: MEDIUM)
+
+**Current**: No retry logic
+**Required** (RFC 6347 Section 4.2.4):
+- Initial timeout: 1 second
+- Exponential backoff: 2, 4, 8, ... seconds
+- Max retransmits: 6 (configurable)
+
+**Effort**: ~100 LOC
+**Dependencies**: Eio timer
+
+---
+
+## Test Coverage
+
+| Test Suite | Cases | Coverage |
+|------------|-------|----------|
+| test_dtls_crypto.ml | 11 | Cipher, context, key derivation, encrypt/decrypt |
+| test_stun.ml | 8 | STUN parsing (related) |
+| test_sctp.ml | 7 | SCTP transport (related) |
+
+**Missing Tests**:
+- Handshake state machine tests
+- Fragment reassembly tests
+- Replay attack prevention tests
+- Certificate validation tests
+- Interoperability tests (vs OpenSSL, BoringSSL)
+
+---
+
+## Roadmap to 100%
+
+### Phase 1: Core Crypto (Current → 60%)
+- [ ] Implement ECDHE key exchange with P-256
+- [ ] Implement Finished verification
+- Estimated: 2 days
+
+### Phase 2: Certificate Handling (60% → 80%)
+- [ ] X.509 parsing with x509 library
+- [ ] Chain validation
+- [ ] Hostname verification
+- Estimated: 3 days
+
+### Phase 3: Server-Side (80% → 95%)
+- [ ] Complete server handshake flow
+- [ ] Symmetric with client implementation
+- Estimated: 3 days
+
+### Phase 4: Reliability (95% → 100%)
+- [ ] Retransmission timer
+- [ ] Fragment reassembly
+- [ ] Comprehensive test suite
+- [ ] Browser interop testing
+- Estimated: 2 days
+
+**Total Estimated Effort**: 10 days
+
+---
+
+## References
+
+- [RFC 6347](https://tools.ietf.org/html/rfc6347) - DTLS 1.2
+- [RFC 5288](https://tools.ietf.org/html/rfc5288) - AES-GCM Cipher Suites
+- [RFC 5246](https://tools.ietf.org/html/rfc5246) - TLS 1.2 (base spec)
+- [RFC 8446](https://tools.ietf.org/html/rfc8446) - TLS 1.3 (future migration)

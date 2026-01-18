@@ -1,0 +1,175 @@
+#!/bin/bash
+# MASC Terminal Dashboard - Real-time multi-agent coordination view
+# Usage: masc-watch [interval_seconds]
+
+set -e
+
+MASC_DIR="${ME_ROOT:-.}/.masc"
+INTERVAL="${1:-2}"
+
+# Colors
+PURPLE='\033[0;35m'
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+GRAY='\033[0;90m'
+BOLD='\033[1m'
+DIM='\033[2m'
+NC='\033[0m'
+
+# Agent colors
+agent_color() {
+    case "$1" in
+        claude) echo -e "${PURPLE}" ;;
+        gemini) echo -e "${BLUE}" ;;
+        codex)  echo -e "${GREEN}" ;;
+        system) echo -e "${GRAY}" ;;
+        *)      echo -e "${NC}" ;;
+    esac
+}
+
+agent_icon() {
+    case "$1" in
+        claude) echo "🟣" ;;
+        gemini) echo "🔵" ;;
+        codex)  echo "🟢" ;;
+        system) echo "⚙️ " ;;
+        *)      echo "🤖" ;;
+    esac
+}
+
+# Box drawing
+draw_box() {
+    local title="$1"
+    local width="${2:-50}"
+    local line=$(printf '─%.0s' $(seq 1 $((width-2))))
+    echo -e "${GRAY}┌─${NC}${BOLD} $title ${NC}${GRAY}${line:${#title}}┐${NC}"
+}
+
+draw_bottom() {
+    local width="${1:-50}"
+    local line=$(printf '─%.0s' $(seq 1 $((width-2))))
+    echo -e "${GRAY}└${line}┘${NC}"
+}
+
+draw_separator() {
+    local width="${1:-50}"
+    local line=$(printf '─%.0s' $(seq 1 $((width-2))))
+    echo -e "${GRAY}├${line}┤${NC}"
+}
+
+# Render dashboard
+render() {
+    clear
+    local width=60
+    local now=$(date '+%H:%M:%S')
+
+    # Header
+    echo ""
+    echo -e "  ${BOLD}🎭 MASC Dashboard${NC}  ${DIM}$now${NC}"
+    echo ""
+
+    # Check if initialized
+    if [ ! -d "$MASC_DIR" ]; then
+        echo -e "  ${YELLOW}⚠ MASC not initialized${NC}"
+        echo -e "  ${DIM}Run: mcp__masc__masc_init${NC}"
+        echo ""
+        return
+    fi
+
+    # Agents
+    draw_box "Agents" $width
+
+    local agent_count=0
+    shopt -s nullglob
+    if [ -d "$MASC_DIR/agents" ]; then
+        for agent_file in "$MASC_DIR/agents"/*.json; do
+            [ -f "$agent_file" ] || continue
+            local name=$(basename "$agent_file" .json)
+            local status=$(jq -r 'if .status | type == "array" then .status[0] else .status // "unknown" end' "$agent_file" 2>/dev/null)
+            local task=$(jq -r '.current_task // ""' "$agent_file" 2>/dev/null)
+            local icon=$(agent_icon "$name")
+            local color=$(agent_color "$name")
+
+            local status_icon="●"
+            [ "$status" = "idle" ] && status_icon="○"
+
+            printf "  ${color}%s %-10s${NC} %s %-8s" "$icon" "$name" "$status_icon" "$status"
+            [ -n "$task" ] && [ "$task" != "null" ] && printf "  ${DIM}%s${NC}" "$task"
+            echo ""
+            ((agent_count++))
+        done
+    fi
+
+    [ $agent_count -eq 0 ] && echo -e "  ${DIM}No agents connected${NC}"
+    draw_bottom $width
+    echo ""
+
+    # Tasks
+    draw_box "Tasks" $width
+
+    local task_count=0
+    if [ -d "$MASC_DIR/tasks" ]; then
+        for task_file in "$MASC_DIR/tasks"/*.json; do
+            [ -f "$task_file" ] || continue
+            local id=$(jq -r '.id // "?"' "$task_file" 2>/dev/null)
+            local title=$(jq -r '.title // "Untitled"' "$task_file" 2>/dev/null | cut -c1-30)
+            local status=$(jq -r '.status // "pending"' "$task_file" 2>/dev/null)
+            local priority=$(jq -r '.priority // 3' "$task_file" 2>/dev/null)
+            local claimed=$(jq -r '.claimed_by // ""' "$task_file" 2>/dev/null)
+
+            local status_color="${GRAY}"
+            local status_icon="○"
+            case "$status" in
+                in_progress) status_color="${YELLOW}"; status_icon="◐" ;;
+                completed)   status_color="${GREEN}"; status_icon="●" ;;
+                pending)     status_color="${GRAY}"; status_icon="○" ;;
+            esac
+
+            local priority_str=""
+            [ "$priority" -le 2 ] && priority_str="${RED}!${NC}"
+
+            printf "  %s ${status_color}%-12s${NC} %-30s" "$status_icon" "$id" "$title"
+            [ -n "$claimed" ] && [ "$claimed" != "null" ] && printf " ${DIM}→%s${NC}" "$claimed"
+            [ -n "$priority_str" ] && printf " %s" "$priority_str"
+            echo ""
+            ((task_count++))
+        done
+    fi
+
+    [ $task_count -eq 0 ] && echo -e "  ${DIM}No tasks${NC}"
+    draw_bottom $width
+    echo ""
+
+    # Recent Messages (last 5)
+    draw_box "Messages" $width
+
+    local msg_count=0
+    if [ -d "$MASC_DIR/messages" ]; then
+        for msg_file in $(ls -t "$MASC_DIR/messages"/*.json 2>/dev/null | head -5 || true); do
+            [ -f "$msg_file" ] || continue
+            local from=$(jq -r '.from // "?"' "$msg_file" 2>/dev/null)
+            local content=$(jq -r '.content // ""' "$msg_file" 2>/dev/null | cut -c1-40)
+            local icon=$(agent_icon "$from")
+            local color=$(agent_color "$from")
+
+            echo -e "  ${color}${icon} ${from}${NC}: ${content}"
+            ((msg_count++))
+        done
+    fi
+
+    [ $msg_count -eq 0 ] && echo -e "  ${DIM}No messages${NC}"
+    draw_bottom $width
+
+    echo ""
+    echo -e "  ${DIM}Press Ctrl+C to exit • Refresh: ${INTERVAL}s${NC}"
+}
+
+# Main loop
+trap 'echo -e "\n${DIM}Bye!${NC}"; exit 0' INT
+
+while true; do
+    render
+    sleep "$INTERVAL"
+done

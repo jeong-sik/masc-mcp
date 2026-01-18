@@ -1,0 +1,50 @@
+(library
+ (name masc_mcp)
+ (public_name masc_mcp)
+ (libraries
+   yojson
+   lwt
+   base64
+   lwt.unix
+   cohttp-lwt-unix
+   websocket-lwt-unix
+   conduit-lwt-unix
+   redis-sync
+   ;; PostgreSQL backend (Eio-native, non-blocking)
+   caqti
+   caqti-eio
+   caqti-eio.unix
+   caqti-driver-postgresql
+   sqlite3
+   unix
+   str
+   mirage-crypto
+   mirage-crypto-ec
+   mirage-crypto-rng
+   mirage-crypto-rng.unix
+   cstruct
+   digestif
+   ocaml-protoc-plugin
+   pbrt
+   pbrt_services
+   ;; grpc grpc-lwt - disabled (h2 version conflict with httpun-eio)
+   ;; grpc-direct (native Eio gRPC from lib/grpc-direct) - enabled for Transport_grpc_next
+   grpc-direct
+   grpc-direct-core
+   h2
+   h2-lwt-unix
+   ctypes
+   ctypes-foreign
+   ;; OCaml 5.x Eio concurrency (required for *_eio.ml modules)
+   eio
+   eio_main
+   eio_posix
+   httpun-eio
+   gluten-eio
+   ipaddr
+   lwt_eio
+   ;; Compact Protocol v5: unified DSL + compression
+   compact-protocol
+   zstd
+   )
+ (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq lwt_ppx)))

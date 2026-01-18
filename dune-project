@@ -1,0 +1,65 @@
+(lang dune 3.13)
+
+(name masc_mcp)
+(version 0.1.0)
+
+(generate_opam_files true)
+
+(source
+ (github jeong-sik/masc-mcp))
+
+(authors "Jeongsik Yun")
+
+(maintainers "Jeongsik Yun")
+
+(license MIT)
+
+(documentation https://github.com/jeong-sik/masc-mcp)
+
+(package
+ (name masc_mcp)
+ (synopsis "Multi-Agent Streaming Coordination MCP Server in OCaml")
+ (description "MASC Protocol: File-based coordination for Claude, Gemini, and Codex agents")
+ (depends
+  (ocaml (>= 5.1))
+  (dune (>= 3.13))
+  ; External dependencies (opam pin)
+  (mcp_protocol (>= 0.1.0))
+  (ocaml-webrtc (>= 0.1.0))
+  (compact-protocol (>= 0.1.0))
+  ; Standard dependencies
+  (yojson (>= 2.0))
+  (cmdliner (>= 1.1))
+  (lwt (>= 5.6))
+  (lwt_ppx (>= 2.1))
+  (cohttp-lwt-unix (>= 5.0))
+  (ppx_deriving_yojson (>= 3.6))
+  (ppx_deriving (>= 5.2))
+  (sqlite3 (>= 5.1))
+  (mirage-crypto (>= 1.0))
+  (mirage-crypto-rng (>= 1.0))
+  (mirage-crypto-rng-lwt (>= 1.0))
+  (ctypes (>= 0.20))
+  (ctypes-foreign (>= 0.20))
+  (integers (>= 0.7))
+  (zstd (>= 0.4))
+  (websocket-lwt-unix (>= 2.15))
+  (conduit-lwt-unix (>= 6.0))
+  (redis-sync (>= 0.7))
+  (caqti (>= 2.1))
+  (caqti-eio (>= 2.1))
+  (caqti-driver-postgresql (>= 2.1))
+  (eio (>= 1.0))
+  (eio_main (>= 1.0))
+  (cstruct (>= 6.0))
+  (digestif (>= 1.1))
+  (ocaml-protoc-plugin (>= 4.0))
+  (pbrt (>= 3.0))
+  (pbrt_services (>= 3.0))
+  (grpc (>= 0.2))
+  (grpc-lwt (>= 0.2))
+  (h2 (>= 0.10))
+  (h2-lwt-unix (>= 0.10))
+  (alcotest (and :with-test (>= 1.6)))
+  (alcotest-lwt (and :with-test (>= 1.6)))
+  (mtime (>= 2.0))))

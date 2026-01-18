@@ -1,0 +1,248 @@
+// MASC MCP gRPC Service Definition
+// A2A Protocol compatible schema
+//
+// To generate OCaml bindings:
+//   opam install ocaml-protoc-plugin pbrt_services
+//   protoc --ocaml_out=./lib --plugin=protoc-gen-ocaml=`which protoc-gen-ocaml` proto/masc.proto
+
+syntax = "proto3";
+
+package masc.v1;
+
+// ===== Core Types =====
+
+message Empty {}
+
+message Agent {
+  string name = 1;
+  string status = 2;  // "active", "idle", "zombie"
+  repeated string capabilities = 3;
+  string last_heartbeat = 4;
+  string joined_at = 5;
+}
+
+message Task {
+  string id = 1;
+  string title = 2;
+  string description = 3;
+  string status = 4;  // "pending", "claimed", "in_progress", "done", "cancelled"
+  string assigned_to = 5;
+  int32 priority = 6;
+  string created_at = 7;
+  string updated_at = 8;
+}
+
+message Message {
+  string id = 1;
+  string from = 2;
+  string content = 3;
+  string timestamp = 4;
+  int64 seq = 5;
+}
+
+message Vote {
+  string id = 1;
+  string topic = 2;
+  string proposer = 3;
+  repeated string options = 4;
+  map<string, string> votes = 5;
+  int32 required_votes = 6;
+  string status = 7;  // "active", "resolved"
+  string result = 8;
+}
+
+message PlanningContext {
+  string task_id = 1;
+  string task_plan = 2;
+  repeated string notes = 3;
+  string deliverable = 4;
+  string created_at = 5;
+  string updated_at = 6;
+}
+
+// ===== Request/Response Messages =====
+
+// Status
+message StatusRequest {}
+message StatusResponse {
+  repeated Agent agents = 1;
+  repeated Task tasks = 2;
+  int32 message_count = 3;
+  string room_path = 4;
+  string project_name = 5;
+}
+
+// Agent Operations
+message JoinRequest {
+  string agent_name = 1;
+  repeated string capabilities = 2;
+}
+message JoinResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message LeaveRequest {
+  string agent_name = 1;
+}
+message LeaveResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Task Operations
+message AddTaskRequest {
+  string title = 1;
+  string description = 2;
+  int32 priority = 3;
+}
+message AddTaskResponse {
+  bool success = 1;
+  string task_id = 2;
+  string message = 3;
+}
+
+message ClaimTaskRequest {
+  string agent_name = 1;
+  string task_id = 2;
+}
+message ClaimTaskResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message DoneTaskRequest {
+  string agent_name = 1;
+  string task_id = 2;
+  string notes = 3;
+}
+message DoneTaskResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message CancelTaskRequest {
+  string agent_name = 1;
+  string task_id = 2;
+  string reason = 3;
+}
+message CancelTaskResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Messaging
+message BroadcastRequest {
+  string agent_name = 1;
+  string message = 2;
+}
+message BroadcastResponse {
+  bool success = 1;
+  int64 seq = 2;
+}
+
+message GetMessagesRequest {
+  int64 since_seq = 1;
+  int32 limit = 2;
+}
+message GetMessagesResponse {
+  repeated Message messages = 1;
+}
+
+// Voting
+message CreateVoteRequest {
+  string proposer = 1;
+  string topic = 2;
+  repeated string options = 3;
+  int32 required_votes = 4;
+}
+message CreateVoteResponse {
+  bool success = 1;
+  string vote_id = 2;
+}
+
+message CastVoteRequest {
+  string agent_name = 1;
+  string vote_id = 2;
+  string choice = 3;
+}
+message CastVoteResponse {
+  bool success = 1;
+  string message = 2;
+  string status = 3;
+  string result = 4;
+}
+
+// Planning
+message InitPlanRequest {
+  string task_id = 1;
+}
+message InitPlanResponse {
+  bool success = 1;
+  PlanningContext context = 2;
+}
+
+message UpdatePlanRequest {
+  string task_id = 1;
+  string content = 2;
+}
+message UpdatePlanResponse {
+  bool success = 1;
+  PlanningContext context = 2;
+}
+
+message AddNoteRequest {
+  string task_id = 1;
+  string note = 2;
+}
+message AddNoteResponse {
+  bool success = 1;
+  PlanningContext context = 2;
+}
+
+message GetPlanRequest {
+  string task_id = 1;
+}
+message GetPlanResponse {
+  bool success = 1;
+  PlanningContext context = 2;
+  string markdown = 3;  // Formatted for LLM consumption
+}
+
+// Streaming
+message StreamMessagesRequest {
+  string agent_name = 1;
+  int64 since_seq = 2;
+}
+
+// ===== Service Definition =====
+
+service MASCService {
+  // Status
+  rpc GetStatus(StatusRequest) returns (StatusResponse);
+
+  // Agent lifecycle
+  rpc Join(JoinRequest) returns (JoinResponse);
+  rpc Leave(LeaveRequest) returns (LeaveResponse);
+
+  // Task management
+  rpc AddTask(AddTaskRequest) returns (AddTaskResponse);
+  rpc ClaimTask(ClaimTaskRequest) returns (ClaimTaskResponse);
+  rpc DoneTask(DoneTaskRequest) returns (DoneTaskResponse);
+  rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse);
+
+  // Messaging
+  rpc Broadcast(BroadcastRequest) returns (BroadcastResponse);
+  rpc GetMessages(GetMessagesRequest) returns (GetMessagesResponse);
+  rpc StreamMessages(StreamMessagesRequest) returns (stream Message);  // Server streaming
+
+  // Voting
+  rpc CreateVote(CreateVoteRequest) returns (CreateVoteResponse);
+  rpc CastVote(CastVoteRequest) returns (CastVoteResponse);
+
+  // Planning
+  rpc InitPlan(InitPlanRequest) returns (InitPlanResponse);
+  rpc UpdatePlan(UpdatePlanRequest) returns (UpdatePlanResponse);
+  rpc AddNote(AddNoteRequest) returns (AddNoteResponse);
+  rpc GetPlan(GetPlanRequest) returns (GetPlanResponse);
+}

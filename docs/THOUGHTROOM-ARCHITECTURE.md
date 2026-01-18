@@ -424,8 +424,7 @@ ThoughtRoom:
 ### Phase 1: Foundation (Current)
 - [x] MASC Protocol v2 (OCaml)
 - [x] Basic agent coordination
-- [x] File locking
-- [x] Worktree isolation
+- [x] Worktree isolation (primary isolation strategy)
 - [ ] **ThoughtRoom design document** ← We are here
 
 ### Phase 2: Auto-Decomposition

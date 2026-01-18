@@ -177,7 +177,6 @@ Client Request
 | Agent Management | 5 | who, agents, heartbeat, cleanup_zombies, gc |
 | Task Operations | 7 | add_task, claim, claim_next, done, cancel_task, tasks, archive_view, update_priority |
 | Communication | 3 | broadcast, messages, listen |
-| File Locking | 2 | lock, unlock |
 | Voting System | 4 | vote_create, vote_cast, vote_status, votes |
 | Portal (A2A) | 4 | portal_open, portal_send, portal_status, portal_close |
 | Worktree | 3 | worktree_create, worktree_remove, worktree_list |

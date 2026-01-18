@@ -161,8 +161,6 @@ type audit_event =
   | TaskCompleted of { agent: string; task_id: string; success: bool; timestamp: float }
   | AuthSuccess of { agent: string; method_: string; timestamp: float }
   | AuthFailure of { agent: string; reason: string; timestamp: float }
-  | FileLocked of { agent: string; file: string; timestamp: float }
-  | FileUnlocked of { agent: string; file: string; timestamp: float }
   | AnomalyDetected of { agent: string; anomaly_type: string; severity: string; timestamp: float }
   | SecurityViolation of { agent: string; violation: string; action_taken: string; timestamp: float }
 
@@ -210,20 +208,6 @@ let event_to_json event =
         ("event", `String "auth_failure");
         ("agent", `String agent);
         ("reason", `String reason);
-        ts_field timestamp
-      ]
-  | FileLocked { agent; file; timestamp } ->
-      `Assoc [
-        ("event", `String "file_locked");
-        ("agent", `String agent);
-        ("file", `String file);
-        ts_field timestamp
-      ]
-  | FileUnlocked { agent; file; timestamp } ->
-      `Assoc [
-        ("event", `String "file_unlocked");
-        ("agent", `String agent);
-        ("file", `String file);
         ts_field timestamp
       ]
   | AnomalyDetected { agent; anomaly_type; severity; timestamp } ->
@@ -291,7 +275,6 @@ type agent_behavior = {
   mutable avg_task_duration: float;
   mutable last_seen: float;
   mutable auth_failures: int;
-  mutable locked_files: string list;
   mutable suspicious_actions: int;
 }
 
@@ -312,7 +295,6 @@ let get_agent_behavior agent =
           avg_task_duration = 0.0;
           last_seen = Unix.gettimeofday ();
           auth_failures = 0;
-          locked_files = [];
           suspicious_actions = 0;
         } in
         Hashtbl.replace agent_behaviors agent b;
@@ -323,7 +305,6 @@ let get_agent_behavior agent =
 type anomaly =
   | RapidTaskCompletion of { rate: float; threshold: float }
   | LowSuccessRate of { rate: float; threshold: float }
-  | ExcessiveFileLocks of { count: int; threshold: int }
   | AuthenticationSpike of { failures: int; threshold: int }
   | LongInactivity of { seconds: float; threshold: float }
   | SuspiciousPattern of string
@@ -332,14 +313,12 @@ type anomaly =
 type anomaly_config = {
   min_tasks_for_rate_check: int;      (* Default: 5 *)
   low_success_rate_threshold: float;  (* Default: 0.5 *)
-  max_concurrent_locks: int;          (* Default: 10 *)
   inactivity_threshold_sec: float;    (* Default: 3600.0 *)
 }
 
 let default_anomaly_config = {
   min_tasks_for_rate_check = 5;
   low_success_rate_threshold = 0.5;
-  max_concurrent_locks = 10;
   inactivity_threshold_sec = 3600.0;
 }
 
@@ -374,14 +353,6 @@ let detect_anomalies ?(anomaly_cfg = default_anomaly_config) config agent =
         threshold = anomaly_cfg.low_success_rate_threshold
       } :: !anomalies;
 
-    (* Check excessive file locks - configurable threshold *)
-    let lock_count = List.length b.locked_files in
-    if lock_count > anomaly_cfg.max_concurrent_locks then
-      anomalies := ExcessiveFileLocks {
-        count = lock_count;
-        threshold = anomaly_cfg.max_concurrent_locks
-      } :: !anomalies;
-
     (* Check auth failures *)
     if b.auth_failures >= config.max_failed_auth then
       anomalies := AuthenticationSpike {
@@ -404,8 +375,6 @@ let anomaly_to_string = function
       Printf.sprintf "Rapid task completion: %.2f/s (threshold: %.2f/s)" rate threshold
   | LowSuccessRate { rate; threshold } ->
       Printf.sprintf "Low success rate: %.1f%% (threshold: %.1f%%)" (rate *. 100.) (threshold *. 100.)
-  | ExcessiveFileLocks { count; threshold } ->
-      Printf.sprintf "Excessive file locks: %d (threshold: %d)" count threshold
   | AuthenticationSpike { failures; threshold } ->
       Printf.sprintf "Auth failures: %d (threshold: %d)" failures threshold
   | LongInactivity { seconds; threshold } ->
@@ -415,7 +384,6 @@ let anomaly_to_string = function
 let anomaly_severity = function
   | RapidTaskCompletion _ -> "warning"
   | LowSuccessRate _ -> "warning"
-  | ExcessiveFileLocks _ -> "high"
   | AuthenticationSpike _ -> "critical"
   | LongInactivity _ -> "info"
   | SuspiciousPattern _ -> "high"

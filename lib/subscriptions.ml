@@ -13,7 +13,6 @@ type resource_type =
   | Agents
   | Messages
   | Votes
-  | FileLocks
   | Custom of string
 
 let resource_type_to_string = function
@@ -21,7 +20,6 @@ let resource_type_to_string = function
   | Agents -> "agents"
   | Messages -> "messages"
   | Votes -> "votes"
-  | FileLocks -> "file_locks"
   | Custom s -> s
 
 let resource_type_of_string = function
@@ -29,7 +27,6 @@ let resource_type_of_string = function
   | "agents" -> Agents
   | "messages" -> Messages
   | "votes" -> Votes
-  | "file_locks" -> FileLocks
   | s -> Custom s
 
 (** Change type *)

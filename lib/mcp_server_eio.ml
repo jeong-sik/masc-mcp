@@ -544,14 +544,6 @@ let execute_tool_eio ~clock state ~name ~arguments =
       let limit = get_int "limit" 10 in
       (true, Room.get_messages config ~since_seq ~limit)
 
-  | "masc_lock" ->
-      let file_path = get_string "file_path" "" in
-      result_to_response (Room.lock_file_r config ~agent_name ~file_path)
-
-  | "masc_unlock" ->
-      let file_path = get_string "file_path" "" in
-      result_to_response (Room.unlock_file_r config ~agent_name ~file_path)
-
   | "masc_listen" ->
       let timeout = float_of_int (get_int "timeout" 300) in
       Log.Mcp.info "%s is now listening (timeout: %.0fs)..." agent_name timeout;
@@ -1105,8 +1097,7 @@ Expires: %s
       Buffer.add_string buf (Printf.sprintf "Burst allowed: %d\n\n" cfg.burst_allowed);
       Buffer.add_string buf "Category limits:\n";
       Buffer.add_string buf (Printf.sprintf "  • Broadcast: %d/min\n" cfg.broadcast_per_minute);
-      Buffer.add_string buf (Printf.sprintf "  • Task ops: %d/min\n" cfg.task_ops_per_minute);
-      Buffer.add_string buf (Printf.sprintf "  • File locks: %d/min\n\n" cfg.file_lock_per_minute);
+      Buffer.add_string buf (Printf.sprintf "  • Task ops: %d/min\n\n" cfg.task_ops_per_minute);
       Buffer.add_string buf "Role multipliers:\n";
       Buffer.add_string buf (Printf.sprintf "  • Reader: %.1fx\n" cfg.reader_multiplier);
       Buffer.add_string buf (Printf.sprintf "  • Worker: %.1fx\n" cfg.worker_multiplier);

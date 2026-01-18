@@ -20,7 +20,6 @@ type rate_tracker = {
   mutable general_timestamps: float list;
   mutable broadcast_timestamps: float list;
   mutable task_ops_timestamps: float list;
-  mutable file_lock_timestamps: float list;
   mutable burst_used: int;
   mutable last_burst_reset: float;
 }
@@ -88,7 +87,6 @@ let create_tracker () = {
   general_timestamps = [];
   broadcast_timestamps = [];
   task_ops_timestamps = [];
-  file_lock_timestamps = [];
   burst_used = 0;
   last_burst_reset = Unix.gettimeofday ();
 }
@@ -98,7 +96,6 @@ let get_timestamps tracker = function
   | GeneralLimit -> tracker.general_timestamps
   | BroadcastLimit -> tracker.broadcast_timestamps
   | TaskOpsLimit -> tracker.task_ops_timestamps
-  | FileLockLimit -> tracker.file_lock_timestamps
 
 (** Set timestamps for category *)
 let set_timestamps tracker category ts =
@@ -106,7 +103,6 @@ let set_timestamps tracker category ts =
   | GeneralLimit -> tracker.general_timestamps <- ts
   | BroadcastLimit -> tracker.broadcast_timestamps <- ts
   | TaskOpsLimit -> tracker.task_ops_timestamps <- ts
-  | FileLockLimit -> tracker.file_lock_timestamps <- ts
 
 (** Enhanced rate limit check with category and role *)
 let check_rate_limit_ex registry ~agent_name ~category ~role =
@@ -192,7 +188,6 @@ let get_rate_limit_status registry ~agent_name ~role =
       status_for_category GeneralLimit;
       status_for_category BroadcastLimit;
       status_for_category TaskOpsLimit;
-      status_for_category FileLockLimit;
     ]);
   ]
 

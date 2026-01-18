@@ -306,44 +306,6 @@ let all_schemas : tool_schema list = [
   };
 
   {
-    name = "masc_lock";
-    description = "Lock a specific file BEFORE editing it. NOTE: Prefer masc_worktree_create for code files (complete isolation). Locks are better for shared configs (.env), migrations, deploy scripts, or quick edits without worktree setup. Lock expires after 30 min. If another agent has the lock, wait or ask via broadcast.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Your agent name");
-        ]);
-        ("file_path", `Assoc [
-          ("type", `String "string");
-          ("description", `String "File path to lock");
-        ]);
-      ]);
-      ("required", `List [`String "agent_name"; `String "file_path"]);
-    ];
-  };
-
-  {
-    name = "masc_unlock";
-    description = "Unlock a file after modification.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Your agent name");
-        ]);
-        ("file_path", `Assoc [
-          ("type", `String "string");
-          ("description", `String "File path to unlock");
-        ]);
-      ]);
-      ("required", `List [`String "agent_name"; `String "file_path"]);
-    ];
-  };
-
-  {
     name = "masc_listen";
     description = "Listen for incoming messages (blocking). Returns after message arrives or timeout.";
     input_schema = `Assoc [
@@ -1187,10 +1149,6 @@ let all_schemas : tool_schema list = [
           ("type", `String "integer");
           ("description", `String "Task operations per minute (default: 30)");
         ]);
-        ("file_lock_per_minute", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "File lock operations per minute (default: 20)");
-        ]);
       ]);
     ];
   };
@@ -1770,7 +1728,7 @@ of their context limits and gracefully hand over work to successors.|};
 
   {
     name = "masc_subscription";
-    description = "Subscribe to resource changes (tasks, agents, messages, votes, file_locks). Receive notifications via polling or SSE.";
+    description = "Subscribe to resource changes (tasks, agents, messages, votes). Receive notifications via polling or SSE.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -1785,7 +1743,7 @@ of their context limits and gracefully hand over work to successors.|};
         ]);
         ("resource", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "tasks"; `String "agents"; `String "messages"; `String "votes"; `String "file_locks"]);
+          ("enum", `List [`String "tasks"; `String "agents"; `String "messages"; `String "votes"]);
           ("description", `String "Resource type");
         ]);
         ("filter", `Assoc [

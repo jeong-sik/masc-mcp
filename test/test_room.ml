@@ -19,8 +19,6 @@ let str_contains s substring =
 
 let contains_check result = String.sub result 0 3 = "\xE2\x9C\x85"  (* ✅ *)
 let contains_warning result = String.sub result 0 3 = "\xE2\x9A\xA0"  (* ⚠ *)
-let contains_lock result = String.sub result 0 4 = "\xF0\x9F\x94\x92"  (* 🔒 *)
-let contains_unlock result = String.sub result 0 4 = "\xF0\x9F\x94\x93"  (* 🔓 *)
 let contains_portal result = String.sub result 0 4 = "\xF0\x9F\x8C\x80"  (* 🌀 *)
 
 let test_init_creates_folder () =
@@ -131,34 +129,6 @@ let test_broadcast_message () =
   (* Get messages *)
   let msgs = Room.get_messages config ~since_seq:0 ~limit:10 in
   Alcotest.(check bool) "has messages" true (String.length msgs > 50);
-
-  (* Cleanup *)
-  let _ = Room.reset config in
-  Unix.rmdir tmp_dir
-
-let test_file_locking () =
-  let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc_test_%d" (Random.int 100000)) in
-  Unix.mkdir tmp_dir 0o755;
-
-  let config = Room.default_config tmp_dir in
-  let _ = Room.init config ~agent_name:None in
-
-  (* Lock file *)
-  let lock_result = Room.lock_file config ~agent_name:"claude" ~file_path:"test.ml" in
-  Alcotest.(check bool) "lock success" true (contains_lock lock_result);
-
-  (* Try to lock again - should fail *)
-  let lock2_result = Room.lock_file config ~agent_name:"gemini" ~file_path:"test.ml" in
-  Alcotest.(check bool) "double lock blocked" true (contains_warning lock2_result);
-
-  (* Unlock *)
-  let unlock_result = Room.unlock_file config ~agent_name:"claude" ~file_path:"test.ml" in
-  Alcotest.(check bool) "unlock success" true (contains_unlock unlock_result);
-
-  (* Now gemini can lock *)
-  let lock3_result = Room.lock_file config ~agent_name:"gemini" ~file_path:"test.ml" in
-  Alcotest.(check bool) "lock after unlock" true (contains_lock lock3_result);
 
   (* Cleanup *)
   let _ = Room.reset config in
@@ -284,33 +254,6 @@ let test_double_complete () =
     (* Try to complete again - should fail (already done) *)
     let result = Room.complete_task config ~agent_name:"claude" ~task_id:"task-001" ~notes:"second" in
     Alcotest.(check bool) "double complete blocked" true (contains_warning result)
-  )
-
-(* --- Lock Edge Cases --- *)
-
-let test_unlock_by_wrong_agent () =
-  with_test_env (fun config ->
-    let _ = Room.lock_file config ~agent_name:"claude" ~file_path:"test.ml" in
-
-    (* Gemini tries to unlock claude's lock - should fail *)
-    let result = Room.unlock_file config ~agent_name:"gemini" ~file_path:"test.ml" in
-    Alcotest.(check bool) "wrong agent unlock blocked" true (contains_warning result)
-  )
-
-let test_unlock_nonexistent () =
-  with_test_env (fun config ->
-    let result = Room.unlock_file config ~agent_name:"claude" ~file_path:"nonexistent.ml" in
-    Alcotest.(check bool) "unlock nonexistent" true (contains_warning result)
-  )
-
-let test_lock_same_agent_twice () =
-  with_test_env (fun config ->
-    let _ = Room.lock_file config ~agent_name:"claude" ~file_path:"test.ml" in
-
-    (* Same agent tries to lock again - should succeed (idempotent) or warn *)
-    let result = Room.lock_file config ~agent_name:"claude" ~file_path:"test.ml" in
-    (* Either success or warning is acceptable *)
-    Alcotest.(check bool) "same agent relock" true (String.length result > 0)
   )
 
 (* --- Join/Leave Edge Cases --- *)
@@ -443,19 +386,6 @@ let test_multiple_tasks_independent () =
     Alcotest.(check bool) "independent tasks" true (contains_check result)
   )
 
-let test_lock_state_after_unlock () =
-  with_test_env (fun config ->
-    let _ = Room.lock_file config ~agent_name:"claude" ~file_path:"test.ml" in
-    let _ = Room.unlock_file config ~agent_name:"claude" ~file_path:"test.ml" in
-
-    (* After unlock, any agent should be able to lock *)
-    let r1 = Room.lock_file config ~agent_name:"gemini" ~file_path:"test.ml" in
-    Alcotest.(check bool) "lock after unlock" true (contains_lock r1);
-
-    let r2 = Room.lock_file config ~agent_name:"codex" ~file_path:"test.ml" in
-    Alcotest.(check bool) "blocked by gemini" true (contains_warning r2)
-  )
-
 (* --- Concurrency Simulation Tests --- *)
 
 let test_rapid_claim_sequence () =
@@ -499,25 +429,6 @@ let test_multiple_agents_multiple_tasks () =
     Alcotest.(check bool) "codex done" true (contains_check c3)
   )
 
-let test_multiple_file_locks () =
-  with_test_env (fun config ->
-    (* Each agent locks different files *)
-    let l1 = Room.lock_file config ~agent_name:"claude" ~file_path:"a.ml" in
-    let l2 = Room.lock_file config ~agent_name:"gemini" ~file_path:"b.ml" in
-    let l3 = Room.lock_file config ~agent_name:"codex" ~file_path:"c.ml" in
-
-    Alcotest.(check bool) "claude locks a" true (contains_lock l1);
-    Alcotest.(check bool) "gemini locks b" true (contains_lock l2);
-    Alcotest.(check bool) "codex locks c" true (contains_lock l3);
-
-    (* Cross-agent attempts should fail *)
-    let x1 = Room.lock_file config ~agent_name:"gemini" ~file_path:"a.ml" in
-    let x2 = Room.lock_file config ~agent_name:"codex" ~file_path:"b.ml" in
-
-    Alcotest.(check bool) "gemini blocked from a" true (contains_warning x1);
-    Alcotest.(check bool) "codex blocked from b" true (contains_warning x2)
-  )
-
 (* --- Recovery & Edge Condition Tests --- *)
 
 let test_reinit_existing_room () =
@@ -538,18 +449,6 @@ let test_operations_preserve_state () =
     (* Status should show all state *)
     let status = Room.status config in
     Alcotest.(check bool) "status not empty" true (String.length status > 100)
-  )
-
-let test_leave_clears_agent_locks () =
-  with_test_env (fun config ->
-    let _ = Room.join config ~agent_name:"gemini" ~capabilities:[] () in
-    let _ = Room.lock_file config ~agent_name:"gemini" ~file_path:"x.ml" in
-    let _ = Room.leave config ~agent_name:"gemini" in
-
-    (* After leave, lock should be released (or still held - check actual behavior) *)
-    let result = Room.lock_file config ~agent_name:"codex" ~file_path:"x.ml" in
-    (* This tests actual behavior - adjust assertion based on design choice *)
-    Alcotest.(check bool) "lock state after leave" true (String.length result > 0)
   )
 
 (* --- Event Log Verification --- *)
@@ -843,13 +742,6 @@ let test_empty_task_id_claim () =
     Alcotest.(check bool) "empty task_id rejected" true (contains_error result)
   )
 
-let test_empty_file_path_lock () =
-  with_test_env (fun config ->
-    (* Empty file path should be rejected *)
-    let result = Room.lock_file config ~agent_name:"claude" ~file_path:"" in
-    Alcotest.(check bool) "empty path rejected" true (contains_error result)
-  )
-
 let test_very_long_agent_name () =
   with_test_env (fun config ->
     let long_name = String.make 100 'x' in
@@ -1039,21 +931,6 @@ let test_many_agents () =
     Alcotest.(check bool) "many agents" true (count >= 10)
   )
 
-let test_many_locks () =
-  with_test_env (fun config ->
-    (* Lock many files *)
-    for i = 1 to 10 do
-      let _ = Room.lock_file config ~agent_name:"claude" ~file_path:(Printf.sprintf "file%d.ml" i) in
-      ()
-    done;
-
-    (* Verify can unlock all *)
-    for i = 1 to 10 do
-      let result = Room.unlock_file config ~agent_name:"claude" ~file_path:(Printf.sprintf "file%d.ml" i) in
-      Alcotest.(check bool) (Printf.sprintf "unlock file%d" i) true (contains_unlock result)
-    done
-  )
-
 (* ============================================================ *)
 (* Portal Advanced Tests                                        *)
 (* ============================================================ *)
@@ -1138,10 +1015,6 @@ let () =
     "messages", [
       Alcotest.test_case "broadcast" `Quick test_broadcast_message;
     ];
-    "locks", [
-      Alcotest.test_case "file locking" `Quick test_file_locking;
-      Alcotest.test_case "same agent relock" `Quick test_lock_same_agent_twice;
-    ];
     "worktree", [
       Alcotest.test_case "list no git" `Quick test_worktree_list_no_git;
       Alcotest.test_case "create no git" `Quick test_worktree_create_no_git;
@@ -1158,10 +1031,6 @@ let () =
       Alcotest.test_case "complete nonexistent" `Quick test_complete_nonexistent_task;
       Alcotest.test_case "claim nonexistent" `Quick test_claim_nonexistent_task;
       Alcotest.test_case "double complete" `Quick test_double_complete;
-    ];
-    "lock_errors", [
-      Alcotest.test_case "unlock by wrong agent" `Quick test_unlock_by_wrong_agent;
-      Alcotest.test_case "unlock nonexistent" `Quick test_unlock_nonexistent;
     ];
     "portal_errors", [
       Alcotest.test_case "send without open" `Quick test_portal_send_without_open;
@@ -1180,7 +1049,6 @@ let () =
     "state", [
       Alcotest.test_case "task state after claim" `Quick test_task_state_after_claim;
       Alcotest.test_case "multiple tasks independent" `Quick test_multiple_tasks_independent;
-      Alcotest.test_case "lock state after unlock" `Quick test_lock_state_after_unlock;
     ];
 
     (* === Archive Tests === *)
@@ -1192,14 +1060,12 @@ let () =
     "concurrency", [
       Alcotest.test_case "rapid claim sequence" `Quick test_rapid_claim_sequence;
       Alcotest.test_case "multi-agent multi-task" `Quick test_multiple_agents_multiple_tasks;
-      Alcotest.test_case "multiple file locks" `Quick test_multiple_file_locks;
     ];
 
     (* === Robustness: Recovery === *)
     "recovery", [
       Alcotest.test_case "reinit existing room" `Quick test_reinit_existing_room;
       Alcotest.test_case "operations preserve state" `Quick test_operations_preserve_state;
-      Alcotest.test_case "leave clears locks" `Quick test_leave_clears_agent_locks;
     ];
 
     (* === Event Log Tests === *)
@@ -1244,7 +1110,6 @@ let () =
     "validation", [
       Alcotest.test_case "empty agent name" `Quick test_empty_agent_name_claim;
       Alcotest.test_case "empty task id" `Quick test_empty_task_id_claim;
-      Alcotest.test_case "empty file path" `Quick test_empty_file_path_lock;
       Alcotest.test_case "very long agent name" `Quick test_very_long_agent_name;
     ];
 
@@ -1272,7 +1137,6 @@ let () =
     "stress", [
       Alcotest.test_case "many tasks" `Quick test_many_tasks;
       Alcotest.test_case "many agents" `Quick test_many_agents;
-      Alcotest.test_case "many locks" `Quick test_many_locks;
     ];
 
     (* === Portal Extended Tests === *)

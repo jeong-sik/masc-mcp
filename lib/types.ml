@@ -418,14 +418,6 @@ let backlog_of_yojson json =
     Ok { tasks; last_updated; version }
   with e -> Error (Printexc.to_string e)
 
-(** File lock info *)
-type file_lock = {
-  file_path: string; [@key "file"]
-  locked_by: string;
-  locked_at: string;
-  expires_at: float;  (* epoch time for timezone-safe comparison *)
-} [@@deriving yojson { strict = false }, show]
-
 (** A2A Task status - enforced at compile time *)
 type a2a_task_status =
   | A2APending
@@ -593,7 +585,6 @@ type rate_limit_config = {
   (* Tool category limits *)
   broadcast_per_minute: int;
   task_ops_per_minute: int;
-  file_lock_per_minute: int;
 } [@@deriving show]
 
 let default_rate_limit = {
@@ -605,7 +596,6 @@ let default_rate_limit = {
   admin_multiplier = 2.0;    (* Admins get 200% *)
   broadcast_per_minute = 15;
   task_ops_per_minute = 30;
-  file_lock_per_minute = 20;
 }
 
 let rate_limit_config_to_yojson c =
@@ -618,7 +608,6 @@ let rate_limit_config_to_yojson c =
     ("admin_multiplier", `Float c.admin_multiplier);
     ("broadcast_per_minute", `Int c.broadcast_per_minute);
     ("task_ops_per_minute", `Int c.task_ops_per_minute);
-    ("file_lock_per_minute", `Int c.file_lock_per_minute);
   ]
 
 let rate_limit_config_of_yojson json =
@@ -632,9 +621,8 @@ let rate_limit_config_of_yojson json =
     let admin_multiplier = json |> member "admin_multiplier" |> to_float_option |> Option.value ~default:2.0 in
     let broadcast_per_minute = json |> member "broadcast_per_minute" |> to_int_option |> Option.value ~default:15 in
     let task_ops_per_minute = json |> member "task_ops_per_minute" |> to_int_option |> Option.value ~default:30 in
-    let file_lock_per_minute = json |> member "file_lock_per_minute" |> to_int_option |> Option.value ~default:20 in
     Ok { per_minute; burst_allowed; priority_agents; reader_multiplier; worker_multiplier; admin_multiplier;
-         broadcast_per_minute; task_ops_per_minute; file_lock_per_minute }
+         broadcast_per_minute; task_ops_per_minute }
   with e -> Error (Printexc.to_string e)
 
 (** Rate limit categories *)
@@ -642,7 +630,6 @@ type rate_limit_category =
   | GeneralLimit
   | BroadcastLimit
   | TaskOpsLimit
-  | FileLockLimit
 [@@deriving show { with_path = false }]
 
 (** Get base limit for category *)
@@ -650,14 +637,12 @@ let limit_for_category config = function
   | GeneralLimit -> config.per_minute
   | BroadcastLimit -> config.broadcast_per_minute
   | TaskOpsLimit -> config.task_ops_per_minute
-  | FileLockLimit -> config.file_lock_per_minute
 
 (** Map tool to rate limit category *)
 let category_for_tool = function
   | "masc_broadcast" | "masc_listen" -> BroadcastLimit
   | "masc_add_task" | "masc_claim" | "masc_claim_next" | "masc_done"
   | "masc_update_priority" -> TaskOpsLimit
-  | "masc_lock" | "masc_unlock" -> FileLockLimit
   | _ -> GeneralLimit
 
 (** Rate limit error - returned when limit exceeded *)

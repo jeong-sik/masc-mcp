@@ -22,7 +22,6 @@ type rate_tracker = {
   mutable general_timestamps: float list;
   mutable broadcast_timestamps: float list;
   mutable task_ops_timestamps: float list;
-  mutable file_lock_timestamps: float list;
   mutable burst_used: int;
   mutable last_burst_reset: float;
 }

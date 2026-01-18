@@ -291,12 +291,10 @@ let default_config_eio ~sw ~env base_path =
 let masc_dir config = Filename.concat config.base_path ".masc"
 let agents_dir config = Filename.concat (masc_dir config) "agents"
 let tasks_dir config = Filename.concat (masc_dir config) "tasks"
-let locks_dir config = Filename.concat (masc_dir config) "locks"
 let messages_dir config = Filename.concat (masc_dir config) "messages"
 let state_path config = Filename.concat (masc_dir config) "state.json"
 let backlog_path config = Filename.concat (tasks_dir config) "backlog.json"
 let archive_path config = Filename.concat (masc_dir config) "tasks-archive.json"
-let locks_summary_path config = Filename.concat (masc_dir config) "locks.json"
 
 (* ============================================ *)
 (* Backend dispatch functions                   *)

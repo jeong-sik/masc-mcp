@@ -43,7 +43,7 @@ masc_done(agent_name: "claude", task_id: "task-001")
 
 When multiple AI agents work on the same project, they need:
 - **Task coordination** - Who's working on what?
-- **File locking** - Prevent simultaneous edits
+- **Isolation** - Prevent simultaneous edits (via Git worktree)
 - **Communication** - Share progress and findings
 - **Human oversight** - Approve dangerous operations
 
@@ -54,8 +54,7 @@ MASC provides all of this through the [Model Context Protocol](https://modelcont
 | Feature | Description |
 |---------|-------------|
 | **Task Board** | Claim tasks, track progress, priority queue |
-| **Worktree Isolation** | Each agent gets isolated git worktree (recommended) |
-| **File Locking** | For shared configs, migrations, deploy scripts (optional fallback) |
+| **Worktree Isolation** | Each agent gets isolated git worktree |
 | **Broadcast** | @mention agents, real-time SSE notifications |
 | **Portal (A2A)** | Direct agent-to-agent communication |
 | **Human-in-the-loop** | Interrupt pattern for dangerous operations |
@@ -472,7 +471,6 @@ masc_reject(task_id: "cleanup-job", reason: "Backup first")
 |-----------|---------------|--------|
 | `masc_status` | 33ms | 🟢 |
 | `masc_broadcast` | 33ms | 🟢 |
-| `masc_lock/unlock` | 30ms | 🟢 |
 | `masc_a2a_discover` | 29ms | 🟢 |
 
 > 📊 자세한 내용: [examples/BEST-PRACTICES.md](examples/BEST-PRACTICES.md)
@@ -490,7 +488,6 @@ masc_reject(task_id: "cleanup-job", reason: "Backup first")
 | `masc_claim` / `masc_done` | Task workflow |
 | `masc_claim_next` | Auto-claim highest priority |
 | `masc_broadcast` | Send message |
-| `masc_lock` / `masc_unlock` | File locking |
 | `masc_portal_*` | Direct A2A communication |
 | `masc_worktree_*` | Git worktree management |
 

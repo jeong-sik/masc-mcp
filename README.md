@@ -122,7 +122,7 @@ See [docs/MODE-SYSTEM.md](docs/MODE-SYSTEM.md) for detailed documentation.
 ### Installation
 
 ```bash
-git clone https://github.com/your-org/masc-mcp.git
+git clone https://github.com/jeong-sik/masc-mcp.git
 cd masc-mcp
 
 # Install dependencies

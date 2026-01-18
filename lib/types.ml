@@ -218,6 +218,32 @@ let task_status_of_yojson json =
     | s -> Error ("Unknown task status: " ^ s)
   with e -> Error (Printexc.to_string e)
 
+(** Worktree info - tracks which worktree is used for a task *)
+type worktree_info = {
+  branch: string;                              (* git branch name *)
+  path: string;                                (* worktree path relative to git root *)
+  git_root: string;                            (* absolute path to .git parent *)
+  repo_name: string;                           (* repository name (basename of git_root) *)
+} [@@deriving show]
+
+let worktree_info_to_yojson wt =
+  `Assoc [
+    ("branch", `String wt.branch);
+    ("path", `String wt.path);
+    ("git_root", `String wt.git_root);
+    ("repo_name", `String wt.repo_name);
+  ]
+
+let worktree_info_of_yojson json =
+  let open Yojson.Safe.Util in
+  try
+    let branch = json |> member "branch" |> to_string in
+    let path = json |> member "path" |> to_string in
+    let git_root = json |> member "git_root" |> to_string in
+    let repo_name = json |> member "repo_name" |> to_string in
+    Ok { branch; path; git_root; repo_name }
+  with e -> Error (Printexc.to_string e)
+
 (** Task definition *)
 type task = {
   id: string;
@@ -227,6 +253,7 @@ type task = {
   priority: int; [@default 3]
   files: string list; [@default []]
   created_at: string;
+  worktree: worktree_info option; [@default None]  (* linked worktree info *)
 } [@@deriving show]
 
 (* Manual yojson for task *)
@@ -240,10 +267,15 @@ let task_to_yojson t =
     ("files", `List (List.map (fun s -> `String s) t.files));
     ("created_at", `String t.created_at);
   ] in
+  (* Add worktree field if present *)
+  let with_worktree = match t.worktree with
+    | None -> base
+    | Some wt -> base @ [("worktree", worktree_info_to_yojson wt)]
+  in
   (* Merge status fields into task *)
   match status_json with
-  | `Assoc status_fields -> `Assoc (base @ status_fields)
-  | _ -> `Assoc base
+  | `Assoc status_fields -> `Assoc (with_worktree @ status_fields)
+  | _ -> `Assoc with_worktree
 
 let task_of_yojson json =
   let open Yojson.Safe.Util in
@@ -254,8 +286,16 @@ let task_of_yojson json =
     let priority = json |> member "priority" |> to_int_option |> Option.value ~default:3 in
     let files = json |> member "files" |> to_list |> List.map to_string in
     let created_at = json |> member "created_at" |> to_string in
+    (* Parse optional worktree field *)
+    let worktree = match json |> member "worktree" with
+      | `Null -> None
+      | wt_json ->
+          match worktree_info_of_yojson wt_json with
+          | Ok wt -> Some wt
+          | Error _ -> None  (* Graceful fallback for backwards compat *)
+    in
     match task_status_of_yojson json with
-    | Ok task_status -> Ok { id; title; description; task_status; priority; files; created_at }
+    | Ok task_status -> Ok { id; title; description; task_status; priority; files; created_at; worktree }
     | Error e -> Error e
   with e -> Error (Printexc.to_string e)
 

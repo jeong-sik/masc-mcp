@@ -588,6 +588,7 @@ let add_task config ~title ~priority ~description =
     priority;
     files = [];
     created_at = now_iso ();
+    worktree = None;  (* Linked when worktree is created *)
   } in
 
   let new_backlog = {

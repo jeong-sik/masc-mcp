@@ -78,6 +78,12 @@
  (modules test_backend_eio)
  (libraries masc_mcp alcotest eio eio_main fmt yojson))
 
+; Session locking test (Eio concurrency)
+(test
+ (name test_session_locking)
+ (modules test_session_locking)
+ (libraries masc_mcp alcotest eio eio_main yojson))
+
 ; Room_eio test (Eio-native room operations)
 (test
  (name test_room_eio)

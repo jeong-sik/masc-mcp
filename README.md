@@ -238,7 +238,7 @@ curl http://127.0.0.1:8935/health
 
 #### PostgreSQL (Recommended for Eio Server)
 
-Enable PostgreSQL for stable, non-blocking distributed coordination. **Recommended for Eio-native server** (`masc-mcp-eio`) as it uses caqti-eio for true async database access.
+Enable PostgreSQL for stable, non-blocking distributed coordination. **Recommended for Eio-native server** (`masc-mcp`) as it uses caqti-eio for true async database access.
 
 ```bash
 # Environment variables
@@ -258,7 +258,7 @@ export MASC_POSTGRES_URL="$RAILWAY_PG_URL"  # or set directly
 
 # Verify PostgreSQL connection
 curl http://127.0.0.1:8935/health
-# {"status":"ok","server":"masc-mcp-eio","backend":"postgres",...}
+# {"status":"ok","server":"masc-mcp","backend":"postgres",...}
 ```
 
 **Required Table** (auto-created or manual):

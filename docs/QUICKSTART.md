@@ -157,7 +157,7 @@ const response = await masc_portal_status({ target: "gemini" })
 해결: PostgreSQL 모드로 전환
 
 export MASC_STORAGE_TYPE=postgres
-./start-masc-mcp.sh  # Eio 서버 기본 사용
+./start-masc-mcp.sh  # Eio 기본 런타임 (Lwt는 deprecated)
 ```
 
 ### 연결 거부

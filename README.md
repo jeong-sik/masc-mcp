@@ -14,7 +14,7 @@ A native OCaml implementation for coordinating multiple AI agents (Claude, Gemin
 ## 5-Minute Quick Start
 
 ```bash
-# 1. Start server (Eio default, auto-builds if needed)
+# 1. Start server (Eio default; Lwt deprecated, auto-builds if needed)
 ./start-masc-mcp.sh --http --port 8935
 
 # 2. Verify it's running
@@ -167,12 +167,13 @@ MASC uses a **Room** concept to coordinate agents. A Room is defined by its base
 | Mode | Room Determined By | Use Case |
 |------|-------------------|----------|
 | **FS (Local)** | `--path`/`--base-path`, `$MASC_BASE_PATH`, or `$ME_ROOT` (fallback: cwd) | Single machine |
-| **Redis (Distributed)** | `MASC_CLUSTER_NAME` + Redis URL | Multi-machine (Lwt server) |
-| **PostgreSQL (Distributed)** | `MASC_CLUSTER_NAME` + Postgres URL | Multi-machine (Eio server, recommended) |
+| **Redis (Distributed)** | `MASC_CLUSTER_NAME` + Redis URL | Multi-machine (Eio default) |
+| **PostgreSQL (Distributed)** | `MASC_CLUSTER_NAME` + Postgres URL | Multi-machine (default runtime, recommended) |
 
 Notes:
 - If the base path is inside a git worktree, MASC resolves it to the main repo root so all worktrees share one `.masc`.
 - Effective room directory is `<resolved-base>/.masc`.
+- Runtime defaults to Eio; Lwt is deprecated and disabled.
 
 ```bash
 # FS Mode: agents on same machine share ~/me/.masc/
@@ -240,9 +241,9 @@ curl http://127.0.0.1:8935/health
 - Cross-machine task coordination
 - Automatic key namespacing (`masc:*`)
 
-#### PostgreSQL (Recommended for Eio Server)
+#### PostgreSQL (Recommended)
 
-Enable PostgreSQL for stable, non-blocking distributed coordination. **Recommended for Eio-native server** (`masc-mcp`) as it uses caqti-eio for true async database access.
+Enable PostgreSQL for stable, non-blocking distributed coordination. Recommended for the default runtime (`masc-mcp`) as it uses caqti-eio for true async database access.
 
 ```bash
 # Environment variables
@@ -257,7 +258,7 @@ export MASC_POSTGRES_URL="postgres://[user:password@]host:port/database"
 export MASC_STORAGE_TYPE=postgres
 export MASC_POSTGRES_URL="$RAILWAY_PG_URL"  # or set directly
 
-# Start Eio server (recommended for PostgreSQL)
+# Start server (default runtime)
 ./start-masc-mcp.sh --http --port 8935
 
 # Verify PostgreSQL connection
@@ -277,8 +278,8 @@ CREATE TABLE IF NOT EXISTS masc_kv (
 CREATE INDEX IF NOT EXISTS idx_masc_kv_expires ON masc_kv(expires_at);
 ```
 
-**Why PostgreSQL over Redis for Eio?**:
-| Feature | Redis (Lwt) | PostgreSQL (Eio) |
+**Why PostgreSQL over Redis?**:
+| Feature | Redis (legacy Lwt) | PostgreSQL (Eio) |
 |---------|-------------|------------------|
 | Async Model | Lwt monadic | Eio direct-style |
 | Blocking Risk | Possible (Lwt_eio bridge) | None (native caqti-eio) |

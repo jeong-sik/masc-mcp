@@ -481,10 +481,7 @@ let send_raw info data =
     try
       Eio.Mutex.use_rw ~protect:true info.mutex (fun () ->
         Httpun.Body.Writer.write_string info.writer data;
-        Httpun.Body.Writer.flush info.writer (function
-          | `Closed -> ()
-          | `Written -> ()
-        )
+        Httpun.Body.Writer.flush info.writer (fun () -> ())
       );
       true
     with exn ->

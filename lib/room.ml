@@ -383,6 +383,43 @@ let reset config =
     Printf.sprintf "🗑️ MASC room reset! (.masc/ deleted at %s)" config.base_path
   end
 
+(* ============================================ *)
+(* Zombie Detection (moved up for status use)  *)
+(* ============================================ *)
+
+(** Default heartbeat timeout in seconds (5 minutes) *)
+let heartbeat_timeout_seconds = 300.0
+
+(** Parse ISO timestamp to Unix time - returns None if parsing fails *)
+let parse_iso_time_opt iso_str =
+  try
+    (* Format: YYYY-MM-DDTHH:MM:SSZ *)
+    Scanf.sscanf iso_str "%04d-%02d-%02dT%02d:%02d:%02dZ"
+      (fun year mon day hour min sec ->
+        let tm = {
+          Unix.tm_sec = sec; tm_min = min; tm_hour = hour;
+          tm_mday = day; tm_mon = mon - 1; tm_year = year - 1900;
+          tm_wday = 0; tm_yday = 0; tm_isdst = false;
+        } in
+        let local_time, _ = Unix.mktime tm in
+        let utc_tm = Unix.gmtime local_time in
+        let utc_time, _ = Unix.mktime utc_tm in
+        let offset = local_time -. utc_time in
+        Some (local_time +. offset))
+  with _ -> None
+
+(** Parse ISO timestamp - returns current time if parsing fails (safe default) *)
+let parse_iso_time iso_str =
+  match parse_iso_time_opt iso_str with
+  | Some t -> t
+  | None -> Unix.gettimeofday ()
+
+(** Check if agent is zombie (no heartbeat for timeout period) *)
+let is_zombie_agent last_seen_iso =
+  let last_seen = parse_iso_time last_seen_iso in
+  let now = Unix.gettimeofday () in
+  (now -. last_seen) > heartbeat_timeout_seconds
+
 (** Get room status *)
 let status config =
   ensure_initialized config;
@@ -419,13 +456,18 @@ let status config =
         let json = read_json config path in
         match agent_of_yojson json with
         | Ok agent ->
-            let icon = match agent.status with
-              | Busy -> "🔴"
-              | Active -> "🟢"
-              | Listening -> "🎧"
-              | Inactive -> "⚫"
+            (* Check zombie status first - overrides normal status *)
+            let is_zombie = is_zombie_agent agent.last_seen in
+            let icon = if is_zombie then "💀"
+              else match agent.status with
+                | Busy -> "🔴"
+                | Active -> "🟢"
+                | Listening -> "🎧"
+                | Inactive -> "⚫"
             in
-            let task = Option.value agent.current_task ~default:"idle" in
+            let task = if is_zombie then "zombie"
+              else Option.value agent.current_task ~default:"idle"
+            in
             Buffer.add_string buf (Printf.sprintf "  %s %s → %s\n" icon agent.name task)
         | Error _ -> ()
     )
@@ -1234,8 +1276,8 @@ include Room_worktree
 (* Heartbeat & Zombie Agent Cleanup             *)
 (* ============================================ *)
 
-(** Default heartbeat timeout in seconds (5 minutes) *)
-let heartbeat_timeout_seconds = 300.0
+(* Note: heartbeat_timeout_seconds, parse_iso_time_opt, parse_iso_time,
+   and is_zombie_agent are defined earlier in the file for use in status *)
 
 (** Update agent heartbeat - must be called periodically *)
 let heartbeat config ~agent_name =
@@ -1257,38 +1299,6 @@ let heartbeat config ~agent_name =
     )
   end else
     Printf.sprintf "⚠ Agent %s not found" agent_name
-
-(** Parse ISO timestamp to Unix time - returns None if parsing fails *)
-let parse_iso_time_opt iso_str =
-  try
-    (* Format: YYYY-MM-DDTHH:MM:SSZ *)
-    Scanf.sscanf iso_str "%04d-%02d-%02dT%02d:%02d:%02dZ"
-      (fun year mon day hour min sec ->
-        let tm = {
-          Unix.tm_sec = sec; tm_min = min; tm_hour = hour;
-          tm_mday = day; tm_mon = mon - 1; tm_year = year - 1900;
-          tm_wday = 0; tm_yday = 0; tm_isdst = false;
-        } in
-        (* mktime returns local time; convert to UTC by applying local offset. *)
-        let local_time, _ = Unix.mktime tm in
-        let utc_tm = Unix.gmtime local_time in
-        let utc_time, _ = Unix.mktime utc_tm in
-        (* offset = local_time - utc_time (positive if east of UTC) *)
-        let offset = local_time -. utc_time in
-        Some (local_time +. offset))
-  with _ -> None
-
-(** Parse ISO timestamp - returns current time if parsing fails (safe default) *)
-let parse_iso_time iso_str =
-  match parse_iso_time_opt iso_str with
-  | Some t -> t
-  | None -> Unix.gettimeofday ()  (* Safe: treats unparseable as "just now" *)
-
-(** Check if agent is zombie (no heartbeat for timeout period) *)
-let is_zombie_agent last_seen_iso =
-  let last_seen = parse_iso_time last_seen_iso in
-  let now = Unix.gettimeofday () in
-  (now -. last_seen) > heartbeat_timeout_seconds
 
 (** Cleanup zombie agents - removes stale agents *)
 let cleanup_zombies config =

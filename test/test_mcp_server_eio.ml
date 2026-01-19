@@ -121,7 +121,6 @@ let test_make_error () =
 let test_handle_request_initialize () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
-  Lwt_eio.with_event_loop ~clock @@ fun _ ->
   Eio.Switch.run @@ fun sw ->
 
   let base_path = temp_dir () in
@@ -160,7 +159,6 @@ let test_handle_request_initialize () =
 let test_handle_request_tools_list () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
-  Lwt_eio.with_event_loop ~clock @@ fun _ ->
   Eio.Switch.run @@ fun sw ->
 
   let base_path = temp_dir () in
@@ -190,7 +188,6 @@ let test_handle_request_tools_list () =
 let test_handle_request_invalid_json () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
-  Lwt_eio.with_event_loop ~clock @@ fun _ ->
   Eio.Switch.run @@ fun sw ->
 
   let base_path = temp_dir () in
@@ -208,7 +205,6 @@ let test_handle_request_invalid_json () =
 let test_handle_request_method_not_found () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
-  Lwt_eio.with_event_loop ~clock @@ fun _ ->
   Eio.Switch.run @@ fun sw ->
 
   let base_path = temp_dir () in

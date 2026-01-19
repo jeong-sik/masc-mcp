@@ -2,7 +2,7 @@
 
     This module provides an Eio-native wrapper around SCTP with:
     - Eio.Mutex for thread-safe state access
-    - Direct-style async (no Lwt monads)
+    - Direct-style async
     - Stream multiplexing support
 
     The underlying SCTP logic is reused from sctp.ml, but all mutable

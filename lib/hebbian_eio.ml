@@ -2,7 +2,7 @@
 
     "Agents that fire together, wire together"
 
-    Pure synchronous operations - no Lwt dependency.
+    Pure synchronous operations (direct-style).
     Compatible with Eio direct-style concurrency.
 
     Tracks successful collaboration patterns:

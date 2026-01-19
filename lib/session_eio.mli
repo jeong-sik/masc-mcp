@@ -39,7 +39,7 @@ val get_config : registry -> rate_limit_config
 
 (** {1 Session Operations - Eio Native} *)
 
-(** Register a new session (direct-style, no Lwt.t) *)
+(** Register a new session (direct-style) *)
 val register : registry -> agent_name:string -> session
 
 (** Unregister session *)

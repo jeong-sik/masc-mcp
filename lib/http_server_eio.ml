@@ -1,7 +1,7 @@
 (** Http_server_eio - Eio-native HTTP server using httpun-eio
 
-    Conflict-free with websocket-lwt-unix (no cohttp 6.x dependency).
-    Phase 2 of Lwt → Eio migration.
+    Conflict-free with httpun-ws-eio (no cohttp 6.x dependency).
+    Phase 2 of Eio migration.
 
     @see <https://github.com/anmonteiro/httpun> httpun documentation
 *)

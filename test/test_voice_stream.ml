@@ -34,50 +34,6 @@ let test_create_custom_port () =
 let test_max_pending_sends () =
   check int "max_pending_sends is 100" 100 max_pending_sends
 
-(** {1 Client ID Generation Tests} *)
-
-let test_generate_client_id_format () =
-  let id = generate_client_id () in
-  check bool "starts with ws-" true (String.sub id 0 3 = "ws-");
-  check bool "length > 20" true (String.length id > 20)
-
-let test_generate_client_id_unique () =
-  let ids = List.init 100 (fun _ -> generate_client_id ()) in
-  let unique_ids = List.sort_uniq String.compare ids in
-  check int "all unique" 100 (List.length unique_ids)
-
-(** {1 Message Parsing Tests} *)
-
-let test_parse_subscribe () =
-  let msg = parse_client_message {|{"type": "subscribe", "agent_id": "claude"}|} in
-  match msg with
-  | Subscribe agent_id -> check string "agent_id" "claude" agent_id
-  | _ -> fail "expected Subscribe"
-
-let test_parse_unsubscribe () =
-  let msg = parse_client_message {|{"type": "unsubscribe"}|} in
-  match msg with
-  | Unsubscribe -> ()
-  | _ -> fail "expected Unsubscribe"
-
-let test_parse_unknown_type () =
-  let msg = parse_client_message {|{"type": "unknown"}|} in
-  match msg with
-  | Unknown _ -> ()
-  | _ -> fail "expected Unknown"
-
-let test_parse_invalid_json () =
-  let msg = parse_client_message "not json" in
-  match msg with
-  | Unknown _ -> ()
-  | _ -> fail "expected Unknown"
-
-let test_parse_empty_string () =
-  let msg = parse_client_message "" in
-  match msg with
-  | Unknown _ -> ()
-  | _ -> fail "expected Unknown"
-
 (** {1 Client Type Tests} *)
 
 let test_client_mutable_agent_filter () =
@@ -138,10 +94,10 @@ let test_server_event_client_error () =
 
 let test_status_json_empty () =
   let stream = create ~port:8937 () in
-  let json = status_json stream in
+  let json = Yojson.Safe.from_string (get_status_json stream) in
   let open Yojson.Safe.Util in
   check int "port" 8937 (json |> member "port" |> to_int);
-  check bool "not running" false (json |> member "is_running" |> to_bool);
+  check bool "not running" false (json |> member "running" |> to_bool);
   check int "no clients" 0 (json |> member "client_count" |> to_int);
   check int "max_pending" 100 (json |> member "max_pending_sends" |> to_int);
   check int "empty clients list" 0 (json |> member "clients" |> to_list |> List.length)
@@ -162,19 +118,6 @@ let creation_tests = [
   "create_default_port", `Quick, test_create_default_port;
   "create_custom_port", `Quick, test_create_custom_port;
   "max_pending_sends", `Quick, test_max_pending_sends;
-]
-
-let client_id_tests = [
-  "generate_client_id_format", `Quick, test_generate_client_id_format;
-  "generate_client_id_unique", `Quick, test_generate_client_id_unique;
-]
-
-let message_parsing_tests = [
-  "parse_subscribe", `Quick, test_parse_subscribe;
-  "parse_unsubscribe", `Quick, test_parse_unsubscribe;
-  "parse_unknown_type", `Quick, test_parse_unknown_type;
-  "parse_invalid_json", `Quick, test_parse_invalid_json;
-  "parse_empty_string", `Quick, test_parse_empty_string;
 ]
 
 let client_type_tests = [
@@ -201,8 +144,6 @@ let callback_tests = [
 let () =
   Alcotest.run "Voice Stream" [
     ("creation", creation_tests);
-    ("client_id", client_id_tests);
-    ("message_parsing", message_parsing_tests);
     ("client_type", client_type_tests);
     ("server_event", server_event_tests);
     ("status", status_tests);

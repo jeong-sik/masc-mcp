@@ -152,13 +152,17 @@ module Rest = struct
     | "masc_tasks" -> (GET, "/api/v1/tasks")
     | "masc_add_task" -> (POST, "/api/v1/tasks")
     | "masc_claim" -> (POST, "/api/v1/tasks/{task_id}/claim")
+    | "masc_transition" -> (POST, "/api/v1/tasks/{task_id}/transition")
     | "masc_done" -> (POST, "/api/v1/tasks/{task_id}/done")
+    | "masc_release" -> (POST, "/api/v1/tasks/{task_id}/release")
     | "masc_cancel_task" -> (POST, "/api/v1/tasks/{task_id}/cancel")
+    | "masc_task_history" -> (GET, "/api/v1/tasks/{task_id}/history")
     (* Agent operations *)
     | "masc_join" -> (POST, "/api/v1/agents")
     | "masc_leave" -> (DELETE, "/api/v1/agents/{agent_name}")
     | "masc_who" -> (GET, "/api/v1/agents")
     | "masc_agents" -> (GET, "/api/v1/agents/detailed")
+    | "masc_agent_update" -> (PATCH, "/api/v1/agents/{agent_name}")
     (* Messaging *)
     | "masc_broadcast" -> (POST, "/api/v1/messages")
     | "masc_messages" -> (GET, "/api/v1/messages")
@@ -208,7 +212,8 @@ module Rest = struct
   let generate_openapi_paths () : Yojson.Safe.t =
     let tools = [
       "masc_status"; "masc_tasks"; "masc_add_task"; "masc_claim"; "masc_done";
-      "masc_cancel_task"; "masc_join"; "masc_leave"; "masc_who"; "masc_agents";
+      "masc_transition"; "masc_release"; "masc_task_history"; "masc_cancel_task";
+      "masc_join"; "masc_leave"; "masc_who"; "masc_agents"; "masc_agent_update";
       "masc_broadcast"; "masc_messages"; "masc_lock"; "masc_unlock";
       "masc_vote_create"; "masc_vote_cast"; "masc_vote_status"; "masc_votes";
       "masc_plan_init"; "masc_plan_update"; "masc_note_add"; "masc_deliver"; "masc_plan_get";

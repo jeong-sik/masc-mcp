@@ -134,12 +134,12 @@ let calculate_adaptive_tempo (tasks : Types.task list) : float * string =
        Printf.sprintf "slow - %d low priority task(s)" (List.length tasks))
 
 (** Adjust tempo adaptively based on current tasks *)
-let adjust_tempo (config : Room_utils.config) : tempo_state Lwt.t =
+let adjust_tempo (config : Room_utils.config) : tempo_state =
   let tasks = Room.get_tasks_raw config in
   let pending = List.filter is_pending_task tasks in
   let (interval, reason) = calculate_adaptive_tempo pending in
   let state = set_tempo config ~interval_s:interval ~reason in
-  Lwt.return state
+  state
 
 (** Format tempo state for display *)
 let format_state (state : tempo_state) : string =

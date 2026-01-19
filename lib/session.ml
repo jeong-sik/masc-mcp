@@ -36,7 +36,7 @@ type registry = {
   mutable sessions: (string, session) Hashtbl.t;
   mutable rate_trackers: (string, rate_tracker) Hashtbl.t;
   config: rate_limit_config;
-  mutable lock: Lwt_mutex.t;
+  lock: Eio.Mutex.t;
 }
 
 (** Create new registry *)
@@ -44,46 +44,50 @@ let create ?(config = default_rate_limit) () = {
   sessions = Hashtbl.create 16;
   rate_trackers = Hashtbl.create 16;
   config;
-  lock = Lwt_mutex.create ();
+  lock = Eio.Mutex.create ();
 }
+
+(** Run a critical section with mutex protection. *)
+let with_lock registry f =
+  Eio.Mutex.lock registry.lock;
+  Fun.protect ~finally:(fun () -> Eio.Mutex.unlock registry.lock) f
 
 (** Register a new session *)
 let register registry ~agent_name =
-  let open Lwt.Syntax in
-  let* () = Lwt_mutex.lock registry.lock in
-  let now = Unix.gettimeofday () in
-  let session = {
-    agent_name;
-    connected_at = now;
-    last_activity = now;
-    is_listening = false;
-    message_queue = [];
-  } in
-  Hashtbl.replace registry.sessions agent_name session;
-  Log.Session.info "Session registered: %s (total: %d)"
-    agent_name (Hashtbl.length registry.sessions);
-  Lwt_mutex.unlock registry.lock;
-  Lwt.return session
+  with_lock registry (fun () ->
+    let now = Unix.gettimeofday () in
+    let session = {
+      agent_name;
+      connected_at = now;
+      last_activity = now;
+      is_listening = false;
+      message_queue = [];
+    } in
+    Hashtbl.replace registry.sessions agent_name session;
+    Log.Session.info "Session registered: %s (total: %d)"
+      agent_name (Hashtbl.length registry.sessions);
+    session
+  )
 
 (** Unregister session *)
 let unregister registry ~agent_name =
-  let open Lwt.Syntax in
-  let* () = Lwt_mutex.lock registry.lock in
-  Hashtbl.remove registry.sessions agent_name;
-  Log.Session.info "Session unregistered: %s (total: %d)"
-    agent_name (Hashtbl.length registry.sessions);
-  Lwt_mutex.unlock registry.lock;
-  Lwt.return_unit
+  with_lock registry (fun () ->
+    Hashtbl.remove registry.sessions agent_name;
+    Log.Session.info "Session unregistered: %s (total: %d)"
+      agent_name (Hashtbl.length registry.sessions)
+  )
 
 (** Update activity timestamp *)
 let update_activity registry ~agent_name ?(is_listening = None) () =
-  match Hashtbl.find_opt registry.sessions agent_name with
-  | Some session ->
-      session.last_activity <- Unix.gettimeofday ();
-      (match is_listening with
-       | Some v -> session.is_listening <- v
-       | None -> ())
-  | None -> ()
+  with_lock registry (fun () ->
+    match Hashtbl.find_opt registry.sessions agent_name with
+    | Some session ->
+        session.last_activity <- Unix.gettimeofday ();
+        (match is_listening with
+         | Some v -> session.is_listening <- v
+         | None -> ())
+    | None -> ()
+  )
 
 (** Create empty rate tracker *)
 let create_tracker () = {
@@ -125,57 +129,59 @@ let set_timestamps tracker category ts =
 
 (** Enhanced rate limit check with category and role *)
 let check_rate_limit_ex registry ~agent_name ~category ~role =
-  let now = Unix.gettimeofday () in
-  let one_minute_ago = now -. 60.0 in
+  with_lock registry (fun () ->
+    let now = Unix.gettimeofday () in
+    let one_minute_ago = now -. 60.0 in
 
-  (* Get or create tracker *)
-  let tracker =
-    match Hashtbl.find_opt registry.rate_trackers agent_name with
-    | Some t -> t
-    | None ->
-        let t = create_tracker () in
-        Hashtbl.replace registry.rate_trackers agent_name t;
-        t
-  in
+    (* Get or create tracker *)
+    let tracker =
+      match Hashtbl.find_opt registry.rate_trackers agent_name with
+      | Some t -> t
+      | None ->
+          let t = create_tracker () in
+          Hashtbl.replace registry.rate_trackers agent_name t;
+          t
+    in
 
-  (* Reset burst if a minute has passed - atomic compare-and-set *)
-  let last_reset = get_last_burst_reset tracker in
-  if now -. last_reset > 60.0 then begin
-    set_burst_used tracker 0;
-    set_last_burst_reset tracker now
-  end;
+    (* Reset burst if a minute has passed - atomic compare-and-set *)
+    let last_reset = get_last_burst_reset tracker in
+    if now -. last_reset > 60.0 then begin
+      set_burst_used tracker 0;
+      set_last_burst_reset tracker now
+    end;
 
-  (* Filter to last minute only *)
-  let timestamps = get_timestamps tracker category in
-  let recent = List.filter (fun t -> t > one_minute_ago) timestamps in
-  set_timestamps tracker category recent;
+    (* Filter to last minute only *)
+    let timestamps = get_timestamps tracker category in
+    let recent = List.filter (fun t -> t > one_minute_ago) timestamps in
+    set_timestamps tracker category recent;
 
-  (* Compute effective limit based on role *)
-  let base_limit = effective_limit registry.config ~role ~category in
-  let limit =
-    if List.mem agent_name registry.config.priority_agents
-    then int_of_float (float_of_int base_limit *. 1.5)
-    else base_limit
-  in
+    (* Compute effective limit based on role *)
+    let base_limit = effective_limit registry.config ~role ~category in
+    let limit =
+      if List.mem agent_name registry.config.priority_agents
+      then int_of_float (float_of_int base_limit *. 1.5)
+      else base_limit
+    in
 
-  let current = List.length recent in
+    let current = List.length recent in
 
-  if current >= limit then begin
-    (* Check if burst is available - using atomic read/increment *)
-    let burst = get_burst_used tracker in
-    if burst < registry.config.burst_allowed then begin
-      incr_burst_used tracker;  (* Atomic increment *)
-      set_timestamps tracker category (now :: recent);
-      (true, 0)  (* Burst allowed *)
+    if current >= limit then begin
+      (* Check if burst is available - using atomic read/increment *)
+      let burst = get_burst_used tracker in
+      if burst < registry.config.burst_allowed then begin
+        incr_burst_used tracker;  (* Atomic increment *)
+        set_timestamps tracker category (now :: recent);
+        (true, 0)  (* Burst allowed *)
+      end else begin
+        let oldest = List.fold_left min now recent in
+        let wait = int_of_float (oldest +. 60.0 -. now) in
+        (false, max 1 wait)
+      end
     end else begin
-      let oldest = List.fold_left min now recent in
-      let wait = int_of_float (oldest +. 60.0 -. now) in
-      (false, max 1 wait)
+      set_timestamps tracker category (now :: recent);
+      (true, 0)
     end
-  end else begin
-    set_timestamps tracker category (now :: recent);
-    (true, 0)
-  end
+  )
 
 (** Check rate limit - simple wrapper using defaults *)
 let check_rate_limit registry ~agent_name =
@@ -183,121 +189,119 @@ let check_rate_limit registry ~agent_name =
 
 (** Get rate limit status for an agent *)
 let get_rate_limit_status registry ~agent_name ~role =
-  let now = Unix.gettimeofday () in
-  let one_minute_ago = now -. 60.0 in
+  with_lock registry (fun () ->
+    let now = Unix.gettimeofday () in
+    let one_minute_ago = now -. 60.0 in
 
-  let tracker =
-    match Hashtbl.find_opt registry.rate_trackers agent_name with
-    | Some t -> t
-    | None -> create_tracker ()
-  in
+    let tracker =
+      match Hashtbl.find_opt registry.rate_trackers agent_name with
+      | Some t -> t
+      | None -> create_tracker ()
+    in
 
-  let status_for_category category =
-    let timestamps = get_timestamps tracker category in
-    let recent = List.filter (fun t -> t > one_minute_ago) timestamps in
-    let limit = effective_limit registry.config ~role ~category in
-    let current = List.length recent in
+    let status_for_category category =
+      let timestamps = get_timestamps tracker category in
+      let recent = List.filter (fun t -> t > one_minute_ago) timestamps in
+      let limit = effective_limit registry.config ~role ~category in
+      let current = List.length recent in
+      `Assoc [
+        ("category", `String (show_rate_limit_category category));
+        ("current", `Int current);
+        ("limit", `Int limit);
+        ("remaining", `Int (max 0 (limit - current)));
+      ]
+    in
+
+    let burst = get_burst_used tracker in  (* Atomic read *)
     `Assoc [
-      ("category", `String (show_rate_limit_category category));
-      ("current", `Int current);
-      ("limit", `Int limit);
-      ("remaining", `Int (max 0 (limit - current)));
+      ("agent", `String agent_name);
+      ("role", `String (agent_role_to_string role));
+      ("burst_remaining", `Int (registry.config.burst_allowed - burst));
+      ("categories", `List [
+        status_for_category GeneralLimit;
+        status_for_category BroadcastLimit;
+        status_for_category TaskOpsLimit;
+      ]);
     ]
-  in
-
-  let burst = get_burst_used tracker in  (* Atomic read *)
-  `Assoc [
-    ("agent", `String agent_name);
-    ("role", `String (agent_role_to_string role));
-    ("burst_remaining", `Int (registry.config.burst_allowed - burst));
-    ("categories", `List [
-      status_for_category GeneralLimit;
-      status_for_category BroadcastLimit;
-      status_for_category TaskOpsLimit;
-    ]);
-  ]
+  )
 
 (** Push message to session queue *)
 let push_message registry ~from_agent ~content ~mention =
-  let open Lwt.Syntax in
-  let* () = Lwt_mutex.lock registry.lock in
+  with_lock registry (fun () ->
+    let notification = `Assoc [
+      ("type", `String "masc/message");
+      ("from", `String from_agent);
+      ("content", `String content);
+      ("mention", match mention with Some m -> `String m | None -> `Null);
+      ("timestamp", `String (now_iso ()));
+    ] in
 
-  let notification = `Assoc [
-    ("type", `String "masc/message");
-    ("from", `String from_agent);
-    ("content", `String content);
-    ("mention", match mention with Some m -> `String m | None -> `Null);
-    ("timestamp", `String (now_iso ()));
-  ] in
-
-  let targets = ref [] in
-  Hashtbl.iter (fun name session ->
-    (* Don't send to self *)
-    if name <> from_agent then begin
-      (* Check mention filter *)
-      let should_send = match mention with
-        | None -> true  (* Broadcast *)
-        | Some m -> m = name  (* Direct mention *)
-      in
-      if should_send then begin
-        session.message_queue <- session.message_queue @ [notification];
-        targets := name :: !targets
+    let targets = ref [] in
+    Hashtbl.iter (fun name session ->
+      (* Don't send to self *)
+      if name <> from_agent then begin
+        (* Check mention filter *)
+        let should_send = match mention with
+          | None -> true  (* Broadcast *)
+          | Some m -> m = name  (* Direct mention *)
+        in
+        if should_send then begin
+          session.message_queue <- session.message_queue @ [notification];
+          targets := name :: !targets
+        end
       end
-    end
-  ) registry.sessions;
+    ) registry.sessions;
 
-  if !targets <> [] then
-    Log.Session.debug "Pushed to: %s" (String.concat ", " !targets);
+    if !targets <> [] then
+      Log.Session.debug "Pushed to: %s" (String.concat ", " !targets);
 
-  Lwt_mutex.unlock registry.lock;
-  Lwt.return !targets
+    !targets
+  )
 
 (** Pop message from queue (for listen) *)
 let pop_message registry ~agent_name =
-  match Hashtbl.find_opt registry.sessions agent_name with
-  | Some session ->
-      (match session.message_queue with
-       | msg :: rest ->
-           session.message_queue <- rest;
-           Some msg
-       | [] -> None)
-  | None -> None
+  with_lock registry (fun () ->
+    match Hashtbl.find_opt registry.sessions agent_name with
+    | Some session ->
+        (match session.message_queue with
+         | msg :: rest ->
+             session.message_queue <- rest;
+             Some msg
+         | [] -> None)
+    | None -> None
+  )
 
 (** Wait for message (blocking with timeout) *)
 let wait_for_message registry ~agent_name ~timeout =
-  let open Lwt.Syntax in
   let start_time = Unix.gettimeofday () in
   let check_interval = 2.0 in
 
   (* Ensure session exists *)
-  let* _ =
-    match Hashtbl.find_opt registry.sessions agent_name with
-    | Some _ -> Lwt.return_unit
-    | None -> register registry ~agent_name |> Lwt.map ignore
-  in
+  (match Hashtbl.find_opt registry.sessions agent_name with
+   | Some _ -> ()
+   | None -> ignore (register registry ~agent_name));
 
   update_activity registry ~agent_name ~is_listening:(Some true) ();
 
   let rec wait_loop () =
     let elapsed = Unix.gettimeofday () -. start_time in
     if elapsed >= timeout then
-      Lwt.return_none
+      None
     else begin
       match pop_message registry ~agent_name with
       | Some msg ->
-          update_activity registry ~agent_name ~is_listening:(Some false) ();
-          Lwt.return_some msg
+          Some msg
       | None ->
-          let* () = Lwt_unix.sleep check_interval in
+          Unix.sleepf check_interval;
           wait_loop ()
     end
   in
 
-  Lwt.catch
-    (fun () -> wait_loop ())
-    (fun _ ->
-      update_activity registry ~agent_name ~is_listening:(Some false) ();
-      Lwt.return_none)
+  let result =
+    try wait_loop () with _ -> None
+  in
+  update_activity registry ~agent_name ~is_listening:(Some false) ();
+  result
 
 (** Get inactive agents (idle > threshold seconds) *)
 let get_inactive_agents registry ~threshold =

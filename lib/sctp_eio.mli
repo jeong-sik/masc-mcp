@@ -2,7 +2,7 @@
 
     This module provides an Eio-native SCTP association with:
     - Eio.Mutex for thread-safe state access
-    - Direct-style async (no Lwt monads)
+    - Direct-style async
     - Stream multiplexing support
 
     Example usage:

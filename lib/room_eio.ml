@@ -1,6 +1,6 @@
 (** Room_eio: OCaml 5.x Eio-native Room implementation
 
-    Direct-style async I/O using Eio, no Lwt monads!
+    Direct-style async I/O using Eio.
 
     This module provides coordination primitives for multi-agent systems:
     - Agent registration/heartbeat

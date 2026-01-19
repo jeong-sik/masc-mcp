@@ -1,7 +1,5 @@
 (** Encryption Module - AES-256-GCM for MASC data protection *)
 
-open Lwt.Syntax
-
 (* GCM compatibility - see gcm_compat.ml for version handling *)
 module GCM = Gcm_compat
 
@@ -156,42 +154,43 @@ let is_encrypted_json json =
   with _ -> false
 
 (** Smart read: transparently decrypt if encrypted, pass through if plain *)
-let smart_read_json ~config ~adata path : (Yojson.Safe.t, encryption_error) result Lwt.t =
-  let* content = Lwt_io.with_file ~mode:Lwt_io.Input path
-    (fun ic -> Lwt_io.read ic) in
+let smart_read_json ~config ~adata path : (Yojson.Safe.t, encryption_error) result =
+  let content = In_channel.with_open_text path In_channel.input_all in
   let json = Yojson.Safe.from_string content in
   if is_encrypted_json json then
     match load_key config with
-    | Error e -> Lwt.return (Error e)
+    | Error e -> Error e
     | Ok key ->
         match envelope_of_json json with
-        | None -> Lwt.return (Error (InvalidEnvelope "malformed envelope"))
+        | None -> Error (InvalidEnvelope "malformed envelope")
         | Some env ->
             if env.adata <> adata then
-              Lwt.return (Error (InvalidEnvelope "adata mismatch"))
+              Error (InvalidEnvelope "adata mismatch")
             else
-              Lwt.return (decrypt_envelope ~key env)
+              decrypt_envelope ~key env
   else
-    Lwt.return (Ok json)
+    Ok json
 
 (** Smart write: encrypt if enabled, write plain if disabled *)
-let smart_write_json ~config ~adata path json : (unit, encryption_error) result Lwt.t =
+let smart_write_json ~config ~adata path json : (unit, encryption_error) result =
   if not config.enabled then begin
     let content = Yojson.Safe.pretty_to_string json in
-    let* () = Lwt_io.with_file ~mode:Lwt_io.Output path
-      (fun oc -> Lwt_io.write oc content) in
-    Lwt.return (Ok ())
+    Out_channel.with_open_text path (fun oc ->
+      Out_channel.output_string oc content
+    );
+    Ok ()
   end else
     match load_key config with
-    | Error e -> Lwt.return (Error e)
+    | Error e -> Error e
     | Ok key ->
         match encrypt_json ~key ~adata json with
-        | Error e -> Lwt.return (Error e)
+        | Error e -> Error e
         | Ok envelope ->
             let content = Yojson.Safe.pretty_to_string (envelope_to_json envelope) in
-            let* () = Lwt_io.with_file ~mode:Lwt_io.Output path
-              (fun oc -> Lwt_io.write oc content) in
-            Lwt.return (Ok ())
+            Out_channel.with_open_text path (fun oc ->
+              Out_channel.output_string oc content
+            );
+            Ok ()
 
 (** Generate a new random 32-byte key (hex encoded for storage) *)
 let generate_key_hex () =

@@ -1,6 +1,6 @@
 (** Backend_eio: OCaml 5.x Eio-native storage backend
 
-    Direct-style async I/O using Eio, no Lwt monads!
+    Direct-style async I/O using Eio.
 
     This module provides the same interface as Backend, but uses:
     - Eio.Path for file operations

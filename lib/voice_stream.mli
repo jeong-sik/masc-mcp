@@ -1,24 +1,24 @@
 (** MASC Voice Stream - Real-time Audio Delivery via WebSocket
 
     Provides low-latency audio streaming from TTS to connected clients.
-    Uses ocaml-websocket (websocket-lwt-unix) for persistent connections.
+    Uses httpun-ws-eio for persistent connections.
 
     Architecture:
     {v
-    ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-    │ TTS Service  │────▶│ Voice Stream │────▶│ WS Clients   │
-    │ (ElevenLabs) │     │ (OCaml)      │     │ (Browser/App)│
-    └──────────────┘     └──────────────┘     └──────────────┘
+    +--------------+     +--------------+     +-------------+
+    | TTS Service  | --> | Voice Stream | --> | WS Clients  |
+    | (ElevenLabs) |     | (OCaml/Eio)  |     | (Browser)   |
+    +--------------+     +--------------+     +-------------+
     v}
 
     Protocol:
-    - Client → Server (text frames):
+    - Client -> Server (text frames):
       - {v {"type": "subscribe", "agent_id": "claude"} v}
       - {v {"type": "unsubscribe"} v}
-    - Server → Client (text frames):
+    - Server -> Client (text frames):
       - {v {"type": "speaking", "agent_id": "claude", "voice": "Sarah"} v}
       - {v {"type": "done", "agent_id": "claude", "duration_ms": 1500} v}
-    - Server → Client (binary frames):
+    - Server -> Client (binary frames):
       - Raw audio bytes (PCM/MP3)
 
     MAGI Review Applied (2026-01-10):
@@ -73,17 +73,16 @@ val create : ?port:int -> unit -> t
 (** {1 Server Lifecycle} *)
 
 (** Start the WebSocket server.
-    This runs the accept loop in the background.
 
-    @param t The stream server
-    @return Unit Lwt promise that resolves when server is listening *)
-val start : t -> unit Lwt.t
+    @param sw Eio switch controlling server lifetime
+    @param net Eio network provider
+    @param t The stream server *)
+val start : sw:Eio.Switch.t -> net:[> `Generic] Eio.Net.t -> t -> unit
 
 (** Stop the server and disconnect all clients.
 
-    @param t The stream server
-    @return Unit Lwt promise *)
-val stop : t -> unit Lwt.t
+    @param t The stream server *)
+val stop : t -> unit
 
 (** Check if server is running.
 
@@ -97,44 +96,39 @@ val is_running : t -> bool
     Unhealthy clients are automatically removed after broadcast.
 
     @param t The stream server
-    @param audio Raw audio bytes
-    @return Unit Lwt promise *)
-val broadcast_audio : t -> bytes -> unit Lwt.t
+    @param audio Raw audio bytes *)
+val broadcast_audio : t -> bytes -> unit
 
 (** Send audio to clients subscribed to a specific agent.
     Unhealthy clients are automatically removed after send.
 
     @param t The stream server
     @param agent_id Target agent
-    @param audio Raw audio bytes
-    @return Unit Lwt promise *)
-val send_to_agent_subscribers : t -> agent_id:string -> bytes -> unit Lwt.t
+    @param audio Raw audio bytes *)
+val send_to_agent_subscribers : t -> agent_id:string -> bytes -> unit
 
 (** Broadcast text message to all clients.
     Used for sync messages, metadata, speaking notifications.
 
     @param t The stream server
-    @param message Text message (typically JSON)
-    @return Unit Lwt promise *)
-val broadcast_text : t -> string -> unit Lwt.t
+    @param message Text message (typically JSON) *)
+val broadcast_text : t -> string -> unit
 
 (** Send speaking notification.
     {v {"type": "speaking", "agent_id": "...", "voice": "..."} v}
 
     @param t The stream server
     @param agent_id Agent who is speaking
-    @param voice Voice name being used
-    @return Unit Lwt promise *)
-val notify_speaking : t -> agent_id:string -> voice:string -> unit Lwt.t
+    @param voice Voice name being used *)
+val notify_speaking : t -> agent_id:string -> voice:string -> unit
 
 (** Send done notification.
     {v {"type": "done", "agent_id": "...", "duration_ms": ...} v}
 
     @param t The stream server
     @param agent_id Agent who finished speaking
-    @param duration_ms Duration in milliseconds (optional)
-    @return Unit Lwt promise *)
-val notify_done : t -> agent_id:string -> ?duration_ms:int -> unit -> unit Lwt.t
+    @param duration_ms Duration in milliseconds (optional) *)
+val notify_done : t -> agent_id:string -> ?duration_ms:int -> unit -> unit
 
 (** {1 Client Management} *)
 
@@ -174,7 +168,7 @@ val unsubscribe : t -> client_id:string -> unit
 
     @param t The stream server
     @param client_id Client to disconnect *)
-val disconnect_client : t -> client_id:string -> unit Lwt.t
+val disconnect_client : t -> client_id:string -> unit
 
 (** Cleanup zombie clients (inactive for too long or unhealthy).
 
@@ -198,17 +192,5 @@ val on_event : t -> (server_event -> unit) -> unit
     Includes port, running state, client count, backpressure config, and client details.
 
     @param t The stream server
-    @return JSON with port, running state, client count, etc. *)
-val status_json : t -> Yojson.Safe.t
-
-(** {1 Utilities} *)
-
-(** Parse client message from JSON string.
-
-    @param s JSON string
-    @return Parsed message *)
-val parse_client_message : string -> client_message
-
-(** Generate unique client ID.
-    @return UUID string *)
-val generate_client_id : unit -> string
+    @return JSON string *)
+val get_status_json : t -> string

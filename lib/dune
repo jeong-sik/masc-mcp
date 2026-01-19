@@ -1,14 +1,77 @@
 (library
  (name masc_mcp)
  (public_name masc_mcp)
+ (modules
+   a2a_tools
+   agent_card
+   auth
+   backend
+   backend_eio
+   cache_eio
+   cancellation
+   checkpoint_types
+   compression_dict
+   config
+   dashboard
+   datachannel
+   datachannel_eio
+   dtls
+   dtls_crypto
+   encryption
+   federation
+   gcm_compat
+   hebbian_eio
+   http_server_eio
+   level2_config
+   level4_config
+   log
+   masc_mcp
+   masc_pb
+   mcp_protocol
+   mcp_server
+   mcp_server_eio
+   mcp_session
+   metrics_store_eio
+   mitosis
+   mode
+   nickname
+   notify
+   orchestrator
+   planning_eio
+   progress
+   redis_common
+   relay
+   response
+   room
+   room_eio
+   room_git
+   room_portal
+   room_utils
+   room_worktree
+   sctp
+   sctp_eio
+   sctp_transport
+   sdp
+   session
+   spawn
+   sse
+   subscriptions
+   tempo
+   tools
+   transport
+   transport_grpc_next
+   types
+   validation
+   voice_stream
+   void
+   webrtc_bindings
+   webrtc_common)
  (libraries
    yojson
-   lwt
    base64
-   lwt.unix
-   cohttp-lwt-unix
-   websocket-lwt-unix
-   conduit-lwt-unix
+   httpun-ws
+   httpun-ws-eio
+   bigstringaf
    redis-sync
    ;; PostgreSQL backend (Eio-native, non-blocking)
    caqti
@@ -32,7 +95,6 @@
    grpc-direct
    grpc-direct-core
    h2
-   h2-lwt-unix
    ctypes
    ctypes-foreign
    ;; OCaml 5.x Eio concurrency (required for *_eio.ml modules)
@@ -42,9 +104,9 @@
    httpun-eio
    gluten-eio
    ipaddr
-   lwt_eio
+   cohttp
    ;; Compact Protocol v5: unified DSL + compression
    compact-protocol
    zstd
    )
- (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq lwt_ppx)))
+ (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

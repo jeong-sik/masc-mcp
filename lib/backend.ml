@@ -123,9 +123,24 @@ let safe_parse_lock_json path =
       end else
         let json = Yojson.Safe.from_string content in
         let open Yojson.Safe.Util in
-        let exp = json |> member "expires_at" |> to_float in
-        let own = json |> member "owner" |> to_string in
-        Some (own, exp)
+        let parse_float_field field =
+          match json |> member field with
+          | `Float f -> Some f
+          | `Int i -> Some (float_of_int i)
+          | `Intlit s -> float_of_string_opt s
+          | `String s -> float_of_string_opt s
+          | _ -> None
+        in
+        let parse_string_field field =
+          match json |> member field with
+          | `String s -> Some s
+          | _ -> None
+        in
+        match parse_string_field "owner", parse_float_field "expires_at" with
+        | Some own, Some exp -> Some (own, exp)
+        | _ ->
+            (try Sys.remove path with _ -> ());
+            None
     with
     | _ ->
         (* Corrupted JSON file - remove it to allow recovery *)

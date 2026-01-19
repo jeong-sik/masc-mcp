@@ -48,6 +48,39 @@ let is_notification req = req.id = None
 (** Get id or null *)
 let get_id req = match req.id with Some id -> id | None -> `Null
 
+(** JSON-RPC id must be string, number, or null. *)
+let is_valid_request_id = function
+  | `Null
+  | `String _
+  | `Int _
+  | `Intlit _
+  | `Float _ -> true
+  | _ -> false
+
+(** Validate initialize params per MCP spec. *)
+let validate_initialize_params params =
+  let ( let* ) = Result.bind in
+  let require_string label = function
+    | Some (`String _) -> Ok ()
+    | None | Some `Null -> Error ("Missing " ^ label)
+    | Some _ -> Error ("Invalid " ^ label)
+  in
+  let require_assoc label = function
+    | Some (`Assoc _ as v) -> Ok v
+    | None | Some `Null -> Error ("Missing " ^ label)
+    | Some _ -> Error ("Invalid " ^ label)
+  in
+  match params with
+  | None -> Error "Missing params"
+  | Some (`Assoc _ as p) ->
+      let* () = require_string "protocolVersion" (get_field "protocolVersion" p) in
+      let* client_info = require_assoc "clientInfo" (get_field "clientInfo" p) in
+      let* () = require_string "clientInfo.name" (get_field "name" client_info) in
+      let* () = require_string "clientInfo.version" (get_field "version" client_info) in
+      let* _ = require_assoc "capabilities" (get_field "capabilities" p) in
+      Ok ()
+  | Some _ -> Error "Invalid params: expected object"
+
 (** JSON-RPC response builders *)
 let make_response ~id result =
   `Assoc [
@@ -56,14 +89,19 @@ let make_response ~id result =
     ("result", result);
   ]
 
-let make_error ~id code message =
+let make_error ?data ~id code message =
+  let error_fields =
+    [("code", `Int code); ("message", `String message)]
+  in
+  let error_fields =
+    match data with
+    | None -> error_fields
+    | Some payload -> error_fields @ [("data", payload)]
+  in
   `Assoc [
     ("jsonrpc", `String "2.0");
     ("id", id);
-    ("error", `Assoc [
-      ("code", `Int code);
-      ("message", `String message);
-    ]);
+    ("error", `Assoc error_fields);
   ]
 
 (** MCP protocol version support (legacy + current) *)

@@ -369,11 +369,25 @@ module FileSystem = struct
     try
       let open Yojson.Safe.Util in
       let j = Yojson.Safe.from_string json in
-      Some {
-        owner = j |> member "owner" |> to_string;
-        acquired_at = j |> member "acquired_at" |> to_float;
-        expires_at = j |> member "expires_at" |> to_float;
-      }
+      let parse_float = function
+        | `Float f -> Some f
+        | `Int i -> Some (float_of_int i)
+        | `Intlit s -> float_of_string_opt s
+        | `String s -> float_of_string_opt s
+        | _ -> None
+      in
+      let parse_string = function
+        | `String s -> Some s
+        | _ -> None
+      in
+      match
+        (parse_string (member "owner" j),
+         parse_float (member "acquired_at" j),
+         parse_float (member "expires_at" j))
+      with
+      | Some owner, Some acquired_at, Some expires_at ->
+          Some { owner; acquired_at; expires_at }
+      | _ -> None
     with _ -> None
 
   let acquire_lock t ~key ~owner ~ttl_seconds =
@@ -397,7 +411,12 @@ module FileSystem = struct
                   (match set t lock_key (lock_info_to_json info) with
                    | Ok () -> Ok true
                    | Error e -> Error e)
-              | _ -> Ok false)
+              | Some _ -> Ok false
+              | None ->
+                  (* Invalid lock metadata, overwrite to recover *)
+                  (match set t lock_key (lock_info_to_json info) with
+                   | Ok () -> Ok true
+                   | Error e -> Error e))
          | Error _ -> Ok false)
     | Error e -> Error e
 

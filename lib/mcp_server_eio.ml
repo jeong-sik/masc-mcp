@@ -27,9 +27,11 @@ let is_jsonrpc_v2 = Mcp_server.is_jsonrpc_v2
 let is_jsonrpc_response = Mcp_server.is_jsonrpc_response
 let is_notification = Mcp_server.is_notification
 let get_id = Mcp_server.get_id
+let is_valid_request_id = Mcp_server.is_valid_request_id
 let jsonrpc_request_of_yojson = Mcp_server.jsonrpc_request_of_yojson
 let protocol_version_from_params = Mcp_server.protocol_version_from_params
 let normalize_protocol_version = Mcp_server.normalize_protocol_version
+let validate_initialize_params = Mcp_server.validate_initialize_params
 let make_response = Mcp_server.make_response
 let make_error = Mcp_server.make_error
 
@@ -1485,22 +1487,25 @@ let handle_call_tool_eio ~clock state id params =
 
 (** Eio-native handlers for simple methods *)
 let handle_initialize_eio id params =
-  let protocol_version =
-    params |> protocol_version_from_params |> normalize_protocol_version
-  in
-  make_response ~id (`Assoc [
-    ("protocolVersion", `String protocol_version);
-    ("serverInfo", Mcp_server.server_info);
-    ("capabilities", Mcp_server.capabilities);
-    ("instructions", `String "MASC (Multi-Agent Streaming Coordination) enables AI agent collaboration. \
-      ROOM: Agents sharing the same base path (.masc/ folder) or Redis cluster coordinate together. \
-      CLUSTER: Set MASC_CLUSTER_NAME for multi-machine coordination (defaults to basename of ME_ROOT). \
-      READ: use resources/list + resources/read (status/tasks/agents/events/schema) for snapshots. \
-      WRITE: prefer masc_transition (claim/start/done/cancel/release) with expected_version for CAS. \
-      WORKFLOW: masc_status → masc_transition(claim) → masc_worktree_create (isolation) → work → masc_transition(done). \
-      Use masc_heartbeat periodically; use @agent mentions in masc_broadcast. \
-      Prefer worktrees over file locks for parallel work.");
-  ])
+  match validate_initialize_params params with
+  | Error msg -> make_error ~id (-32602) msg
+  | Ok () ->
+      let protocol_version =
+        params |> protocol_version_from_params |> normalize_protocol_version
+      in
+      make_response ~id (`Assoc [
+        ("protocolVersion", `String protocol_version);
+        ("serverInfo", Mcp_server.server_info);
+        ("capabilities", Mcp_server.capabilities);
+        ("instructions", `String "MASC (Multi-Agent Streaming Coordination) enables AI agent collaboration. \
+          ROOM: Agents sharing the same base path (.masc/ folder) or Redis cluster coordinate together. \
+          CLUSTER: Set MASC_CLUSTER_NAME for multi-machine coordination (defaults to basename of ME_ROOT). \
+          READ: use resources/list + resources/read (status/tasks/agents/events/schema) for snapshots. \
+          WRITE: prefer masc_transition (claim/start/done/cancel/release) with expected_version for CAS. \
+          WORKFLOW: masc_status → masc_transition(claim) → masc_worktree_create (isolation) → work → masc_transition(done). \
+          Use masc_heartbeat periodically; use @agent mentions in masc_broadcast. \
+          Prefer worktrees over file locks for parallel work.");
+      ])
 
 let handle_list_tools_eio state id =
   let room_path = Room.masc_dir state.Mcp_server.room_config in
@@ -1542,7 +1547,7 @@ let handle_request ~clock ~sw:_ state request_str =
     in
     match json with
     | Error msg ->
-        make_error ~id:`Null (-32700) ("Parse error: " ^ msg)
+        make_error ~id:`Null ~data:(`String msg) (-32700) "Parse error"
     | Ok json ->
         if is_jsonrpc_response json then
           `Null
@@ -1550,10 +1555,12 @@ let handle_request ~clock ~sw:_ state request_str =
           make_error ~id:`Null (-32600) "Invalid Request: jsonrpc must be 2.0"
         else
           match jsonrpc_request_of_yojson json with
-          | Error msg -> make_error ~id:`Null (-32600) ("Invalid Request: " ^ msg)
+          | Error msg -> make_error ~id:`Null ~data:(`String msg) (-32600) "Invalid Request"
           | Ok req ->
               let id = get_id req in
-              if is_notification req then
+              if not (is_valid_request_id id) then
+                make_error ~id:`Null (-32600) "Invalid Request: id must be string, number, or null"
+              else if is_notification req then
                 `Null
               else
                 (match req.method_ with
@@ -1573,7 +1580,7 @@ let handle_request ~clock ~sw:_ state request_str =
                     | None -> make_error ~id (-32602) "Missing params")
                 | method_ -> make_error ~id (-32601) ("Method not found: " ^ method_))
   with exn ->
-    make_error ~id:`Null (-32603) ("Internal error: " ^ Printexc.to_string exn)
+    make_error ~id:`Null ~data:(`String (Printexc.to_string exn)) (-32603) "Internal error"
 
 (** {1 Server Entry Points} *)
 

@@ -88,4 +88,4 @@ val normalize_protocol_version : string -> string
 val make_response : id:Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
 
 (** Make error JSON-RPC response *)
-val make_error : id:Yojson.Safe.t -> int -> string -> Yojson.Safe.t
+val make_error : ?data:Yojson.Safe.t -> id:Yojson.Safe.t -> int -> string -> Yojson.Safe.t

@@ -87,9 +87,6 @@ if [ -n "$MASC_EIO_EXE" ] && command -v dune >/dev/null 2>&1; then
     fi
 fi
 
-# Eio is now the default runtime (Lwt deprecated)
-EIO_MODE="true"
-
 # Default arguments
 PORT="${MASC_MCP_PORT:-8935}"
 HTTP_MODE="${MASC_MCP_HTTP:-true}"
@@ -113,8 +110,9 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --lwt)
-            EIO_MODE="false"
-            shift
+            echo "Error: Lwt runtime is deprecated since 2026-01." >&2
+            echo "Please use Eio (default). Lwt support has been removed." >&2
+            exit 1
             ;;
         --port)
             PORT="$2"

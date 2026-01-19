@@ -412,14 +412,24 @@ let handle_get_mcp ?legacy_messages_endpoint _state conn req =
             let* chunk = Cohttp_lwt_unix.Server.IO.read ic 1 in
             if String.equal chunk "" then Lwt.return_unit else wait_for_eof ()
           )
-          (fun _exn ->
-            (* Channel closed or other IO error - client disconnected abruptly *)
-            Lwt.return_unit
+          (function
+            | Lwt_io.Channel_closed _ | End_of_file ->
+                (* Expected: client disconnected (abruptly or cleanly) *)
+                Lwt.return_unit
+            | exn ->
+                (* Unexpected error - log for debugging *)
+                Printf.eprintf "[WARN] SSE wait_for_eof unexpected: %s\n%!"
+                  (Printexc.to_string exn);
+                Lwt.return_unit
           )
       in
-      let* () = wait_for_eof () in
-      stop_sse_conn_by_key conn_key;
-      Lwt.return_unit
+      (* Use finalize to guarantee cleanup even if wait_for_eof raises *)
+      Lwt.finalize
+        (fun () -> wait_for_eof ())
+        (fun () ->
+          stop_sse_conn_by_key conn_key;
+          Lwt.return_unit
+        )
     );
 
     let write_chunk s =

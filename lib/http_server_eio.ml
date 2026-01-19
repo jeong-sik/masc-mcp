@@ -245,7 +245,7 @@ let default_routes =
   Router.empty
   |> Router.get "/health" health_handler
   |> Router.get "/" (fun _req reqd ->
-      Response.text "MASC MCP Server (Eio)" reqd)
+      Response.text "MASC MCP Server" reqd)
 
 (** Create httpun request handler from router
     Note: httpun-eio wraps reqd in Gluten.Reqd.t, extract with .reqd field *)
@@ -277,7 +277,7 @@ let run ~sw ~net config routes =
   in
   let addr = `Tcp (ip, config.port) in
   let socket = Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:config.max_connections addr in
-  Printf.printf "🚀 MASC MCP Server (Eio) listening on http://%s:%d\n" config.host config.port;
+  Printf.printf "🚀 MASC MCP Server listening on http://%s:%d\n" config.host config.port;
   Printf.printf "   Graceful shutdown: SIGTERM/SIGINT supported\n%!";
 
   let rec accept_loop () =

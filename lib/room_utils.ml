@@ -250,13 +250,13 @@ let default_config base_path =
 let default_config_eio ~sw ~env base_path =
   let resolved_path = resolve_masc_base_path base_path in
   let backend_config = backend_config_for resolved_path in
-  Log.Backend.info "MASC Backend (Eio): type=%s, postgres_url=%s"
+  Log.Backend.info "MASC Backend: type=%s, postgres_url=%s"
     (Backend.show_backend_type backend_config.backend_type)
     (match backend_config.postgres_url with Some _ -> "<configured>" | None -> "none");
   let backend =
     match create_backend_eio ~sw ~env backend_config with
     | Ok backend ->
-        Log.Backend.info "Backend initialized (Eio): %s"
+        Log.Backend.info "Backend initialized: %s"
           (match backend with
            | Memory _ -> "Memory"
            | FileSystem _ -> "FileSystem"

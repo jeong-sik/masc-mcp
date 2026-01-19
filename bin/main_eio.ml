@@ -590,7 +590,7 @@ let handle_delete_mcp request reqd =
 let make_routes () =
   Http.Router.empty
   |> Http.Router.get "/health" health_handler
-  |> Http.Router.get "/" (fun _req reqd -> Http.Response.text "MASC MCP Server (Eio)" reqd)
+  |> Http.Router.get "/" (fun _req reqd -> Http.Response.text "MASC MCP Server" reqd)
   |> Http.Router.get "/mcp" (fun request reqd -> handle_get_mcp request reqd)
   |> Http.Router.post "/" handle_post_mcp
   |> Http.Router.post "/mcp" handle_post_mcp
@@ -680,7 +680,7 @@ let run_server ~sw ~env ~port ~base_path =
 
   let resolved_base = state.room_config.base_path in
   let masc_dir = Filename.concat resolved_base ".masc" in
-  Printf.printf "🚀 MASC MCP Server (Eio) listening on http://%s:%d\n%!" config.host config.port;
+  Printf.printf "🚀 MASC MCP Server listening on http://%s:%d\n%!" config.host config.port;
   Printf.printf "   Base path: %s\n%!" resolved_base;
   if resolved_base <> base_path then
     Printf.printf "   Base path (input): %s\n%!" base_path;
@@ -762,7 +762,7 @@ let run_cmd port base_path =
       Printf.eprintf "🚀 MASC MCP: Shutdown complete.\n%!")
 
 let cmd =
-  let doc = "MASC MCP Server (Eio native)" in
+  let doc = "MASC MCP Server" in
   let info = Cmd.info "masc-mcp" ~version:"2.2.1" ~doc in
   Cmd.v info Term.(const run_cmd $ port $ base_path)
 

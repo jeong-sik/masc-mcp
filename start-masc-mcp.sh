@@ -56,7 +56,7 @@ fi
 
 # 5. Build Eio version if not found (Lwt deprecated, download disabled)
 if [ -z "$MASC_EIO_EXE" ]; then
-    echo "Building MASC MCP server (Eio) from source..." >&2
+    echo "Building MASC MCP server from source..." >&2
     if ! command -v dune >/dev/null 2>&1; then
         echo "Error: dune not found. Install dune first." >&2
         exit 1

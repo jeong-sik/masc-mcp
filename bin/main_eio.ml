@@ -203,27 +203,135 @@ let graphql_headers origin =
 
 (** GraphQL Playground HTML (GET /graphql) *)
 let graphql_playground_html ~nonce =
-  Printf.sprintf {|
+  String.concat "" [
+    {|
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="user-scalable=no,initial-scale=1,minimum-scale=1,maximum-scale=1" />
     <title>MASC GraphQL Playground</title>
-    <link rel="stylesheet" href="/static/css/index.css" />
+    <link rel="stylesheet" href="/static/css/middleware.css" />
   </head>
   <body>
+    <style>
+      html { font-family: "Open Sans", sans-serif; overflow: hidden; }
+      body { margin: 0; background: #172a3a; }
+      .playgroundIn { animation: playgroundIn .5s ease-out forwards; }
+      @keyframes playgroundIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+    </style>
+    <style>
+      .fadeOut { animation: fadeOut .5s ease-out forwards; }
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(-10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes fadeOut {
+        from { opacity: 1; transform: translateY(0); }
+        to { opacity: 0; transform: translateY(-10px); }
+      }
+      @keyframes appearIn {
+        from { opacity: 0; transform: translateY(0); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes scaleIn {
+        from { transform: scale(0); }
+        to { transform: scale(1); }
+      }
+      @keyframes innerDrawIn {
+        0% { stroke-dashoffset: 70; }
+        50% { stroke-dashoffset: 140; }
+        100% { stroke-dashoffset: 210; }
+      }
+      @keyframes outerDrawIn {
+        0% { stroke-dashoffset: 76; }
+        100% { stroke-dashoffset: 152; }
+      }
+      #loading-wrapper {
+        position: absolute;
+        width: 100vw;
+        height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+      }
+      .logo {
+        width: 75px;
+        height: 75px;
+        margin-bottom: 20px;
+        opacity: 0;
+        animation: fadeIn .5s ease-out forwards;
+      }
+      .text {
+        font-size: 32px;
+        font-weight: 200;
+        text-align: center;
+        color: rgba(255, 255, 255, .6);
+        opacity: 0;
+        animation: fadeIn .5s ease-out forwards;
+      }
+      .text strong { font-weight: 400; }
+    </style>
+    <div id="loading-wrapper">
+      <svg class="logo" viewBox="0 0 128 128" xmlns:xlink="http://www.w3.org/1999/xlink">
+        <title>GraphQL Playground Logo</title>
+        <defs>
+          <linearGradient id="linearGradient-1" x1="4.86%" x2="96.21%" y1="0%" y2="99.66%">
+            <stop stop-color="#E00082" stop-opacity=".8" offset="0%"></stop>
+            <stop stop-color="#E00082" offset="100%"></stop>
+          </linearGradient>
+        </defs>
+        <g>
+          <rect id="Gradient" width="127.96" height="127.96" y="1" fill="url(#linearGradient-1)" rx="4"></rect>
+          <path id="Border" fill="#E00082" fill-rule="nonzero" d="M4.7 2.84c-1.58 0-2.86 1.28-2.86 2.85v116.57c0 1.57 1.28 2.84 2.85 2.84h116.57c1.57 0 2.84-1.26 2.84-2.83V5.67c0-1.55-1.26-2.83-2.83-2.83H4.67zM4.7 0h116.58c3.14 0 5.68 2.55 5.68 5.7v116.58c0 3.14-2.54 5.68-5.68 5.68H4.68c-3.13 0-5.68-2.54-5.68-5.68V5.68C-1 2.56 1.55 0 4.7 0z"></path>
+          <path class="bglIGM" x="64" y="28" fill="#fff" d="M64 36c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8"></path>
+          <path class="ksxRII" x="95.98500061035156" y="46.510000228881836" fill="#fff" d="M89.04 50.52c-2.2-3.84-.9-8.73 2.94-10.96 3.83-2.2 8.72-.9 10.95 2.94 2.2 3.84.9 8.73-2.94 10.96-3.85 2.2-8.76.9-10.97-2.94"></path>
+          <path class="cWrBmb" x="95.97162628173828" y="83.4900016784668" fill="#fff" d="M102.9 87.5c-2.2 3.84-7.1 5.15-10.94 2.94-3.84-2.2-5.14-7.12-2.94-10.96 2.2-3.84 7.12-5.15 10.95-2.94 3.86 2.23 5.16 7.12 2.94 10.96"></path>
+          <path class="Wnusb" x="64" y="101.97999572753906" fill="#fff" d="M64 110c-4.43 0-8-3.6-8-8.02 0-4.44 3.57-8.02 8-8.02s8 3.58 8 8.02c0 4.4-3.57 8.02-8 8.02"></path>
+          <path class="bfPqf" x="32.03982162475586" y="83.4900016784668" fill="#fff" d="M25.1 87.5c-2.2-3.84-.9-8.73 2.93-10.96 3.83-2.2 8.72-.9 10.95 2.94 2.2 3.84.9 8.73-2.94 10.96-3.85 2.2-8.74.9-10.95-2.94"></path>
+          <path class="edRCTN" x="32.033552169799805" y="46.510000228881836" fill="#fff" d="M38.96 50.52c-2.2 3.84-7.12 5.15-10.95 2.94-3.82-2.2-5.12-7.12-2.92-10.96 2.2-3.84 7.12-5.15 10.95-2.94 3.83 2.23 5.14 7.12 2.94 10.96"></path>
+          <path class="iEGVWn" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" d="M63.55 27.5l32.9 19-32.9-19z"></path>
+          <path class="bsocdx" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" d="M96 46v38-38z"></path>
+          <path class="jAZXmP" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" d="M96.45 84.5l-32.9 19 32.9-19z"></path>
+          <path class="hSeArx" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" d="M64.45 103.5l-32.9-19 32.9 19z"></path>
+          <path class="bVgqGk" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" d="M32 84V46v38z"></path>
+          <path class="hEFqBt" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" d="M31.55 46.5l32.9-19-32.9 19z"></path>
+          <path class="dzEKCM" id="Triangle-Bottom" stroke="#fff" stroke-width="4" d="M30 84h70" stroke-linecap="round"></path>
+          <path class="DYnPx" id="Triangle-Left" stroke="#fff" stroke-width="4" d="M65 26L30 87" stroke-linecap="round"></path>
+          <path class="hjPEAQ" id="Triangle-Right" stroke="#fff" stroke-width="4" d="M98 87L63 26" stroke-linecap="round"></path>
+        </g>
+      </svg>
+      <div class="text">Loading <strong>GraphQL Playground</strong></div>
+    </div>
     <div id="root"></div>
-    <script nonce="%s">
+    <script nonce="|};
+    nonce;
+    {|">
       window.addEventListener("load", function () {
+        var loading = document.getElementById("loading-wrapper");
+        if (loading) {
+          loading.classList.add("fadeOut");
+        }
         var root = document.getElementById("root");
-        GraphQLPlayground.init(root, { endpoint: "/graphql" });
+        if (!root) {
+          return;
+        }
+        root.classList.add("playgroundIn");
+        GraphQLPlayground.init(root, {
+          endpoint: "/graphql",
+          settings: { "request.credentials": "same-origin" }
+        });
       });
     </script>
-    <script src="/static/js/index.js"></script>
+    <script src="/static/js/middleware.js"></script>
   </body>
 </html>
-|} nonce
+|};
+  ]
 
 let graphql_csp_header nonce =
   Printf.sprintf
@@ -699,10 +807,10 @@ let make_routes () =
   Http.Router.empty
   |> Http.Router.get "/health" health_handler
   |> Http.Router.get "/" (fun _req reqd -> Http.Response.text "MASC MCP Server" reqd)
-  |> Http.Router.get "/static/css/index.css"
-       (serve_playground_asset "static/css/index.css")
-  |> Http.Router.get "/static/js/index.js"
-       (serve_playground_asset "static/js/index.js")
+  |> Http.Router.get "/static/css/middleware.css"
+       (serve_playground_asset "static/css/middleware.css")
+  |> Http.Router.get "/static/js/middleware.js"
+       (serve_playground_asset "static/js/middleware.js")
   |> Http.Router.get "/graphiql/graphiql.min.css"
        (serve_graphiql_asset "graphiql.min.css")
   |> Http.Router.get "/graphiql/graphiql.min.js"

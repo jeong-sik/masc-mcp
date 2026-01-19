@@ -269,12 +269,26 @@ let lock_info_to_json lock =
 let lock_info_of_json json =
   let open Yojson.Safe.Util in
   try
-    Ok {
-      resource = json |> member "resource" |> to_string;
-      owner = json |> member "owner" |> to_string;
-      acquired_at = json |> member "acquired_at" |> to_float;
-      expires_at = json |> member "expires_at" |> to_float;
-    }
+    let parse_float = function
+      | `Float f -> Some f
+      | `Int i -> Some (float_of_int i)
+      | `Intlit s -> float_of_string_opt s
+      | `String s -> float_of_string_opt s
+      | _ -> None
+    in
+    let parse_string = function
+      | `String s -> Some s
+      | _ -> None
+    in
+    match
+      (parse_string (member "resource" json),
+       parse_string (member "owner" json),
+       parse_float (member "acquired_at" json),
+       parse_float (member "expires_at" json))
+    with
+    | Some resource, Some owner, Some acquired_at, Some expires_at ->
+        Ok { resource; owner; acquired_at; expires_at }
+    | _ -> Error "Invalid lock metadata"
   with e ->
     Error (Printexc.to_string e)
 

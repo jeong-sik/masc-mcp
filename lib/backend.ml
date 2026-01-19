@@ -111,25 +111,40 @@ let validate_ttl ttl_seconds =
 
 (** Safely parse JSON lock file, returning None on any error.
     Also removes corrupted files to allow recovery. *)
-let safe_parse_lock_json path =
-  if not (Sys.file_exists path) then None
+let safe_parse_lock_json file_path =
+  if not (Sys.file_exists file_path) then None
   else
     try
-      let content = In_channel.with_open_text path In_channel.input_all in
+      let content = In_channel.with_open_text file_path In_channel.input_all in
       if String.length content = 0 then begin
         (* Empty file is corrupted - remove it *)
-        (try Sys.remove path with _ -> ());
+        (try Sys.remove file_path with _ -> ());
         None
       end else
         let json = Yojson.Safe.from_string content in
         let open Yojson.Safe.Util in
-        let exp = json |> member "expires_at" |> to_float in
-        let own = json |> member "owner" |> to_string in
-        Some (own, exp)
+        let parse_float_field field =
+          match json |> member field with
+          | `Float f -> Some f
+          | `Int i -> Some (float_of_int i)
+          | `Intlit s -> float_of_string_opt s
+          | `String s -> float_of_string_opt s
+          | _ -> None
+        in
+        let parse_string_field field =
+          match json |> member field with
+          | `String s -> Some s
+          | _ -> None
+        in
+        match parse_string_field "owner", parse_float_field "expires_at" with
+        | Some own, Some exp -> Some (own, exp)
+        | _ ->
+            (try Sys.remove file_path with _ -> ());
+            None
     with
     | _ ->
         (* Corrupted JSON file - remove it to allow recovery *)
-        (try Sys.remove path with _ -> ());
+        (try Sys.remove file_path with _ -> ());
         None
 
 (** Acquire exclusive file lock using Unix.lockf.

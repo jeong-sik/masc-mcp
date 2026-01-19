@@ -648,6 +648,13 @@ Implements [MCP Spec 2025-11-25](https://spec.modelcontextprotocol.io/):
 - Relay-style connections: `tasks`, `agents`, `messages` support `first` + `after`
 - Cursors are base64 `"kind:value"` (`task`, `agent`, `message`)
 
+Real-world use cases:
+
+- Live ops dashboard: tasks + agents + message stream in one place
+- Release readiness: check in-progress/blocked tasks from CI
+- Incident response: track active agents, watch recent messages
+- Audit/reporting: snapshot coordination state for daily summaries
+
 Example:
 
 ```bash
@@ -662,6 +669,20 @@ Relay-style connection example:
 curl -s -X POST http://127.0.0.1:8935/graphql \
   -H 'Content-Type: application/json' \
   -d '{"query":"{ tasks(first: 2) { totalCount edges { cursor node { id title status { status } } } pageInfo { hasNextPage endCursor } } }"}'
+```
+
+More examples:
+
+```bash
+curl -s -X POST http://127.0.0.1:8935/graphql \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"{ agents(first: 5) { edges { node { name status currentTask lastSeen } } totalCount } }"}'
+```
+
+```bash
+curl -s -X POST http://127.0.0.1:8935/graphql \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"{ messages(first: 10) { edges { cursor node { seq from content timestamp } } pageInfo { endCursor hasNextPage } } }"}'
 ```
 
 ## Contributing

@@ -210,16 +210,16 @@ let graphql_playground_html ~nonce =
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>MASC GraphQL Playground</title>
-    <link rel="stylesheet" href="https://unpkg.com/graphiql@1.9.3/graphiql.min.css" />
+    <link rel="stylesheet" href="/graphiql/graphiql.min.css" />
     <style nonce="%s">
       html, body, #graphiql { height: 100%%; margin: 0; }
     </style>
   </head>
   <body>
     <div id="graphiql">Loading...</div>
-    <script src="https://unpkg.com/react@16.14.0/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@16.14.0/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/graphiql@1.9.3/graphiql.min.js"></script>
+    <script src="/graphiql/react.production.min.js"></script>
+    <script src="/graphiql/react-dom.production.min.js"></script>
+    <script src="/graphiql/graphiql.min.js"></script>
     <script nonce="%s">
       const graphQLFetcher = function (graphQLParams) {
         return fetch("/graphql", {
@@ -249,10 +249,37 @@ let graphql_csp_header nonce =
   Printf.sprintf
     "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; \
      connect-src 'self'; img-src 'self' data:; \
-     script-src 'self' https://unpkg.com 'nonce-%s' 'unsafe-eval'; \
-     style-src 'self' https://unpkg.com 'unsafe-inline'; \
-     font-src https://unpkg.com data:"
-    nonce
+     script-src 'self' 'nonce-%s' 'unsafe-eval'; \
+     style-src 'self' 'nonce-%s'; \
+     font-src 'self' data:"
+    nonce nonce
+
+(** Local GraphiQL assets *)
+let graphiql_asset_root () =
+  Filename.concat (Sys.getcwd ()) "assets/graphiql"
+
+let graphiql_asset_path name =
+  Filename.concat (graphiql_asset_root ()) name
+
+let graphiql_asset_content_type name =
+  if Filename.check_suffix name ".css" then
+    "text/css; charset=utf-8"
+  else if Filename.check_suffix name ".js" then
+    "application/javascript; charset=utf-8"
+  else
+    "application/octet-stream"
+
+let read_file path =
+  try Ok (In_channel.with_open_bin path In_channel.input_all)
+  with exn -> Error (Printexc.to_string exn)
+
+let serve_graphiql_asset name _request reqd =
+  let path = graphiql_asset_path name in
+  match read_file path with
+  | Ok body ->
+      Http.Response.bytes ~content_type:(graphiql_asset_content_type name) body reqd
+  | Error _ ->
+      Http.Response.not_found reqd
 
 (** CORS preflight response headers *)
 let cors_preflight_headers origin =
@@ -659,6 +686,14 @@ let make_routes () =
   Http.Router.empty
   |> Http.Router.get "/health" health_handler
   |> Http.Router.get "/" (fun _req reqd -> Http.Response.text "MASC MCP Server" reqd)
+  |> Http.Router.get "/graphiql/graphiql.min.css"
+       (serve_graphiql_asset "graphiql.min.css")
+  |> Http.Router.get "/graphiql/graphiql.min.js"
+       (serve_graphiql_asset "graphiql.min.js")
+  |> Http.Router.get "/graphiql/react.production.min.js"
+       (serve_graphiql_asset "react.production.min.js")
+  |> Http.Router.get "/graphiql/react-dom.production.min.js"
+       (serve_graphiql_asset "react-dom.production.min.js")
   |> Http.Router.get "/mcp" (fun request reqd -> handle_get_mcp request reqd)
   |> Http.Router.post "/" handle_post_mcp
   |> Http.Router.post "/mcp" handle_post_mcp

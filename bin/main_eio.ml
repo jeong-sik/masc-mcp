@@ -14,6 +14,7 @@ module Mcp_session = Masc_mcp.Mcp_session
 module Mcp_server = Masc_mcp.Mcp_server
 module Mcp_eio = Masc_mcp.Mcp_server_eio
 module Room_utils = Masc_mcp.Room_utils
+module Graphql_api = Masc_mcp.Graphql_api
 module Http_negotiation = Masc_mcp.Mcp_protocol.Http_negotiation
 module Progress = Masc_mcp.Progress
 module Sse = Masc_mcp.Sse
@@ -195,6 +196,11 @@ let json_headers session_id protocol_version origin =
   @ mcp_headers session_id protocol_version
   @ cors_headers origin
 
+(** GraphQL response headers *)
+let graphql_headers origin =
+  [("content-type", "application/json")]
+  @ cors_headers origin
+
 (** CORS preflight response headers *)
 let cors_preflight_headers origin =
   [
@@ -250,6 +256,27 @@ let options_handler request reqd =
 (** Eio switch and clock references for MCP handlers *)
 let current_sw : Eio.Switch.t option ref = ref None
 let current_clock : float Eio.Time.clock_ty Eio.Resource.t option ref = ref None
+
+let http_status_of_graphql = function
+  | `OK -> `OK
+  | `Bad_request -> `Bad_request
+
+let handle_post_graphql request reqd =
+  let origin = get_origin request in
+  Http.Request.read_body_async reqd (fun body_str ->
+    let state = match !server_state with
+      | Some s -> s
+      | None -> failwith "Server state not initialized"
+    in
+    let response = Graphql_api.handle_request ~config:state.room_config body_str in
+    let status = http_status_of_graphql response.status in
+    let headers = Httpun.Headers.of_list (
+      ("content-length", string_of_int (String.length response.body))
+      :: graphql_headers origin
+    ) in
+    let http_response = Httpun.Response.create ~headers status in
+    Httpun.Reqd.respond_with_string reqd http_response response.body
+  )
 
 (** MCP POST handler - async body reading with callback-based response *)
 let handle_post_mcp request reqd =
@@ -548,6 +575,7 @@ let make_routes () =
   |> Http.Router.get "/mcp" (fun request reqd -> handle_get_mcp request reqd)
   |> Http.Router.post "/" handle_post_mcp
   |> Http.Router.post "/mcp" handle_post_mcp
+  |> Http.Router.post "/graphql" handle_post_graphql
   |> Http.Router.post "/messages" handle_post_messages
   |> Http.Router.get "/sse"
        (fun request reqd ->
@@ -636,6 +664,7 @@ let run_server ~sw ~env ~port ~base_path =
   Printf.printf "   GET  /mcp → SSE stream (notifications)\n%!";
   Printf.printf "   POST /mcp → JSON-RPC (Accept: text/event-stream for SSE)\n%!";
   Printf.printf "   DELETE /mcp → Session termination\n%!";
+  Printf.printf "   POST /graphql → GraphQL (read-only)\n%!";
   Printf.printf "   GET  /sse → legacy SSE stream (event: endpoint)\n%!";
   Printf.printf "   POST /messages → legacy client->server messages\n%!";
   Printf.printf "   GET  /health → Health check\n%!";

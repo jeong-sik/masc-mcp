@@ -20,6 +20,7 @@
    encryption
    federation
    gcm_compat
+   graphql_api
    hebbian_eio
    http_server_eio
    level2_config
@@ -69,6 +70,8 @@
  (libraries
    yojson
    base64
+   graphql
+   graphql_parser
    httpun-ws
    httpun-ws-eio
    bigstringaf

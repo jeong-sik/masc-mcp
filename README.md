@@ -642,6 +642,28 @@ Implements [MCP Spec 2025-11-25](https://spec.modelcontextprotocol.io/):
 - `MCP-Protocol-Version` header negotiation
 - `Mcp-Session-Id` for session tracking
 
+## GraphQL (Read-only)
+
+- `POST /graphql` accepts JSON: `{ "query": "...", "variables": {...}, "operationName": "..." }`
+- Relay-style connections: `tasks`, `agents`, `messages` support `first` + `after`
+- Cursors are base64 `"kind:value"` (`task`, `agent`, `message`)
+
+Example:
+
+```bash
+curl -s -X POST http://127.0.0.1:8935/graphql \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"{ status { project paused } }"}'
+```
+
+Relay-style connection example:
+
+```bash
+curl -s -X POST http://127.0.0.1:8935/graphql \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"{ tasks(first: 2) { totalCount edges { cursor node { id title status { status } } } pageInfo { hasNextPage endCursor } } }"}'
+```
+
 ## Contributing
 
 Contributions welcome! Please:

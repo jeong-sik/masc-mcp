@@ -29,6 +29,8 @@
   (compact-protocol (>= 0.1.0))
   ; Standard dependencies
   (yojson (>= 2.0))
+  (graphql (>= 0.14.0))
+  (graphql_parser (>= 0.14.0))
   (cmdliner (>= 1.1))
   (cohttp (>= 5.0))
   (ppx_deriving_yojson (>= 3.6))

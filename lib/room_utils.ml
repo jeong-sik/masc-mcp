@@ -106,7 +106,7 @@ let env_opt name =
 let storage_type_from_env () =
   match env_opt "MASC_STORAGE_TYPE" with
   | Some value -> String.lowercase_ascii value
-  | None -> "auto"  (* Default to auto-detection *)
+  | None -> "filesystem"  (* Default to zero-dependency FileSystem backend *)
 
 (** Auto-detect best backend based on environment variables
     Priority order:

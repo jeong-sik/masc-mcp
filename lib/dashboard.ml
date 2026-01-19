@@ -141,6 +141,45 @@ let truncate_message (msg : string) : string =
     String.sub msg 0 prefix_len ^ "..."
   else msg
 
+(** Check string suffix *)
+let ends_with ~suffix s =
+  let suffix_len = String.length suffix in
+  let s_len = String.length s in
+  s_len >= suffix_len &&
+  String.sub s (s_len - suffix_len) suffix_len = suffix
+
+let rec count_lock_files path =
+  if not (Sys.file_exists path) then
+    0
+  else if Sys.is_directory path then
+    Sys.readdir path
+    |> Array.fold_left (fun acc entry ->
+      let child = Filename.concat path entry in
+      acc + count_lock_files child
+    ) 0
+  else if ends_with ~suffix:".flock" (Filename.basename path) then
+    0
+  else
+    1
+
+(** Get lock count across backends *)
+let lock_count (config : Room_utils.config) : int =
+  match config.backend with
+  | Room_utils.FileSystem _ ->
+      let locks_dir = Filename.concat (Room_utils.masc_dir config) "locks" in
+      count_lock_files locks_dir
+  | Room_utils.RedisRest _ | Room_utils.RedisNative _ | Room_utils.Memory _ | Room_utils.PostgresNative _ ->
+      let prefix = Printf.sprintf "locks:%s:" (Room_utils.project_prefix config) in
+      (match Room_utils.backend_list_keys config ~prefix with
+       | Ok keys -> List.length keys
+       | Error _ -> 0)
+
+(** Get locks section *)
+let locks_section (config : Room_utils.config) : section =
+  let count = lock_count config in
+  let content = [Printf.sprintf "%d active locks" count] in
+  { title = "Locks"; content; empty_msg = "" }
+
 (** Get messages section *)
 let messages_section (config : Room_utils.config) : section =
   let messages = Room.get_messages_raw config ~limit:max_recent_messages ~since_seq:0 in
@@ -198,6 +237,7 @@ let generate (config : Room_utils.config) : string =
   let sections = [
     agents_section config;
     tasks_section config;
+    locks_section config;
     messages_section config;
     tempo_section config;
     worktrees_section config;
@@ -210,6 +250,7 @@ let generate_compact (config : Room_utils.config) : string =
   let agents = Room.get_agents_raw config in
   let tasks = Room.get_tasks_raw config in
   let tempo = Tempo.get_tempo config in
+  let locks = lock_count config in
   let pending = List.filter (fun t -> t.Types.task_status = Types.Todo) tasks in
   let active = List.filter (fun t ->
     match t.Types.task_status with
@@ -217,8 +258,9 @@ let generate_compact (config : Room_utils.config) : string =
     | Types.Claimed _ -> true
     | _ -> false
   ) tasks in
-  Printf.sprintf "Agents: %d | Tasks: %d active, %d pending | Tempo: %.0fs"
+  Printf.sprintf "Agents: %d | Tasks: %d active, %d pending | Locks: %d | Tempo: %.0fs"
     (List.length agents)
     (List.length active)
     (List.length pending)
+    locks
     tempo.Tempo.current_interval_s

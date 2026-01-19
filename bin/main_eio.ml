@@ -201,6 +201,38 @@ let graphql_headers origin =
   [("content-type", "application/json")]
   @ cors_headers origin
 
+(** GraphiQL playground HTML (GET /graphql) *)
+let graphql_playground_html = {|
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MASC GraphQL Playground</title>
+    <link rel="stylesheet" href="https://unpkg.com/graphiql@2.5.2/graphiql.min.css" />
+    <style>
+      html, body, #graphiql { height: 100%; margin: 0; }
+    </style>
+  </head>
+  <body>
+    <div id="graphiql">Loading...</div>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/graphiql@2.5.2/graphiql.min.js"></script>
+    <script>
+      const fetcher = GraphiQL.createFetcher({ url: "/graphql" });
+      const root = ReactDOM.createRoot(document.getElementById("graphiql"));
+      root.render(
+        React.createElement(GraphiQL, {
+          fetcher: fetcher,
+          defaultQuery: "{ status { protocolVersion project messageSeq activeAgents paused } }"
+        })
+      );
+    </script>
+  </body>
+</html>
+|}
+
 (** CORS preflight response headers *)
 let cors_preflight_headers origin =
   [
@@ -261,6 +293,9 @@ let http_status_of_graphql = function
   | `OK -> `OK
   | `Bad_request -> `Bad_request
 
+let handle_get_graphql _request reqd =
+  Http.Response.html graphql_playground_html reqd
+
 let handle_post_graphql request reqd =
   let origin = get_origin request in
   Http.Request.read_body_async reqd (fun body_str ->
@@ -277,6 +312,12 @@ let handle_post_graphql request reqd =
     let http_response = Httpun.Response.create ~headers status in
     Httpun.Reqd.respond_with_string reqd http_response response.body
   )
+
+let handle_graphql request reqd =
+  match Http.Request.method_ request with
+  | `GET -> handle_get_graphql request reqd
+  | `POST -> handle_post_graphql request reqd
+  | _ -> Http.Response.method_not_allowed reqd
 
 (** MCP POST handler - async body reading with callback-based response *)
 let handle_post_mcp request reqd =
@@ -594,7 +635,7 @@ let make_routes () =
   |> Http.Router.get "/mcp" (fun request reqd -> handle_get_mcp request reqd)
   |> Http.Router.post "/" handle_post_mcp
   |> Http.Router.post "/mcp" handle_post_mcp
-  |> Http.Router.post "/graphql" handle_post_graphql
+  |> Http.Router.add ~path:"/graphql" ~methods:[`GET; `POST] ~handler:handle_graphql
   |> Http.Router.post "/messages" handle_post_messages
   |> Http.Router.get "/sse"
        (fun request reqd ->

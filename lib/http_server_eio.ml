@@ -95,6 +95,14 @@ module Response = struct
     let response = Httpun.Response.create ~headers status in
     Httpun.Reqd.respond_with_string reqd response body
 
+  let html ?(status = `OK) body reqd =
+    let headers = Httpun.Headers.of_list [
+      ("content-type", "text/html; charset=utf-8");
+      ("content-length", string_of_int (String.length body));
+    ] in
+    let response = Httpun.Response.create ~headers status in
+    Httpun.Reqd.respond_with_string reqd response body
+
   (** JSON response with optional zstd compression (dictionary-enhanced)
 
       Uses trained multi-format dictionary for small messages (32-2048 bytes)

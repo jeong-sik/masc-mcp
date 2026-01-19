@@ -210,26 +210,35 @@ let graphql_playground_html ~nonce =
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>MASC GraphQL Playground</title>
-    <link rel="stylesheet" href="https://unpkg.com/graphiql@2.5.2/graphiql.min.css" />
+    <link rel="stylesheet" href="https://unpkg.com/graphiql@1.9.3/graphiql.min.css" />
     <style nonce="%s">
       html, body, #graphiql { height: 100%%; margin: 0; }
     </style>
   </head>
   <body>
     <div id="graphiql">Loading...</div>
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/graphiql@2.5.2/graphiql.min.js"></script>
+    <script src="https://unpkg.com/react@16.14.0/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@16.14.0/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/graphiql@1.9.3/graphiql.min.js"></script>
     <script nonce="%s">
-      const fetcher = GraphiQL.createFetcher({ url: "/graphql" });
-      const root = ReactDOM.createRoot(document.getElementById("graphiql"));
-      root.render(
+      const graphQLFetcher = function (graphQLParams) {
+        return fetch("/graphql", {
+          method: "post",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(graphQLParams),
+        }).then(function (response) {
+          return response.json();
+        });
+      };
+      const defaultQuery =
+        "{ status { protocolVersion project messageSeq activeAgents paused } " +
+        "tasks(first: 10) { totalCount edges { node { id title priority status { status assignee } } } } }";
+      ReactDOM.render(
         React.createElement(GraphiQL, {
-          fetcher: fetcher,
-          defaultQuery:
-            "{ status { protocolVersion project messageSeq activeAgents paused } " +
-            "tasks(first: 10) { totalCount edges { node { id title priority status { status assignee } } } } }"
-        })
+          fetcher: graphQLFetcher,
+          defaultQuery: defaultQuery
+        }),
+        document.getElementById("graphiql")
       );
     </script>
   </body>
@@ -240,7 +249,7 @@ let graphql_csp_header nonce =
   Printf.sprintf
     "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; \
      connect-src 'self'; img-src 'self' data:; \
-     script-src 'self' https://unpkg.com 'nonce-%s'; \
+     script-src 'self' https://unpkg.com 'nonce-%s' 'unsafe-eval'; \
      style-src 'self' https://unpkg.com 'unsafe-inline'; \
      font-src https://unpkg.com data:"
     nonce
@@ -481,7 +490,7 @@ let send_raw info data =
     try
       Eio.Mutex.use_rw ~protect:true info.mutex (fun () ->
         Httpun.Body.Writer.write_string info.writer data;
-        Httpun.Body.Writer.flush info.writer (fun () -> ())
+        Httpun.Body.Writer.flush info.writer (fun _ -> ())
       );
       true
     with exn ->

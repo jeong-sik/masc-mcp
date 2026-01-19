@@ -34,6 +34,8 @@ let normalize_protocol_version = Mcp_server.normalize_protocol_version
 let validate_initialize_params = Mcp_server.validate_initialize_params
 let make_response = Mcp_server.make_response
 let make_error = Mcp_server.make_error
+let is_valid_request_id = Mcp_server.is_valid_request_id
+let validate_initialize_params = Mcp_server.validate_initialize_params
 
 (** Unregister agent synchronously - adapter for Session.registry
 

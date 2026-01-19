@@ -219,8 +219,9 @@ let sse_streaming_handler request reqd =
   let connected_data = Printf.sprintf {|{"session_id":"%s","protocol_version":"%s"}|}
     session_id protocol_version in
   send_sse_event body "connected" connected_data;
-  Httpun.Body.Writer.flush body (fun () ->
-    ()  (* Connection established, client is now listening *)
+  Httpun.Body.Writer.flush body (function
+    | `Closed -> ()
+    | `Written -> ()
   )
 
 (** SSE simple handler - for compatibility, returns single event *)

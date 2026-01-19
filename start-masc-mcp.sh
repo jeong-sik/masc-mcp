@@ -54,57 +54,48 @@ elif [ -x "$LOCAL_EIO_EXE" ]; then
     MASC_EIO_EXE="$LOCAL_EIO_EXE"
 fi
 
-# 5. Auto-download from GitHub releases if nothing found
-if [ -z "$MASC_EXE" ]; then
-    echo "No binary found. Downloading from GitHub releases..." >&2
-    RELEASE_URL="https://github.com/jeong-sik/masc-mcp/releases/latest/download/masc-mcp-macos-arm64"
-    if curl -fsSL -o "$RELEASE_BINARY" "$RELEASE_URL" 2>/dev/null; then
-        chmod +x "$RELEASE_BINARY"
-        MASC_EXE="$RELEASE_BINARY"
-        echo "Downloaded: $RELEASE_BINARY" >&2
+# 5. Build Eio version if not found (Lwt deprecated, download disabled)
+if [ -z "$MASC_EIO_EXE" ]; then
+    echo "Building MASC MCP server (Eio) from source..." >&2
+    if ! command -v dune >/dev/null 2>&1; then
+        echo "Error: dune not found. Install dune first." >&2
+        exit 1
+    fi
+    dune build ./bin/main_eio.exe 1>&2
+    if [ -x "$LOCAL_EIO_EXE" ]; then
+        MASC_EIO_EXE="$LOCAL_EIO_EXE"
     else
-        # Fallback: build from source
-        echo "Download failed. Building from source..." >&2
-        if ! command -v dune >/dev/null 2>&1; then
-            echo "Error: dune not found. Install dune or download binary manually." >&2
-            exit 1
-        fi
-        dune build ./bin/main.exe 1>&2
-        if [ -x "$LOCAL_EXE" ]; then
-            MASC_EXE="$LOCAL_EXE"
-        else
-            echo "Error: build failed." >&2
-            exit 1
-        fi
+        echo "Error: build failed." >&2
+        exit 1
     fi
 fi
 
-# Rebuild if sources are newer than the executable (avoids stale binary runs)
-if [ -n "$MASC_EXE" ] && command -v dune >/dev/null 2>&1; then
+# Rebuild Eio version if sources are newer than the executable (avoids stale binary runs)
+# NOTE: Lwt version (main.exe) is deprecated - Eio is now the default
+if [ -n "$MASC_EIO_EXE" ] && command -v dune >/dev/null 2>&1; then
     if find "$SCRIPT_DIR/bin" "$SCRIPT_DIR/lib" \
         -type f \( -name '*.ml' -o -name '*.mli' -o -name 'dune' \) \
-        -newer "$MASC_EXE" 2>/dev/null | head -n 1 | grep -q .; then
+        -newer "$MASC_EIO_EXE" 2>/dev/null | head -n 1 | grep -q .; then
         echo "Rebuilding MASC MCP server (stale executable detected)..." >&2
-        dune build ./bin/main.exe 1>&2
+        dune build ./bin/main_eio.exe 1>&2
 
-        if [ -x "$WORKSPACE_EXE" ]; then
-            MASC_EXE="$WORKSPACE_EXE"
-        elif [ -x "$LOCAL_EXE" ]; then
-            MASC_EXE="$LOCAL_EXE"
+        if [ -x "$WORKSPACE_EIO_EXE" ]; then
+            MASC_EIO_EXE="$WORKSPACE_EIO_EXE"
+        elif [ -x "$LOCAL_EIO_EXE" ]; then
+            MASC_EIO_EXE="$LOCAL_EIO_EXE"
         fi
     fi
 fi
+
+# Eio is now the default runtime (Lwt deprecated)
+EIO_MODE="true"
 
 # Default arguments
 PORT="${MASC_MCP_PORT:-8935}"
 HTTP_MODE="${MASC_MCP_HTTP:-true}"
 BASE_PATH="${MASC_BASE_PATH:-$ME_ROOT}"
-EIO_MODE="false"
-
-# Auto-detect: Use Eio server if PostgreSQL backend is configured
-if [ "$MASC_STORAGE_TYPE" = "postgres" ]; then
-    EIO_MODE="true"
-fi
+# NOTE: Eio is now the default runtime (Lwt deprecated since 2026-01)
+EIO_MODE="true"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do

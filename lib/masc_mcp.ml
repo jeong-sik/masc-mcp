@@ -23,6 +23,7 @@ module Mcp_server = Mcp_server
 module Mcp_server_eio = Mcp_server_eio
 module Mcp_session = Mcp_session
 module Http_server_eio = Http_server_eio
+module Graphql_api = Graphql_api
 module Sse = Sse
 module Progress = Progress
 module Cancellation = Cancellation

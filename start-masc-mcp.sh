@@ -9,8 +9,7 @@ if command -v opam >/dev/null 2>&1; then
     eval "$(opam env 2>/dev/null)" >/dev/null 2>/dev/null || true
 fi
 
-# Redis backend: auto-use RAILWAY_REDIS_URL if MASC_REDIS_URL not set
-export MASC_REDIS_URL="${MASC_REDIS_URL:-$RAILWAY_REDIS_URL}"
+# Storage backends are opt-in. Use MASC_STORAGE_TYPE + MASC_REDIS_URL/MASC_POSTGRES_URL explicitly.
 
 # Room/namespace: derive from ME_ROOT directory name if not set
 # e.g., ME_ROOT=/Users/dancer/me → cluster "me"

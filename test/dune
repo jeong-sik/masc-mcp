@@ -12,13 +12,13 @@
 ; ============================================================
 (tests
  (names test_room test_types test_checkpoint test_auth test_http_negotiation
-        test_sse test_encryption test_backend test_cancellation
+        test_sse test_encryption test_backend test_cancellation test_graphql_api
         test_subscriptions test_session test_progress test_mitosis test_spawn
         test_validation test_response test_voice_stream test_sctp
         test_datachannel_rfc test_dtls_crypto test_dashboard
         test_multi_room test_worktree_detection)
  (modules test_room test_types test_checkpoint test_auth test_http_negotiation
-          test_sse test_encryption test_backend test_cancellation
+          test_sse test_encryption test_backend test_cancellation test_graphql_api
           test_subscriptions test_session test_progress test_mitosis test_spawn
           test_validation test_response test_voice_stream test_sctp
           test_datachannel_rfc test_dtls_crypto test_dashboard

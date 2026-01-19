@@ -202,7 +202,8 @@ let graphql_headers origin =
   @ cors_headers origin
 
 (** GraphiQL playground HTML (GET /graphql) *)
-let graphql_playground_html = {|
+let graphql_playground_html ~nonce =
+  Printf.sprintf {|
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -210,8 +211,8 @@ let graphql_playground_html = {|
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>MASC GraphQL Playground</title>
     <link rel="stylesheet" href="https://unpkg.com/graphiql@2.5.2/graphiql.min.css" />
-    <style>
-      html, body, #graphiql { height: 100%; margin: 0; }
+    <style nonce="%s">
+      html, body, #graphiql { height: 100%%; margin: 0; }
     </style>
   </head>
   <body>
@@ -219,19 +220,30 @@ let graphql_playground_html = {|
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/graphiql@2.5.2/graphiql.min.js"></script>
-    <script>
+    <script nonce="%s">
       const fetcher = GraphiQL.createFetcher({ url: "/graphql" });
       const root = ReactDOM.createRoot(document.getElementById("graphiql"));
       root.render(
         React.createElement(GraphiQL, {
           fetcher: fetcher,
-          defaultQuery: "{ status { protocolVersion project messageSeq activeAgents paused } }"
+          defaultQuery:
+            "{ status { protocolVersion project messageSeq activeAgents paused } " +
+            "tasks(first: 10) { totalCount edges { node { id title priority status { status assignee } } } } }"
         })
       );
     </script>
   </body>
 </html>
-|}
+|} nonce nonce
+
+let graphql_csp_header nonce =
+  Printf.sprintf
+    "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; \
+     connect-src 'self'; img-src 'self' data:; \
+     script-src 'self' https://unpkg.com 'nonce-%s'; \
+     style-src 'self' https://unpkg.com 'unsafe-inline'; \
+     font-src https://unpkg.com data:"
+    nonce
 
 (** CORS preflight response headers *)
 let cors_preflight_headers origin =
@@ -294,7 +306,16 @@ let http_status_of_graphql = function
   | `Bad_request -> `Bad_request
 
 let handle_get_graphql _request reqd =
-  Http.Response.html graphql_playground_html reqd
+  let nonce =
+    let rng = Random.State.make_self_init () in
+    let bytes = Bytes.init 16 (fun _ -> Char.chr (Random.State.int rng 256)) in
+    Base64.encode_string (Bytes.to_string bytes)
+  in
+  let headers = [
+    ("content-security-policy", graphql_csp_header nonce);
+  ] in
+  let body = graphql_playground_html ~nonce in
+  Http.Response.html ~headers body reqd
 
 let handle_post_graphql request reqd =
   let origin = get_origin request in

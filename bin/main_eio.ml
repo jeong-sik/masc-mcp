@@ -241,7 +241,7 @@ let is_http_error_response = function
 
 (** Health check handler *)
 let health_handler _request reqd =
-  let json = {|{"status":"ok","server":"masc-mcp-eio","version":"2.2.0"}|} in
+let json = {|{"status":"ok","server":"masc-mcp-eio","version":"2.2.1"}|} in
   Http.Response.json json reqd
 
 (** CORS preflight handler *)
@@ -419,7 +419,10 @@ let send_raw info data =
     try
       Eio.Mutex.use_rw ~protect:true info.mutex (fun () ->
         Httpun.Body.Writer.write_string info.writer data;
-        Httpun.Body.Writer.flush info.writer (fun () -> ())
+        Httpun.Body.Writer.flush info.writer (function
+          | `Closed -> ()
+          | `Written -> ()
+        )
       );
       true
     with exn ->
@@ -675,8 +678,13 @@ let run_server ~sw ~env ~port ~base_path =
   let addr = `Tcp (ip, config.port) in
   let socket = Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:config.max_connections addr in
 
+  let resolved_base = state.room_config.base_path in
+  let masc_dir = Filename.concat resolved_base ".masc" in
   Printf.printf "🚀 MASC MCP Server (Eio) listening on http://%s:%d\n%!" config.host config.port;
-  Printf.printf "   Base path: %s\n%!" base_path;
+  Printf.printf "   Base path: %s\n%!" resolved_base;
+  if resolved_base <> base_path then
+    Printf.printf "   Base path (input): %s\n%!" base_path;
+  Printf.printf "   MASC dir: %s\n%!" masc_dir;
   Printf.printf "   GET  /mcp → SSE stream (notifications)\n%!";
   Printf.printf "   POST /mcp → JSON-RPC (Accept: text/event-stream for SSE)\n%!";
   Printf.printf "   DELETE /mcp → Session termination\n%!";
@@ -755,7 +763,7 @@ let run_cmd port base_path =
 
 let cmd =
   let doc = "MASC MCP Server (Eio native)" in
-  let info = Cmd.info "masc-mcp-eio" ~version:"2.2.0-eio" ~doc in
+  let info = Cmd.info "masc-mcp-eio" ~version:"2.2.1-eio" ~doc in
   Cmd.v info Term.(const run_cmd $ port $ base_path)
 
 let () = exit (Cmd.eval cmd)

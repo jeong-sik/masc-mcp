@@ -348,6 +348,24 @@ let backend_get_all config ~prefix =
   | RedisNative t -> Backend.RedisNative.get_all t ~prefix
   | PostgresNative t -> Backend.PostgresNative.get_all t ~prefix
 
+let lock_count config =
+  let is_active now value =
+    try
+      let open Yojson.Safe.Util in
+      let json = Yojson.Safe.from_string value in
+      match json |> member "expires_at" |> to_float_option with
+      | Some expires_at -> expires_at > now
+      | None -> true
+    with _ -> true
+  in
+  let now = Unix.gettimeofday () in
+  match backend_get_all config ~prefix:"locks:" with
+  | Ok pairs ->
+      List.fold_left (fun acc (_key, value) ->
+        if is_active now value then acc + 1 else acc
+      ) 0 pairs
+  | Error _ -> 0
+
 let backend_set_if_not_exists config ~key ~value =
   match config.backend with
   | Memory t -> Backend.MemoryBackend.set_if_not_exists t ~key ~value

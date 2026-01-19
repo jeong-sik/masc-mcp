@@ -166,13 +166,17 @@ MASC uses a **Room** concept to coordinate agents. A Room is defined by its base
 
 | Mode | Room Determined By | Use Case |
 |------|-------------------|----------|
-| **FS (Local)** | `--path` argument or `$ME_ROOT` | Single machine |
+| **FS (Local)** | `--path`/`--base-path`, `$MASC_BASE_PATH`, or `$ME_ROOT` (fallback: cwd) | Single machine |
 | **Redis (Distributed)** | `MASC_CLUSTER_NAME` + Redis URL | Multi-machine (Lwt server) |
 | **PostgreSQL (Distributed)** | `MASC_CLUSTER_NAME` + Postgres URL | Multi-machine (Eio server, recommended) |
 
+Notes:
+- If the base path is inside a git worktree, MASC resolves it to the main repo root so all worktrees share one `.masc`.
+- Effective room directory is `<resolved-base>/.masc`.
+
 ```bash
 # FS Mode: agents on same machine share ~/me/.masc/
-./start-masc-mcp.sh --path ~/me --port 8935
+./start-masc-mcp.sh --base-path ~/me --port 8935
 
 # Redis Mode: agents on different machines share "myproject" cluster
 export MASC_CLUSTER_NAME=myproject
@@ -309,8 +313,8 @@ export MASC_NOTIFY_FOCUS_ON_OSASCRIPT=1
 | Variable | Default | Description |
 |----------|---------|-------------|
 | **Core** | | |
-| `ME_ROOT` | - | Base path for `.masc/` directory |
-| `MASC_BASE_PATH` | `$ME_ROOT` | Override base path |
+| `ME_ROOT` | - | Default base path for `.masc/` (fallback: cwd) |
+| `MASC_BASE_PATH` | `$ME_ROOT` | Override base path (worktrees resolve to git root) |
 | `MASC_CLUSTER_NAME` | `basename($ME_ROOT)` | Cluster name for Redis mode |
 | **Storage** | | |
 | `MASC_STORAGE_TYPE` | `fs` | `fs`, `redis`, or `postgres` |

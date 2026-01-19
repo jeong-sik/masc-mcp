@@ -574,6 +574,8 @@ let handle_delete_mcp req =
 (** HTTP server mode with MCP Streamable HTTP Transport (2025-11-25 spec) *)
 let run_http ~port ~base_path =
   let state = Masc_mcp.Mcp_server.create_state ~base_path in
+  let resolved_base = state.room_config.base_path in
+  let masc_dir = Filename.concat resolved_base ".masc" in
 
   (* Register SSE broadcast callback *)
   Masc_mcp.Mcp_server.set_sse_callback state Sse.broadcast;
@@ -583,7 +585,10 @@ let run_http ~port ~base_path =
   Masc_mcp.Orchestrator.start state.room_config;
 
   Printf.printf "🎮 MASC MCP Server (Streamable HTTP 2025-11-25)\n%!";
-  Printf.printf "📁 Room: %s\n%!" base_path;
+  Printf.printf "📁 Room: %s\n%!" resolved_base;
+  if resolved_base <> base_path then
+    Printf.printf "   Base path (input): %s\n%!" base_path;
+  Printf.printf "   MASC dir: %s\n%!" masc_dir;
   Printf.printf "🌐 http://127.0.0.1:%d/mcp\n%!" port;
   Printf.printf "   GET  /mcp → SSE stream (notifications)\n%!";
   Printf.printf "   POST /mcp → JSON-RPC (Accept: text/event-stream for SSE)\n%!";
@@ -1094,7 +1099,7 @@ let port_arg =
   Arg.(value & opt int 8935 & info ["port"; "p"] ~docv:"PORT" ~doc)
 
 let path_arg =
-  let doc = "Base path for MASC room (default: $ME_ROOT or current directory)." in
+  let doc = "Base path for MASC room (default: $ME_ROOT or current directory; worktrees resolve to git root)." in
   Arg.(value & opt string (default_base_path ()) & info ["path"; "d"] ~docv:"PATH" ~doc)
 
 let grpc_port_arg =
@@ -1142,7 +1147,7 @@ let server_cmd =
 
 let cmd =
   let doc = "MASC - Multi-Agent Streaming Coordination (MCP 2025-11-25)" in
-  let info = Cmd.info "masc-mcp" ~version:"2.0.1" ~doc in
+  let info = Cmd.info "masc-mcp" ~version:"2.2.1" ~doc in
   Cmd.group info ~default:Term.(const main $ http_flag $ stdio_flag $ port_arg $ grpc_port_arg $ path_arg) [
     server_cmd;
     dashboard_cmd;

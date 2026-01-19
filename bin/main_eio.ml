@@ -241,7 +241,7 @@ let is_http_error_response = function
 
 (** Health check handler *)
 let health_handler _request reqd =
-  let json = {|{"status":"ok","server":"masc-mcp-eio","version":"2.2.0"}|} in
+  let json = {|{"status":"ok","server":"masc-mcp-eio","version":"2.2.1"}|} in
   Http.Response.json json reqd
 
 (** CORS preflight handler *)
@@ -755,7 +755,7 @@ let run_cmd port base_path =
 
 let cmd =
   let doc = "MASC MCP Server (Eio native)" in
-  let info = Cmd.info "masc-mcp-eio" ~version:"2.2.0-eio" ~doc in
+  let info = Cmd.info "masc-mcp-eio" ~version:"2.2.1-eio" ~doc in
   Cmd.v info Term.(const run_cmd $ port $ base_path)
 
 let () = exit (Cmd.eval cmd)

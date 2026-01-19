@@ -1,6 +1,6 @@
 # MASC MCP
 
-[![Version](https://img.shields.io/badge/version-2.1.0-blue.svg)](https://github.com/jeong-sik/masc-mcp)
+[![Version](https://img.shields.io/badge/version-2.2.1-blue.svg)](https://github.com/jeong-sik/masc-mcp)
 [![OCaml](https://img.shields.io/badge/OCaml-5.x-orange.svg)](https://ocaml.org/)
 [![MCP](https://img.shields.io/badge/MCP-2025--11--25-blue.svg)](https://spec.modelcontextprotocol.io/)
 [![Status](https://img.shields.io/badge/status-Production%20Ready-green.svg)]()
@@ -14,7 +14,7 @@ A native OCaml implementation for coordinating multiple AI agents (Claude, Gemin
 ## 5-Minute Quick Start
 
 ```bash
-# 1. Start server (auto-builds if needed)
+# 1. Start server (Eio default, auto-builds if needed)
 ./start-masc-mcp.sh --http --port 8935
 
 # 2. Verify it's running
@@ -238,7 +238,7 @@ curl http://127.0.0.1:8935/health
 
 #### PostgreSQL (Recommended for Eio Server)
 
-Enable PostgreSQL for stable, non-blocking distributed coordination. **Recommended for Eio-native server** (`masc-mcp-eio`) as it uses caqti-eio for true async database access.
+Enable PostgreSQL for stable, non-blocking distributed coordination. **Recommended for Eio-native server** (`masc-mcp`) as it uses caqti-eio for true async database access.
 
 ```bash
 # Environment variables
@@ -254,11 +254,11 @@ export MASC_STORAGE_TYPE=postgres
 export MASC_POSTGRES_URL="$RAILWAY_PG_URL"  # or set directly
 
 # Start Eio server (recommended for PostgreSQL)
-./start-masc-mcp.sh --http --port 8935 --eio
+./start-masc-mcp.sh --http --port 8935
 
 # Verify PostgreSQL connection
 curl http://127.0.0.1:8935/health
-# {"status":"ok","server":"masc-mcp-eio","backend":"postgres",...}
+# {"status":"ok","server":"masc-mcp","backend":"postgres",...}
 ```
 
 **Required Table** (auto-created or manual):

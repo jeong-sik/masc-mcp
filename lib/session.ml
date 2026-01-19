@@ -79,13 +79,15 @@ let unregister registry ~agent_name =
 
 (** Update activity timestamp *)
 let update_activity registry ~agent_name ?(is_listening = None) () =
-  match Hashtbl.find_opt registry.sessions agent_name with
-  | Some session ->
-      session.last_activity <- Unix.gettimeofday ();
-      (match is_listening with
-       | Some v -> session.is_listening <- v
-       | None -> ())
-  | None -> ()
+  with_lock registry (fun () ->
+    match Hashtbl.find_opt registry.sessions agent_name with
+    | Some session ->
+        session.last_activity <- Unix.gettimeofday ();
+        (match is_listening with
+         | Some v -> session.is_listening <- v
+         | None -> ())
+    | None -> ()
+  )
 
 (** Create empty rate tracker *)
 let create_tracker () = {
@@ -127,57 +129,59 @@ let set_timestamps tracker category ts =
 
 (** Enhanced rate limit check with category and role *)
 let check_rate_limit_ex registry ~agent_name ~category ~role =
-  let now = Unix.gettimeofday () in
-  let one_minute_ago = now -. 60.0 in
+  with_lock registry (fun () ->
+    let now = Unix.gettimeofday () in
+    let one_minute_ago = now -. 60.0 in
 
-  (* Get or create tracker *)
-  let tracker =
-    match Hashtbl.find_opt registry.rate_trackers agent_name with
-    | Some t -> t
-    | None ->
-        let t = create_tracker () in
-        Hashtbl.replace registry.rate_trackers agent_name t;
-        t
-  in
+    (* Get or create tracker *)
+    let tracker =
+      match Hashtbl.find_opt registry.rate_trackers agent_name with
+      | Some t -> t
+      | None ->
+          let t = create_tracker () in
+          Hashtbl.replace registry.rate_trackers agent_name t;
+          t
+    in
 
-  (* Reset burst if a minute has passed - atomic compare-and-set *)
-  let last_reset = get_last_burst_reset tracker in
-  if now -. last_reset > 60.0 then begin
-    set_burst_used tracker 0;
-    set_last_burst_reset tracker now
-  end;
+    (* Reset burst if a minute has passed - atomic compare-and-set *)
+    let last_reset = get_last_burst_reset tracker in
+    if now -. last_reset > 60.0 then begin
+      set_burst_used tracker 0;
+      set_last_burst_reset tracker now
+    end;
 
-  (* Filter to last minute only *)
-  let timestamps = get_timestamps tracker category in
-  let recent = List.filter (fun t -> t > one_minute_ago) timestamps in
-  set_timestamps tracker category recent;
+    (* Filter to last minute only *)
+    let timestamps = get_timestamps tracker category in
+    let recent = List.filter (fun t -> t > one_minute_ago) timestamps in
+    set_timestamps tracker category recent;
 
-  (* Compute effective limit based on role *)
-  let base_limit = effective_limit registry.config ~role ~category in
-  let limit =
-    if List.mem agent_name registry.config.priority_agents
-    then int_of_float (float_of_int base_limit *. 1.5)
-    else base_limit
-  in
+    (* Compute effective limit based on role *)
+    let base_limit = effective_limit registry.config ~role ~category in
+    let limit =
+      if List.mem agent_name registry.config.priority_agents
+      then int_of_float (float_of_int base_limit *. 1.5)
+      else base_limit
+    in
 
-  let current = List.length recent in
+    let current = List.length recent in
 
-  if current >= limit then begin
-    (* Check if burst is available - using atomic read/increment *)
-    let burst = get_burst_used tracker in
-    if burst < registry.config.burst_allowed then begin
-      incr_burst_used tracker;  (* Atomic increment *)
-      set_timestamps tracker category (now :: recent);
-      (true, 0)  (* Burst allowed *)
+    if current >= limit then begin
+      (* Check if burst is available - using atomic read/increment *)
+      let burst = get_burst_used tracker in
+      if burst < registry.config.burst_allowed then begin
+        incr_burst_used tracker;  (* Atomic increment *)
+        set_timestamps tracker category (now :: recent);
+        (true, 0)  (* Burst allowed *)
+      end else begin
+        let oldest = List.fold_left min now recent in
+        let wait = int_of_float (oldest +. 60.0 -. now) in
+        (false, max 1 wait)
+      end
     end else begin
-      let oldest = List.fold_left min now recent in
-      let wait = int_of_float (oldest +. 60.0 -. now) in
-      (false, max 1 wait)
+      set_timestamps tracker category (now :: recent);
+      (true, 0)
     end
-  end else begin
-    set_timestamps tracker category (now :: recent);
-    (true, 0)
-  end
+  )
 
 (** Check rate limit - simple wrapper using defaults *)
 let check_rate_limit registry ~agent_name =
@@ -185,39 +189,41 @@ let check_rate_limit registry ~agent_name =
 
 (** Get rate limit status for an agent *)
 let get_rate_limit_status registry ~agent_name ~role =
-  let now = Unix.gettimeofday () in
-  let one_minute_ago = now -. 60.0 in
+  with_lock registry (fun () ->
+    let now = Unix.gettimeofday () in
+    let one_minute_ago = now -. 60.0 in
 
-  let tracker =
-    match Hashtbl.find_opt registry.rate_trackers agent_name with
-    | Some t -> t
-    | None -> create_tracker ()
-  in
+    let tracker =
+      match Hashtbl.find_opt registry.rate_trackers agent_name with
+      | Some t -> t
+      | None -> create_tracker ()
+    in
 
-  let status_for_category category =
-    let timestamps = get_timestamps tracker category in
-    let recent = List.filter (fun t -> t > one_minute_ago) timestamps in
-    let limit = effective_limit registry.config ~role ~category in
-    let current = List.length recent in
+    let status_for_category category =
+      let timestamps = get_timestamps tracker category in
+      let recent = List.filter (fun t -> t > one_minute_ago) timestamps in
+      let limit = effective_limit registry.config ~role ~category in
+      let current = List.length recent in
+      `Assoc [
+        ("category", `String (show_rate_limit_category category));
+        ("current", `Int current);
+        ("limit", `Int limit);
+        ("remaining", `Int (max 0 (limit - current)));
+      ]
+    in
+
+    let burst = get_burst_used tracker in  (* Atomic read *)
     `Assoc [
-      ("category", `String (show_rate_limit_category category));
-      ("current", `Int current);
-      ("limit", `Int limit);
-      ("remaining", `Int (max 0 (limit - current)));
+      ("agent", `String agent_name);
+      ("role", `String (agent_role_to_string role));
+      ("burst_remaining", `Int (registry.config.burst_allowed - burst));
+      ("categories", `List [
+        status_for_category GeneralLimit;
+        status_for_category BroadcastLimit;
+        status_for_category TaskOpsLimit;
+      ]);
     ]
-  in
-
-  let burst = get_burst_used tracker in  (* Atomic read *)
-  `Assoc [
-    ("agent", `String agent_name);
-    ("role", `String (agent_role_to_string role));
-    ("burst_remaining", `Int (registry.config.burst_allowed - burst));
-    ("categories", `List [
-      status_for_category GeneralLimit;
-      status_for_category BroadcastLimit;
-      status_for_category TaskOpsLimit;
-    ]);
-  ]
+  )
 
 (** Push message to session queue *)
 let push_message registry ~from_agent ~content ~mention =

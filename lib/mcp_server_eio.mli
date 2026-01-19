@@ -1,18 +1,17 @@
 (** MCP Protocol Server Implementation - Eio Native
 
     Direct-style async MCP server using OCaml 5.x Effect Handlers.
-    Provides same functionality as Mcp_server but without Lwt dependency.
+    Provides same functionality as Mcp_server but Eio-native.
 
-    Key differences from Lwt version:
+    Key differences from legacy version:
     - Direct-style async (no monads, no let-star)
     - Eio.Switch for structured concurrency
     - Eio.Buf_write for buffered I/O
     - Eio.Process for subprocess execution
 
-    Migration strategy:
+    Implementation notes:
     - Core request handling is Eio-native
-    - Tool implementations use lwt_eio bridge during transition
-    - Gradually migrate tools to pure Eio
+    - Tool implementations are direct-style Eio
 *)
 
 (** {1 Types} *)
@@ -45,7 +44,7 @@ val create_state_eio : sw:Eio.Switch.t -> env:Caqti_eio.stdenv -> base_path:stri
 (** Handle incoming JSON-RPC request string (Eio direct-style)
 
     This is the main entry point for Eio-native request handling.
-    Uses execute_tool_eio for tool calls, eliminating Lwt bridge for tools.
+    Uses execute_tool_eio for tool calls.
 
     @param clock Eio time clock for Session_eio timeout operations
     @param sw Eio.Switch for structured concurrency

@@ -1,10 +1,10 @@
-(** MCP Protocol Server Implementation - Eio Native (100% Lwt-Free!)
+(** MCP Protocol Server Implementation - Eio Native
 
     Direct-style async MCP server using OCaml 5.x Effect Handlers.
-    All Lwt bridges have been eliminated as of 2026-01-11.
+    Legacy bridges have been eliminated as of 2026-01-11.
 
     Key adapters for Session.registry compatibility:
-    - unregister_sync: Direct hashtable removal without Lwt_mutex
+    - unregister_sync: Direct hashtable removal without extra mutex layer
     - wait_for_message_eio: Polling with Eio.Time.sleep
 *)
 
@@ -35,7 +35,7 @@ let make_error = Mcp_server.make_error
 
 (** Unregister agent synchronously - adapter for Session.registry
 
-    Directly removes from hashtable without Lwt_mutex.
+    Directly removes from hashtable without extra mutex layer.
     Safe in Eio single-fiber context.
 *)
 let unregister_sync (registry : Session.registry) ~agent_name =
@@ -46,7 +46,7 @@ let unregister_sync (registry : Session.registry) ~agent_name =
 (** Wait for message using Eio sleep - adapter for Session.registry
 
     Uses existing Session.pop_message but with Eio.Time.sleep for polling.
-    This avoids the Lwt bridge while keeping the existing registry structure.
+    This avoids the legacy bridge while keeping the existing registry structure.
 *)
 let wait_for_message_eio ~clock (registry : Session.registry) ~agent_name ~timeout =
   let start_time = Unix.gettimeofday () in
@@ -123,6 +123,22 @@ let handle_read_resource_eio state id params =
             `List []
         in
 
+        let read_events_json ~limit =
+          let lines = Mcp_server.read_event_lines config ~limit in
+          let events =
+            List.filter_map (fun line ->
+              try Some (Yojson.Safe.from_string line) with _ -> None
+            ) lines
+          in
+          `List events
+        in
+
+        let read_events_markdown ~limit =
+          let lines = Mcp_server.read_event_lines config ~limit in
+          if lines = [] then "(no events)"
+          else String.concat "\n" (List.map (fun line -> "- " ^ line) lines)
+        in
+
         let (mime_type, text_opt) =
           match resource_id with
           | "status" -> ("text/markdown", Some (Room.status config))
@@ -145,6 +161,12 @@ let handle_read_resource_eio state id params =
           | "who.json" ->
               let statuses = Session.get_agent_statuses registry in
               ("application/json", Some (Yojson.Safe.pretty_to_string (`List statuses)))
+          | "agents" ->
+              let json = Room.get_agents_status config in
+              ("text/markdown", Some (Yojson.Safe.pretty_to_string json))
+          | "agents.json" ->
+              let json = Room.get_agents_status config in
+              ("application/json", Some (Yojson.Safe.pretty_to_string json))
           | "messages" | "messages/recent" ->
               let since_seq = Mcp_server.int_query_param uri "since_seq" ~default:0 in
               let limit = Mcp_server.int_query_param uri "limit" ~default:10 in
@@ -154,6 +176,23 @@ let handle_read_resource_eio state id params =
               let limit = Mcp_server.int_query_param uri "limit" ~default:10 in
               let json = read_messages_json ~since_seq ~limit in
               ("application/json", Some (Yojson.Safe.pretty_to_string json))
+          | "events" ->
+              let limit = Mcp_server.int_query_param uri "limit" ~default:50 in
+              ("text/markdown", Some (read_events_markdown ~limit))
+          | "events.json" ->
+              let limit = Mcp_server.int_query_param uri "limit" ~default:50 in
+              let json = read_events_json ~limit in
+              ("application/json", Some (Yojson.Safe.pretty_to_string json))
+          | "worktrees" ->
+              let json = Room.worktree_list config in
+              ("text/markdown", Some (Yojson.Safe.pretty_to_string json))
+          | "worktrees.json" ->
+              let json = Room.worktree_list config in
+              ("application/json", Some (Yojson.Safe.pretty_to_string json))
+          | "schema" ->
+              ("text/markdown", Some Mcp_server.schema_markdown)
+          | "schema.json" ->
+              ("application/json", Some (Yojson.Safe.pretty_to_string Mcp_server.schema_json))
           | _ -> ("text/plain", None)
         in
 
@@ -236,7 +275,7 @@ let detect_mode first_line =
   else
     LineDelimited
 
-(** Execute tool - Eio native version (100% Lwt-free!)
+(** Execute tool - Eio native version.
 
     Direct-style implementation using Eio-native modules:
     - wait_for_message_eio for session listening (Eio.Time.sleep)
@@ -244,7 +283,7 @@ let detect_mode first_line =
     - Planning_eio for planning operations (pure sync)
     - handle_read_resource_eio for resource reading (pure sync)
 
-    All Lwt bridges have been removed! 🎉
+    All legacy bridges have been removed.
 *)
 let execute_tool_eio ~clock state ~name ~arguments =
   (* clock parameter used for Session_eio.wait_for_message *)
@@ -300,7 +339,7 @@ let execute_tool_eio ~clock state ~name ~arguments =
 
   (* Auto-join: if agent not in session and tool requires agent, auto-register *)
   let read_only_tools = ["masc_status"; "masc_tasks"; "masc_who"; "masc_agents";
-                         "masc_messages"; "masc_votes"; "masc_vote_status";
+                         "masc_messages"; "masc_task_history"; "masc_votes"; "masc_vote_status";
                          "masc_worktree_list"; "masc_pending_interrupts";
                          "masc_cost_report"; "masc_portal_status"] in
   if agent_name <> "unknown" && not (List.mem name read_only_tools) then begin
@@ -409,6 +448,70 @@ let execute_tool_eio ~clock state ~name ~arguments =
       let task_id = get_string "task_id" "" in
       result_to_response (Room.claim_task_r config ~agent_name ~task_id)
 
+  | "masc_transition" ->
+      let task_id = get_string "task_id" "" in
+      let action = get_string "action" "" in
+      let notes = get_string "notes" "" in
+      let reason = get_string "reason" "" in
+      let expected_version = _get_int_opt "expected_version" in
+      let action_lc = String.lowercase_ascii action in
+      let tasks = Room.get_tasks_raw config in
+      let task_opt = List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks in
+      let default_time = Unix.gettimeofday () -. 60.0 in
+      let (started_at_actual, collaborators_from_task) = match task_opt with
+        | Some t -> (match t.task_status with
+            | Types.InProgress { started_at; assignee } ->
+                let ts = Types.parse_iso8601 ~default_time started_at in
+                let collabs = if assignee <> "" && assignee <> agent_name then [assignee] else [] in
+                (ts, collabs)
+            | Types.Claimed { claimed_at; assignee } ->
+                let ts = Types.parse_iso8601 ~default_time claimed_at in
+                let collabs = if assignee <> "" && assignee <> agent_name then [assignee] else [] in
+                (ts, collabs)
+            | _ -> (default_time, []))
+        | None -> (default_time, [])
+      in
+      let result =
+        Room.transition_task_r config ~agent_name ~task_id ~action ?expected_version ~notes ~reason ()
+      in
+      (match result, action_lc with
+       | Ok _, "done" ->
+           let metric : Metrics_store_eio.task_metric = {
+             id = Printf.sprintf "metric-%s-%d" task_id (int_of_float (Unix.gettimeofday () *. 1000.));
+             agent_id = agent_name;
+             task_id;
+             started_at = started_at_actual;
+             completed_at = Some (Unix.gettimeofday ());
+             success = true;
+             error_message = None;
+             collaborators = collaborators_from_task;
+             handoff_from = None;
+             handoff_to = None;
+           } in
+           ignore (Metrics_store_eio.record config metric)
+       | Ok _, "cancel" ->
+           let metric : Metrics_store_eio.task_metric = {
+             id = Printf.sprintf "metric-%s-%d" task_id (int_of_float (Unix.gettimeofday () *. 1000.));
+             agent_id = agent_name;
+             task_id;
+             started_at = started_at_actual;
+             completed_at = Some (Unix.gettimeofday ());
+             success = false;
+             error_message = Some (if reason = "" then "Cancelled" else reason);
+             collaborators = collaborators_from_task;
+             handoff_from = None;
+             handoff_to = None;
+           } in
+           ignore (Metrics_store_eio.record config metric)
+       | _ -> ());
+      result_to_response result
+
+  | "masc_release" ->
+      let task_id = get_string "task_id" "" in
+      let expected_version = _get_int_opt "expected_version" in
+      result_to_response
+        (Room.release_task_r config ~agent_name ~task_id ?expected_version ())
+
   | "masc_done" ->
       let task_id = get_string "task_id" "" in
       let notes = get_string "notes" "" in
@@ -494,6 +597,34 @@ let execute_tool_eio ~clock state ~name ~arguments =
            ignore (Metrics_store_eio.record config metric)
        | Error _ -> ());
       result_to_response result
+
+  | "masc_task_history" ->
+      let open Yojson.Safe.Util in
+      let task_id = get_string "task_id" "" in
+      let limit = get_int "limit" 50 in
+      let scan_limit = min 500 (limit * 5) in
+      let lines = Mcp_server.read_event_lines config ~limit:scan_limit in
+      let parsed =
+        List.filter_map (fun line ->
+          try Some (Yojson.Safe.from_string line) with _ -> None
+        ) lines
+      in
+      let matches_task json =
+        let task = json |> member "task" |> to_string_option in
+        let task_id_field = json |> member "task_id" |> to_string_option in
+        match task, task_id_field with
+        | Some t, _ when t = task_id -> true
+        | _, Some t when t = task_id -> true
+        | _ -> false
+      in
+      let rec take n xs =
+        match xs with
+        | [] -> []
+        | _ when n <= 0 -> []
+        | x :: rest -> x :: take (n - 1) rest
+      in
+      let events = parsed |> List.filter matches_task |> take limit in
+      (true, Yojson.Safe.pretty_to_string (`List events))
 
   | "masc_tasks" ->
       (true, Room.list_tasks config)
@@ -635,6 +766,16 @@ Time: %s
   | "masc_register_capabilities" ->
       let capabilities = get_string_list "capabilities" in
       (true, Room.register_capabilities config ~agent_name ~capabilities)
+
+  | "masc_agent_update" ->
+      let status = get_string_opt "status" in
+      let capabilities =
+        match arguments |> Yojson.Safe.Util.member "capabilities" with
+        | `Null -> None
+        | `List _ -> Some (get_string_list "capabilities")
+        | _ -> None
+      in
+      result_to_response (Room.update_agent_r config ~agent_name ?status ?capabilities ())
 
   | "masc_find_by_capability" ->
       let capability = get_string "capability" "" in
@@ -1354,8 +1495,10 @@ let handle_initialize_eio id params =
     ("instructions", `String "MASC (Multi-Agent Streaming Coordination) enables AI agent collaboration. \
       ROOM: Agents sharing the same base path (.masc/ folder) or Redis cluster coordinate together. \
       CLUSTER: Set MASC_CLUSTER_NAME for multi-machine coordination (defaults to basename of ME_ROOT). \
-      WORKFLOW: masc_status → masc_claim (task) → masc_worktree_create (isolation) → work → masc_done. \
-      Use @agent mentions in masc_broadcast for cross-agent communication. \
+      READ: use resources/list + resources/read (status/tasks/agents/events/schema) for snapshots. \
+      WRITE: prefer masc_transition (claim/start/done/cancel/release) with expected_version for CAS. \
+      WORKFLOW: masc_status → masc_transition(claim) → masc_worktree_create (isolation) → work → masc_transition(done). \
+      Use masc_heartbeat periodically; use @agent mentions in masc_broadcast. \
       Prefer worktrees over file locks for parallel work.");
   ])
 
@@ -1389,7 +1532,7 @@ let handle_list_prompts_eio id =
 (** Handle incoming JSON-RPC request - Pure Eio Native
 
     Direct-style async using OCaml 5.x Effect Handlers.
-    Uses execute_tool_eio for tool calls, eliminating Lwt bridge for tools.
+    Uses execute_tool_eio for tool calls.
 *)
 let handle_request ~clock ~sw:_ state request_str =
   try

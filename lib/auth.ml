@@ -212,12 +212,13 @@ let permission_for_tool = function
   | "masc_status" | "masc_who" | "masc_tasks" | "masc_messages"
   | "masc_agents" | "masc_portal_status" | "masc_pending_interrupts"
   | "masc_votes" | "masc_vote_status" | "masc_worktree_list"
-  | "masc_cost_report" -> Some CanReadState
+  | "masc_cost_report" | "masc_task_history" -> Some CanReadState
   | "masc_add_task" -> Some CanAddTask
   | "masc_claim" | "masc_claim_next" -> Some CanClaimTask
-  | "masc_done" | "masc_update_priority" -> Some CanCompleteTask
+  | "masc_done" | "masc_update_priority" | "masc_transition" | "masc_release" -> Some CanCompleteTask
   | "masc_broadcast" | "masc_listen" | "masc_heartbeat"
-  | "masc_register_capabilities" | "masc_find_by_capability" -> Some CanBroadcast
+  | "masc_register_capabilities" | "masc_find_by_capability"
+  | "masc_agent_update" -> Some CanBroadcast
   | "masc_lock" -> Some CanLockFile
   | "masc_unlock" -> Some CanUnlockFile
   | "masc_portal_open" | "masc_portal_close" -> Some CanOpenPortal

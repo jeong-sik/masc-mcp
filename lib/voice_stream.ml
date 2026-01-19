@@ -1,7 +1,7 @@
 (** MASC Voice Stream - Real-time Audio Delivery via WebSocket
 
     Implementation of WebSocket server for audio streaming.
-    Uses websocket-lwt-unix for persistent connections.
+    Uses httpun-ws-eio for persistent connections.
 
     MAGI Review Applied (2026-01-10):
     - P0: clients List -> Hashtbl for O(1) lookup
@@ -12,8 +12,8 @@
     @since MASC v3.0
 *)
 
-module Ws = Websocket
-module Ws_lwt = Websocket_lwt_unix
+module Ws = Httpun_ws
+module Ws_eio = Httpun_ws_eio
 
 (** {1 Configuration} *)
 
@@ -29,11 +29,13 @@ type client = {
   mutable pending_sends: int;  (* Backpressure counter *)
 }
 
-(** Internal client with connected_client handle *)
+(** Internal client with websocket handle *)
 type internal_client = {
   client: client;
-  conn: Ws_lwt.Connected_client.t;
+  wsd: Ws.Wsd.t;
+  send_mutex: Eio.Mutex.t;
   mutable is_healthy: bool;  (* Mark unhealthy on send failure *)
+  mutable partial_text: Buffer.t option;
 }
 
 type client_message =
@@ -47,13 +49,16 @@ type server_event =
   | MessageReceived of string * client_message
   | ClientError of string * string  (* client_id, error_message *)
 
+type any_listening_socket =
+  | Listening_socket : 'a Eio.Net.listening_socket -> any_listening_socket
+
 type t = {
   port: int;
-  clients: (string, internal_client) Hashtbl.t;  (* P0: Hashtbl for O(1) lookup *)
+  clients: (string, internal_client) Hashtbl.t;
   mutable is_running: bool;
   mutable should_stop: bool;
   mutable event_callback: (server_event -> unit) option;
-  mutable _server_handle: Conduit_lwt_unix.server Lwt.t option;
+  mutable server_socket: any_listening_socket option;
 }
 
 (** {1 Utilities} *)
@@ -89,7 +94,7 @@ let create ?(port = 8937) () =
     is_running = false;
     should_stop = false;
     event_callback = None;
-    _server_handle = None;
+    server_socket = None;
   }
 
 (** {1 Internal Helpers} *)
@@ -103,23 +108,240 @@ let find_internal_client t client_id =
   Hashtbl.find_opt t.clients client_id
 
 let remove_client t client_id =
-  Hashtbl.remove t.clients client_id;
-  fire_event t (ClientDisconnected client_id)
+  if Hashtbl.mem t.clients client_id then begin
+    Hashtbl.remove t.clients client_id;
+    Log.info ~ctx:"voice_stream" "Client disconnected: %s (total: %d)" client_id (Hashtbl.length t.clients);
+    fire_event t (ClientDisconnected client_id)
+  end
 
-let make_text_frame content =
-  Ws.Frame.create
-    ~opcode:Ws.Frame.Opcode.Text
-    ~content
+let safe_close_client t ic =
+  ic.is_healthy <- false;
+  (try
+     if not (Ws.Wsd.is_closed ic.wsd) then
+       Ws.Wsd.close ic.wsd
+   with _ -> ());
+  remove_client t ic.client.id
+
+let mark_client_error t ic message =
+  fire_event t (ClientError (ic.client.id, message));
+  safe_close_client t ic
+
+let update_activity ic =
+  ic.client.last_activity <- Unix.gettimeofday ()
+
+let buffer_of_payload payload ~len ~on_complete =
+  let buffer = Bytes.create len in
+  let offset = ref 0 in
+  let on_read bs ~off ~len =
+    Bigstringaf.blit_to_bytes bs ~src_off:off buffer ~dst_off:!offset ~len;
+    offset := !offset + len
+  in
+  let on_eof () =
+    let slice =
+      if !offset = len then buffer else Bytes.sub buffer 0 !offset
+    in
+    on_complete slice
+  in
+  Ws.Payload.schedule_read payload ~on_eof ~on_read
+
+let handle_text_message t ic message =
+  let parsed = parse_client_message message in
+  update_activity ic;
+  (match parsed with
+   | Subscribe agent_id -> ic.client.agent_filter <- Some agent_id
+   | Unsubscribe -> ic.client.agent_filter <- None
+   | Unknown _ -> ());
+  fire_event t (MessageReceived (ic.client.id, parsed))
+
+let handle_text_payload t ic ~is_fin bytes =
+  let chunk = Bytes.to_string bytes in
+  match ic.partial_text, is_fin with
+  | None, true -> handle_text_message t ic chunk
+  | None, false ->
+    let buf = Buffer.create (String.length chunk * 2) in
+    Buffer.add_string buf chunk;
+    ic.partial_text <- Some buf
+  | Some buf, _ ->
+    Buffer.add_string buf chunk;
+    if is_fin then begin
+      let message = Buffer.contents buf in
+      ic.partial_text <- None;
+      handle_text_message t ic message
+    end
+
+let handle_frame t ic ~opcode ~is_fin ~len payload =
+  match (opcode : Ws.Websocket.Opcode.t) with
+  | `Text | `Continuation ->
+    buffer_of_payload payload ~len ~on_complete:(fun bytes ->
+        handle_text_payload t ic ~is_fin bytes)
+  | `Binary ->
+    Ws.Payload.schedule_read payload ~on_eof:ignore ~on_read:(fun _ ~off:_ ~len:_ -> ())
+  | `Ping -> Ws.Wsd.send_pong ic.wsd
+  | `Pong -> ()
+  | `Connection_close -> safe_close_client t ic
+  | `Other _ ->
+    Ws.Payload.schedule_read payload ~on_eof:ignore ~on_read:(fun _ ~off:_ ~len:_ -> ())
+
+let handle_eof t ic = function
+  | Some (`Exn exn) -> mark_client_error t ic (Printexc.to_string exn)
+  | None -> safe_close_client t ic
+
+let send_bytes t ic ~kind payload =
+  if not ic.is_healthy then
     ()
+  else if Ws.Wsd.is_closed ic.wsd then
+    mark_client_error t ic "WebSocket closed"
+  else if ic.client.pending_sends >= max_pending_sends then begin
+    Log.warn ~ctx:"voice_stream" "Client %s exceeded backpressure limit, disconnecting" ic.client.id;
+    mark_client_error t ic "Backpressure limit exceeded"
+  end else begin
+    ic.client.pending_sends <- ic.client.pending_sends + 1;
+    let finish () =
+      ic.client.pending_sends <- max 0 (ic.client.pending_sends - 1)
+    in
+    try
+      Eio.Mutex.use_rw ~protect:true ic.send_mutex (fun () ->
+        Ws.Wsd.send_bytes ic.wsd ~kind payload ~off:0 ~len:(Bytes.length payload);
+        Ws.Wsd.flushed ic.wsd finish);
+    with exn ->
+      finish ();
+      mark_client_error t ic (Printexc.to_string exn)
+  end
 
-let make_binary_frame content =
-  Ws.Frame.create
-    ~opcode:Ws.Frame.Opcode.Binary
-    ~content
+let send_text t ic message =
+  let payload = Bytes.of_string message in
+  send_bytes t ic ~kind:`Text payload
+
+let add_client t wsd =
+  let client_id = generate_client_id () in
+  let client = {
+    id = client_id;
+    agent_filter = None;
+    connected_at = Unix.gettimeofday ();
+    last_activity = Unix.gettimeofday ();
+    pending_sends = 0;
+  } in
+  let ic = {
+    client;
+    wsd;
+    send_mutex = Eio.Mutex.create ();
+    is_healthy = true;
+    partial_text = None;
+  } in
+  Hashtbl.add t.clients client_id ic;
+  fire_event t (ClientConnected client);
+  Log.info ~ctx:"voice_stream" "Client connected: %s (total: %d)" client_id (Hashtbl.length t.clients);
+  ic
+
+let websocket_handler t _client_addr wsd =
+  let ic = add_client t wsd in
+  let frame ~opcode ~is_fin ~len payload =
+    handle_frame t ic ~opcode ~is_fin ~len payload
+  in
+  let eof ?error () =
+    handle_eof t ic error
+  in
+  { Ws.Websocket_connection.frame; eof }
+
+let ipaddr_of_host host =
+  match Ipaddr.of_string host with
+  | Ok addr -> Eio.Net.Ipaddr.of_raw (Ipaddr.to_octets addr)
+  | Error _ -> Eio.Net.Ipaddr.V4.loopback
+
+(** {1 Server Lifecycle} *)
+
+let start ~sw ~net t =
+  if t.is_running then
     ()
+  else begin
+    t.is_running <- true;
+    t.should_stop <- false;
+    let addr = `Tcp (ipaddr_of_host "127.0.0.1", t.port) in
+    let socket = Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:128 addr in
+    t.server_socket <- Some (Listening_socket socket);
+    let connection_handler =
+      Ws_eio.Server.create_connection_handler ~sw (websocket_handler t)
+    in
+    Log.info ~ctx:"voice_stream" "WebSocket server starting on port %d" t.port;
+    let rec accept_loop () =
+      if t.should_stop then
+        ()
+      else
+        try
+          let flow, client_addr = Eio.Net.accept ~sw socket in
+          Eio.Fiber.fork ~sw (fun () ->
+            try connection_handler client_addr flow
+            with exn ->
+              Log.error ~ctx:"voice_stream" "Handler error: %s" (Printexc.to_string exn));
+          accept_loop ()
+        with exn ->
+          if t.should_stop then
+            ()
+          else begin
+            Log.error ~ctx:"voice_stream" "Accept error: %s" (Printexc.to_string exn);
+            accept_loop ()
+          end
+    in
+    Eio.Fiber.fork ~sw accept_loop;
+    Log.info ~ctx:"voice_stream" "WebSocket server started on port %d" t.port
+  end
 
-let make_close_frame () =
-  Ws.Frame.close 1000
+let stop t =
+  t.should_stop <- true;
+  t.is_running <- false;
+  (match t.server_socket with
+   | Some (Listening_socket socket) ->
+     t.server_socket <- None;
+     (try Eio.Resource.close socket with _ -> ())
+   | None -> ());
+  let clients = Hashtbl.fold (fun _ ic acc -> ic :: acc) t.clients [] in
+  List.iter (fun ic -> safe_close_client t ic) clients;
+  Hashtbl.clear t.clients;
+  Log.info ~ctx:"voice_stream" "WebSocket server stopped"
+
+let is_running t = t.is_running
+
+(** {1 Broadcasting} *)
+
+let broadcast_audio t audio =
+  let clients = Hashtbl.fold (fun _ ic acc -> ic :: acc) t.clients [] in
+  List.iter (fun ic -> send_bytes t ic ~kind:`Binary audio) clients
+
+let send_to_agent_subscribers t ~agent_id audio =
+  let clients = Hashtbl.fold (fun _ ic acc -> ic :: acc) t.clients [] in
+  List.iter (fun ic ->
+      match ic.client.agent_filter with
+      | Some id when String.equal id agent_id ->
+        send_bytes t ic ~kind:`Binary audio
+      | _ -> ()) clients
+
+let broadcast_text t message =
+  let clients = Hashtbl.fold (fun _ ic acc -> ic :: acc) t.clients [] in
+  List.iter (fun ic -> send_text t ic message) clients
+
+let notify_speaking t ~agent_id ~voice =
+  let msg =
+    Printf.sprintf
+      {|{"type":"speaking","agent_id":"%s","voice":"%s"}|}
+      agent_id
+      voice
+  in
+  broadcast_text t msg
+
+let notify_done t ~agent_id ?duration_ms () =
+  let msg =
+    match duration_ms with
+    | Some duration ->
+      Printf.sprintf
+        {|{"type":"done","agent_id":"%s","duration_ms":%d}|}
+        agent_id
+        duration
+    | None ->
+      Printf.sprintf
+        {|{"type":"done","agent_id":"%s"}|}
+        agent_id
+  in
+  broadcast_text t msg
 
 (** {1 Client Management} *)
 
@@ -137,274 +359,57 @@ let subscribe_to_agent t ~client_id ~agent_id =
   match find_internal_client t client_id with
   | Some ic ->
     ic.client.agent_filter <- Some agent_id;
-    ic.client.last_activity <- Unix.gettimeofday ()
+    update_activity ic
   | None -> ()
 
 let unsubscribe t ~client_id =
   match find_internal_client t client_id with
   | Some ic ->
     ic.client.agent_filter <- None;
-    ic.client.last_activity <- Unix.gettimeofday ()
+    update_activity ic
   | None -> ()
 
 let disconnect_client t ~client_id =
-  let open Lwt.Syntax in
   match find_internal_client t client_id with
-  | Some ic ->
-    remove_client t client_id;
-    let* () =
-      Lwt.catch
-        (fun () -> Ws_lwt.Connected_client.send ic.conn (make_close_frame ()))
-        (fun _exn -> Lwt.return_unit)
-    in
-    Lwt.return_unit
-  | None -> Lwt.return_unit
+  | Some ic -> safe_close_client t ic
+  | None -> ()
 
 let cleanup_zombies t ?(timeout = 300.0) () =
   let now = Unix.gettimeofday () in
-  let to_remove = Hashtbl.fold (fun id ic acc ->
-    if now -. ic.client.last_activity > timeout || not ic.is_healthy then
-      id :: acc
-    else
-      acc
-  ) t.clients [] in
-  List.iter (fun id -> remove_client t id) to_remove;
-  List.length to_remove
-
-(** {1 Safe Send with Error Handling} *)
-
-(** P1: Send with failure handling - removes client on error *)
-let safe_send t ic frame =
-  let open Lwt.Syntax in
-  (* Backpressure check *)
-  if ic.client.pending_sends >= max_pending_sends then begin
-    Log.warn ~ctx:"voice_stream" "Client %s exceeded backpressure limit, disconnecting" ic.client.id;
-    ic.is_healthy <- false;
-    fire_event t (ClientError (ic.client.id, "backpressure_exceeded"));
-    Lwt.return_false
-  end else begin
-    ic.client.pending_sends <- ic.client.pending_sends + 1;
-    let* result =
-      Lwt.catch
-        (fun () ->
-          let* () = Ws_lwt.Connected_client.send ic.conn frame in
-          Lwt.return_true)
-        (fun exn ->
-          Log.error ~ctx:"voice_stream" "Send failed for client %s: %s"
-            ic.client.id (Printexc.to_string exn);
-          ic.is_healthy <- false;
-          fire_event t (ClientError (ic.client.id, Printexc.to_string exn));
-          Lwt.return_false)
-    in
-    ic.client.pending_sends <- ic.client.pending_sends - 1;
-    Lwt.return result
-  end
-
-(** {1 Broadcasting} *)
-
-let broadcast_frame t frame =
-  let open Lwt.Syntax in
-  let clients_list = Hashtbl.fold (fun _id ic acc -> ic :: acc) t.clients [] in
-  let* _results = Lwt_list.map_p (fun ic ->
-    if ic.is_healthy then
-      safe_send t ic frame
-    else
-      Lwt.return_false
-  ) clients_list in
-  (* Cleanup unhealthy clients after broadcast *)
-  let unhealthy = Hashtbl.fold (fun id ic acc ->
-    if not ic.is_healthy then id :: acc else acc
-  ) t.clients [] in
-  List.iter (fun id -> remove_client t id) unhealthy;
-  Lwt.return_unit
-
-let broadcast_audio t audio =
-  let frame = make_binary_frame (Bytes.to_string audio) in
-  broadcast_frame t frame
-
-let send_to_agent_subscribers t ~agent_id audio =
-  let open Lwt.Syntax in
-  let frame = make_binary_frame (Bytes.to_string audio) in
-  let subscribers = Hashtbl.fold (fun _id ic acc ->
-    if ic.is_healthy then
-      match ic.client.agent_filter with
-      | Some filter when filter = agent_id -> ic :: acc
-      | None -> ic :: acc  (* No filter = receive all *)
-      | Some _ -> acc  (* Different agent filter *)
-    else acc
-  ) t.clients [] in
-  let* _results = Lwt_list.map_p (fun ic -> safe_send t ic frame) subscribers in
-  (* Cleanup unhealthy clients *)
-  let unhealthy = List.filter (fun ic -> not ic.is_healthy) subscribers in
-  List.iter (fun ic -> remove_client t ic.client.id) unhealthy;
-  Lwt.return_unit
-
-let broadcast_text t message =
-  let frame = make_text_frame message in
-  broadcast_frame t frame
-
-let notify_speaking t ~agent_id ~voice =
-  let json = `Assoc [
-    ("type", `String "speaking");
-    ("agent_id", `String agent_id);
-    ("voice", `String voice);
-  ] in
-  broadcast_text t (Yojson.Safe.to_string json)
-
-let notify_done t ~agent_id ?duration_ms () =
-  let json = `Assoc [
-    ("type", `String "done");
-    ("agent_id", `String agent_id);
-    ("duration_ms", match duration_ms with
-      | Some ms -> `Int ms
-      | None -> `Null);
-  ] in
-  broadcast_text t (Yojson.Safe.to_string json)
+  let stale_before = now -. timeout in
+  let to_remove = ref [] in
+  Hashtbl.iter (fun _id ic ->
+    if (not ic.is_healthy) || ic.client.last_activity < stale_before then
+      to_remove := ic.client.id :: !to_remove) t.clients;
+  List.iter (fun client_id -> disconnect_client t ~client_id) !to_remove;
+  List.length !to_remove
 
 (** {1 Event Handling} *)
 
 let on_event t callback =
   t.event_callback <- Some callback
 
-(** {1 Server Lifecycle} *)
-
-let is_running t = t.is_running
-
-(** Handle incoming WebSocket frames from a client *)
-let handle_client t ic =
-  let open Lwt.Syntax in
-  let rec loop () =
-    if t.should_stop || not ic.is_healthy then Lwt.return_unit
-    else
-      let* frame_opt =
-        Lwt.catch
-          (fun () ->
-            let* frame = Ws_lwt.Connected_client.recv ic.conn in
-            Lwt.return (Some frame))
-          (fun exn ->
-            Log.debug ~ctx:"voice_stream" "Recv error for %s: %s"
-              ic.client.id (Printexc.to_string exn);
-            Lwt.return None)
-      in
-      match frame_opt with
-      | None ->
-        (* Connection closed or error *)
-        remove_client t ic.client.id;
-        Lwt.return_unit
-      | Some frame ->
-        ic.client.last_activity <- Unix.gettimeofday ();
-        (match frame.Ws.Frame.opcode with
-         | Ws.Frame.Opcode.Close ->
-           remove_client t ic.client.id;
-           Lwt.return_unit
-         | Ws.Frame.Opcode.Text ->
-           let msg = parse_client_message frame.Ws.Frame.content in
-           fire_event t (MessageReceived (ic.client.id, msg));
-           (match msg with
-            | Subscribe agent_id ->
-              subscribe_to_agent t ~client_id:ic.client.id ~agent_id
-            | Unsubscribe ->
-              unsubscribe t ~client_id:ic.client.id
-            | Unknown _ -> ());
-           loop ()
-         | Ws.Frame.Opcode.Ping ->
-           let pong = Ws.Frame.create
-             ~opcode:Ws.Frame.Opcode.Pong
-             ~content:frame.Ws.Frame.content
-             () in
-           let* _ = safe_send t ic pong in
-           loop ()
-         | _ -> loop ())
-  in
-  loop ()
-
-(** WebSocket connection handler *)
-let client_handler t conn =
-  let open Lwt.Syntax in
-  (* Create client *)
-  let client_id = generate_client_id () in
-  let now = Unix.gettimeofday () in
-  let client = {
-    id = client_id;
-    agent_filter = None;
-    connected_at = now;
-    last_activity = now;
-    pending_sends = 0;
-  } in
-
-  let internal_client = { client; conn; is_healthy = true } in
-  Hashtbl.add t.clients client_id internal_client;
-  fire_event t (ClientConnected client);
-  Log.info ~ctx:"voice_stream" "Client connected: %s (total: %d)" client_id (client_count t);
-
-  (* Handle frames until disconnect *)
-  let* () = handle_client t internal_client in
-  Log.info ~ctx:"voice_stream" "Client disconnected: %s (total: %d)" client_id (client_count t);
-  Lwt.return_unit
-
-let start t =
-  let open Lwt.Syntax in
-  if t.is_running then Lwt.return_unit
-  else begin
-    t.is_running <- true;
-    t.should_stop <- false;
-
-    let ctx = Lazy.force Conduit_lwt_unix.default_ctx in
-    let mode = `TCP (`Port t.port) in
-
-    let handler conn =
-      Lwt.catch
-        (fun () -> client_handler t conn)
-        (fun exn ->
-          Log.error ~ctx:"voice_stream" "Handler error: %s" (Printexc.to_string exn);
-          Lwt.return_unit)
-    in
-
-    Lwt.async (fun () ->
-      let* _server = Ws_lwt.establish_server ~ctx ~mode handler in
-      Log.info ~ctx:"voice_stream" "WebSocket server started on port %d" t.port;
-      Lwt.return_unit
-    );
-
-    Lwt.return_unit
-  end
-
-let stop t =
-  let open Lwt.Syntax in
-  t.should_stop <- true;
-  t.is_running <- false;
-
-  (* Disconnect all clients *)
-  let clients_list = Hashtbl.fold (fun _id ic acc -> ic :: acc) t.clients [] in
-  let* () = Lwt_list.iter_p (fun ic ->
-    Lwt.catch
-      (fun () -> Ws_lwt.Connected_client.send ic.conn (make_close_frame ()))
-      (fun _exn -> Lwt.return_unit)
-  ) clients_list in
-
-  Hashtbl.clear t.clients;
-  Log.info ~ctx:"voice_stream" "WebSocket server stopped";
-  Lwt.return_unit
-
 (** {1 Status} *)
 
-let status_json t =
-  let clients_list = Hashtbl.fold (fun _id ic acc ->
-    `Assoc [
-      ("id", `String ic.client.id);
-      ("agent_filter", match ic.client.agent_filter with
-        | Some a -> `String a
-        | None -> `Null);
-      ("connected_at", `Float ic.client.connected_at);
-      ("last_activity", `Float ic.client.last_activity);
-      ("pending_sends", `Int ic.client.pending_sends);
-      ("is_healthy", `Bool ic.is_healthy);
-    ] :: acc
-  ) t.clients [] in
-  `Assoc [
-    ("port", `Int t.port);
-    ("is_running", `Bool t.is_running);
-    ("client_count", `Int (client_count t));
-    ("max_pending_sends", `Int max_pending_sends);
-    ("clients", `List clients_list);
-  ]
+let get_status_json t =
+  let clients_json =
+    list_clients t
+    |> List.map (fun c ->
+        Printf.sprintf
+          {|{"id":"%s","agent_filter":%s,"connected_at":%.0f,"last_activity":%.0f,"pending_sends":%d}|}
+          c.id
+          (match c.agent_filter with
+           | Some a -> Printf.sprintf "\"%s\"" a
+           | None -> "null")
+          c.connected_at
+          c.last_activity
+          c.pending_sends)
+    |> String.concat ","
+  in
+  Printf.sprintf
+    {|{"port":%d,"running":%s,"client_count":%d,"max_pending_sends":%d,"clients":[%s]}|}
+    t.port
+    (if t.is_running then "true" else "false")
+    (client_count t)
+    max_pending_sends
+    clients_json

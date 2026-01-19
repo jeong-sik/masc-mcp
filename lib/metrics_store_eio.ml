@@ -1,6 +1,6 @@
 (** MASC Metrics Store - Agent Performance Tracking (Eio Native)
 
-    Pure synchronous metrics operations - no Lwt dependency.
+    Pure synchronous metrics operations.
     Compatible with Eio direct-style concurrency.
 
     에이전트 성과 측정 데이터 저장:

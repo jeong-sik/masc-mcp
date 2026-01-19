@@ -12,9 +12,9 @@
     - H2-based TCP server with Eio async I/O
     - Client module for outbound RPC calls
 
-    {2 Differences from transport_grpc (Lwt)}
+    {2 Differences from legacy transport_grpc}
 
-    - Uses Eio instead of Lwt for concurrency
+    - Uses Eio direct-style concurrency
     - Supports TLS via Tls_eio and Flow_handler
     - Compatible with h2 >= 0.13 (httpun-eio compatible)
     - Uses grpc-eio library from lib/grpc-eio-next

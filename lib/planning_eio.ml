@@ -1,6 +1,6 @@
 (** Planning_eio - OCaml 5.x Pure Synchronous Planning Module
 
-    Eio-native version of Planning module (no Lwt dependency).
+    Eio-native version of Planning module.
     Implements the planning-with-files pattern for structured AI collaboration:
     - task_plan.md: Main execution plan
     - notes.md: Observations, learnings, context

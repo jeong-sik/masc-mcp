@@ -96,7 +96,8 @@ let tool_category tool_name =
   | "masc_set_room" | "masc_init" | "masc_join" | "masc_leave"
   | "masc_status" | "masc_add_task" | "masc_claim" | "masc_done"
   | "masc_tasks" | "masc_archive_view" | "masc_claim_next"
-  | "masc_update_priority" -> Core
+  | "masc_update_priority" | "masc_transition" | "masc_release"
+  | "masc_task_history" -> Core
 
   (* Communication tools *)
   | "masc_broadcast" | "masc_messages" | "masc_lock" | "masc_unlock"
@@ -115,7 +116,8 @@ let tool_category tool_name =
   | "masc_agents" -> Health
 
   (* Agent discovery tools *)
-  | "masc_register_capabilities" | "masc_find_by_capability" -> Discovery
+  | "masc_register_capabilities" | "masc_find_by_capability"
+  | "masc_agent_update" -> Discovery
 
   (* Voting/consensus tools *)
   | "masc_vote_create" | "masc_vote_cast" | "masc_vote_status"

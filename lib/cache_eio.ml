@@ -1,6 +1,6 @@
 (** MASC Cache - Shared Context Store (Eio Native)
 
-    Pure synchronous cache operations - no Lwt dependency.
+    Pure synchronous cache operations.
     Compatible with Eio direct-style concurrency.
 
     에이전트 간 컨텍스트 공유 및 캐싱:

@@ -1,26 +1,10 @@
-(executable
- (name main)
- (modules main)
- (public_name masc-mcp)
- (package masc_mcp)
- (libraries masc_mcp cmdliner lwt lwt.unix cohttp-lwt-unix)
- (preprocess (pps lwt_ppx)))
-
 ;; Eio-native server with PostgresNative backend support (OCaml 5.x Effects)
 (executable
  (name main_eio)
  (modules main_eio)
- (public_name masc-mcp-eio)
+ (public_name masc-mcp)
  (package masc_mcp)
- (libraries masc_mcp cmdliner eio eio_main httpun-eio gluten-eio lwt_eio caqti-eio))
-
-(executable
- (name masc_checkpoint)
- (modules masc_checkpoint)
- (public_name masc-checkpoint)
- (package masc_mcp)
- (libraries masc_mcp neo4j_bolt lwt lwt.unix yojson)
- (preprocess (pps lwt_ppx)))
+ (libraries masc_mcp cmdliner eio eio_main httpun-eio gluten-eio caqti-eio))
 
 (executable
  (name masc_cost)
@@ -29,10 +13,11 @@
  (package masc_mcp)
  (libraries unix yojson))
 
-(executable
- (name selftest_webrtc)
- (modules selftest_webrtc)
- (libraries masc_mcp yojson))
+;; WebRTC selftest disabled (legacy DataChannel removed)
+;; (executable
+;;  (name selftest_webrtc)
+;;  (modules selftest_webrtc)
+;;  (libraries masc_mcp yojson))
 
 ;; gRPC-Eio server with native gzip compression (OCaml 5.x Effects)
 ;; Runs on port 9936, parallel to main server (8935/9935)

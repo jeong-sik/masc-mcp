@@ -642,7 +642,7 @@ let limit_for_category config = function
 let category_for_tool = function
   | "masc_broadcast" | "masc_listen" -> BroadcastLimit
   | "masc_add_task" | "masc_claim" | "masc_claim_next" | "masc_done"
-  | "masc_update_priority" -> TaskOpsLimit
+  | "masc_update_priority" | "masc_transition" | "masc_release" -> TaskOpsLimit
   | _ -> GeneralLimit
 
 (** Rate limit error - returned when limit exceeded *)

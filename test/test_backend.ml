@@ -237,8 +237,9 @@ let test_redis_creates_with_url () =
     cluster_name = "test";
   } in
   match Backend.RedisBackend.create cfg with
-  | Ok _ -> ()
-  | Error e -> fail (Printf.sprintf "Should create with URL: %s" (Backend.show_error e))
+  | Error (Backend.BackendNotSupported _) -> ()
+  | Ok _ -> fail "Redis REST backend should be disabled"
+  | Error e -> fail (Printf.sprintf "Unexpected error: %s" (Backend.show_error e))
 
 (* Test: error messages *)
 let test_error_messages () =

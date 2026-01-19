@@ -549,7 +549,11 @@ let claim_task config ~agent_name ~task_id =
       else match !already_claimed with
         | Some other -> Printf.sprintf "⚠ Task %s is already claimed by %s" task_id other
         | None ->
-            let new_backlog = { backlog with tasks = new_tasks; last_updated = now_iso () } in
+            let new_backlog = {
+              tasks = new_tasks;
+              last_updated = now_iso ();
+              version = backlog.version + 1;
+            } in
             write_backlog config new_backlog;
 
             (* Update agent status *)
@@ -608,7 +612,11 @@ let claim_task_r config ~agent_name ~task_id : string Types.masc_result =
         else match !already_claimed with
           | Some other -> Error (Types.TaskAlreadyClaimed { task_id; by = other })
           | None ->
-              let new_backlog = { backlog with tasks = new_tasks; last_updated = now_iso () } in
+              let new_backlog = {
+                tasks = new_tasks;
+                last_updated = now_iso ();
+                version = backlog.version + 1;
+              } in
               write_backlog config new_backlog;
               let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
               if Sys.file_exists agent_file then begin
@@ -627,6 +635,122 @@ let claim_task_r config ~agent_name ~task_id : string Types.masc_result =
     Unix.lockf fd Unix.F_ULOCK 0;
     Unix.close fd;
     result
+
+(** Unified task transition (single entrypoint) *)
+let transition_task_r config ~agent_name ~task_id ~action
+    ?expected_version ?(notes="") ?(reason="") () : string Types.masc_result =
+  if not (is_initialized config) then Error Types.NotInitialized
+  else match validate_agent_name_r agent_name, validate_task_id_r task_id with
+    | Error e, _ -> Error e
+    | _, Error e -> Error e
+    | Ok _, Ok _ ->
+        let lock_file = Filename.concat (tasks_dir config) ".backlog.lock" in
+        mkdir_p (Filename.dirname lock_file);
+        let fd = Unix.openfile lock_file [Unix.O_CREAT; Unix.O_RDWR] 0o644 in
+        Unix.lockf fd Unix.F_LOCK 0;
+        let result =
+          try
+            let backlog = read_backlog config in
+            (match expected_version with
+             | Some v when backlog.version <> v ->
+                 Error (Types.TaskInvalidState
+                   (Printf.sprintf "Version mismatch (expected %d, got %d)" v backlog.version))
+             | _ ->
+                 let task_opt = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
+                 match task_opt with
+                 | None -> Error (Types.TaskNotFound task_id)
+                 | Some task ->
+                     let now = now_iso () in
+                     let action = String.lowercase_ascii action in
+                     let status_to_string = function
+                       | Types.Todo -> "todo"
+                       | Types.Claimed _ -> "claimed"
+                       | Types.InProgress _ -> "in_progress"
+                       | Types.Done _ -> "done"
+                       | Types.Cancelled _ -> "cancelled"
+                     in
+                     let transition =
+                       match action, task.task_status with
+                       | "claim", Types.Todo ->
+                           Ok (Types.Claimed { assignee = agent_name; claimed_at = now }, Some task_id)
+                       | "start", Types.Claimed { assignee; _ } when assignee = agent_name ->
+                           Ok (Types.InProgress { assignee = agent_name; started_at = now }, Some task_id)
+                       | "done", Types.Claimed { assignee; _ }
+                       | "done", Types.InProgress { assignee; _ } when assignee = agent_name ->
+                           Ok (Types.Done {
+                             assignee = agent_name;
+                             completed_at = now;
+                             notes = if notes = "" then None else Some notes;
+                           }, None)
+                       | "cancel", Types.Todo ->
+                           Ok (Types.Cancelled {
+                             cancelled_by = agent_name;
+                             cancelled_at = now;
+                             reason = if reason = "" then None else Some reason;
+                           }, None)
+                       | "cancel", Types.Claimed { assignee; _ }
+                       | "cancel", Types.InProgress { assignee; _ } when assignee = agent_name ->
+                           Ok (Types.Cancelled {
+                             cancelled_by = agent_name;
+                             cancelled_at = now;
+                             reason = if reason = "" then None else Some reason;
+                           }, None)
+                       | "release", Types.Claimed { assignee; _ }
+                       | "release", Types.InProgress { assignee; _ } when assignee = agent_name ->
+                           Ok (Types.Todo, None)
+                       | _ ->
+                           Error (Types.TaskInvalidState
+                             (Printf.sprintf "Invalid transition: %s -> %s (%s)"
+                               (status_to_string task.task_status) action task_id))
+                     in
+                     (match transition with
+                      | Error e -> Error e
+                      | Ok (new_status, set_current) ->
+                          let new_tasks = List.map (fun t ->
+                            if t.id = task_id then { t with task_status = new_status } else t
+                          ) backlog.tasks in
+                          let new_backlog = {
+                            tasks = new_tasks;
+                            last_updated = now_iso ();
+                            version = backlog.version + 1;
+                          } in
+                          write_backlog config new_backlog;
+                          let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
+                          if Sys.file_exists agent_file then begin
+                            let json = read_json config agent_file in
+                            match agent_of_yojson json with
+                            | Ok agent ->
+                                let updated =
+                                  match set_current with
+                                  | Some _ -> { agent with status = Busy; current_task = Some task_id }
+                                  | None ->
+                                      if agent.current_task = Some task_id then
+                                        { agent with status = Active; current_task = None }
+                                      else
+                                        agent
+                                in
+                                write_json config agent_file (agent_to_yojson updated)
+                            | Error _ -> ()
+                          end;
+                          log_event config (Printf.sprintf
+                            "{\"type\":\"task_transition\",\"agent\":\"%s\",\"task\":\"%s\",\"action\":\"%s\",\"from\":\"%s\",\"to\":\"%s\",\"ts\":\"%s\"}"
+                            agent_name task_id action
+                            (status_to_string task.task_status)
+                            (status_to_string new_status)
+                            now);
+                          Ok (Printf.sprintf "✅ %s %s → %s" task_id
+                                (status_to_string task.task_status)
+                                (status_to_string new_status))
+                     ))
+          with e -> Error (Types.IoError (Printexc.to_string e))
+        in
+        Unix.lockf fd Unix.F_ULOCK 0;
+        Unix.close fd;
+        result
+
+(** Release task back to backlog - transition wrapper *)
+let release_task_r config ~agent_name ~task_id ?expected_version () : string Types.masc_result =
+  transition_task_r config ~agent_name ~task_id ~action:"release" ?expected_version ()
 
 (** Complete task with file locking *)
 let complete_task config ~agent_name ~task_id ~notes =
@@ -672,7 +796,11 @@ let complete_task config ~agent_name ~task_id ~notes =
           else t
         ) backlog.tasks in
 
-        let new_backlog = { backlog with tasks = new_tasks; last_updated = now_iso () } in
+        let new_backlog = {
+          tasks = new_tasks;
+          last_updated = now_iso ();
+          version = backlog.version + 1;
+        } in
         write_backlog config new_backlog;
 
         (* Update agent status *)
@@ -733,7 +861,11 @@ let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_resul
                   { t with task_status = Done { assignee = agent_name; completed_at = now_iso (); notes = if notes = "" then None else Some notes } }
                 else t
               ) backlog.tasks in
-              let new_backlog = { backlog with tasks = new_tasks; last_updated = now_iso () } in
+              let new_backlog = {
+                tasks = new_tasks;
+                last_updated = now_iso ();
+                version = backlog.version + 1;
+              } in
               write_backlog config new_backlog;
               let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
               if Sys.file_exists agent_file then begin
@@ -786,7 +918,11 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
                   }}
                 else t
               ) backlog.tasks in
-              let new_backlog = { backlog with tasks = new_tasks; last_updated = now_iso () } in
+              let new_backlog = {
+                tasks = new_tasks;
+                last_updated = now_iso ();
+                version = backlog.version + 1;
+              } in
               write_backlog config new_backlog;
               (* Update agent status if they had this task *)
               let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
@@ -876,7 +1012,11 @@ let claim_next config ~agent_name =
             else t
           ) backlog.tasks in
 
-          let new_backlog = { backlog with tasks = new_tasks; last_updated = now_iso () } in
+          let new_backlog = {
+            tasks = new_tasks;
+            last_updated = now_iso ();
+            version = backlog.version + 1;
+          } in
           write_backlog config new_backlog;
 
           (* Update agent status *)
@@ -932,7 +1072,11 @@ let update_priority config ~task_id ~priority =
             else t
           ) backlog.tasks in
 
-          let new_backlog = { backlog with tasks = new_tasks; last_updated = now_iso () } in
+          let new_backlog = {
+            tasks = new_tasks;
+            last_updated = now_iso ();
+            version = backlog.version + 1;
+          } in
           write_backlog config new_backlog;
 
           log_event config (Printf.sprintf
@@ -1223,7 +1367,11 @@ let gc config ?(days=7) () =
   ) backlog.tasks in
 
   if !stale_count > 0 then begin
-    let new_backlog = { backlog with tasks = kept_tasks; last_updated = now_iso () } in
+    let new_backlog = {
+      tasks = kept_tasks;
+      last_updated = now_iso ();
+      version = backlog.version + 1;
+    } in
     write_backlog config new_backlog;
     results := Printf.sprintf "📦 Archived %d stale task(s) (older than %d days)" !stale_count days :: !results
   end else
@@ -1354,6 +1502,77 @@ let register_capabilities config ~agent_name ~capabilities =
     )
   end else
     Printf.sprintf "⚠ Agent %s not found. Join first!" agent_name
+
+(** Update agent metadata (status/capabilities). *)
+let update_agent_r config ~agent_name ?status ?capabilities () : string Types.masc_result =
+  if not (is_initialized config) then Error Types.NotInitialized
+  else match validate_agent_name_r agent_name with
+    | Error e -> Error e
+    | Ok _ ->
+        let actual_name = resolve_agent_name config agent_name in
+        let agent_file = Filename.concat (agents_dir config) (safe_filename actual_name ^ ".json") in
+        if not (Sys.file_exists agent_file) then
+          Error (Types.AgentNotFound actual_name)
+        else
+          let locked =
+            with_file_lock_r config agent_file (fun () ->
+              let json = read_json config agent_file in
+              match agent_of_yojson json with
+              | Error _ -> Error (Types.InvalidJson "Invalid agent file")
+              | Ok agent ->
+                  let status_opt =
+                    match status with
+                    | None -> Ok None
+                    | Some s ->
+                        (match Types.agent_status_of_string_opt (String.lowercase_ascii s) with
+                         | Some st -> Ok (Some st)
+                         | None -> Error (Types.InvalidJson ("Unknown status: " ^ s)))
+                  in
+                  (match status_opt with
+                   | Error e -> Error e
+                   | Ok maybe_status ->
+                       let invalid =
+                         match agent.current_task, maybe_status with
+                         | Some _, Some Types.Inactive ->
+                             Some "Cannot set inactive while a task is assigned"
+                         | None, Some Types.Busy ->
+                             Some "Cannot set busy without an active task"
+                         | _ -> None
+                       in
+                       (match invalid with
+                        | Some msg -> Error (Types.TaskInvalidState msg)
+                        | None ->
+                            let updated_caps =
+                              match capabilities with
+                              | None -> agent.capabilities
+                              | Some caps -> caps
+                            in
+                            let updated_status =
+                              match maybe_status with
+                              | None -> agent.status
+                              | Some st -> st
+                            in
+                            let updated = {
+                              agent with
+                              status = updated_status;
+                              capabilities = updated_caps;
+                              last_seen = now_iso ();
+                            } in
+                            write_json config agent_file (agent_to_yojson updated);
+                            log_event config (Printf.sprintf
+                              "{\"type\":\"agent_update\",\"agent\":\"%s\",\"status\":\"%s\",\"capabilities\":%s,\"ts\":\"%s\"}"
+                              actual_name
+                              (Types.agent_status_to_string updated_status)
+                              (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) updated_caps)))
+                              (now_iso ()));
+                            Ok (Printf.sprintf "✅ %s updated" actual_name)
+                       ))
+            )
+          in
+          (match locked with
+           | Ok (Ok msg) -> Ok msg
+           | Ok (Error e) -> Error e
+           | Error e -> Error e)
 
 (** Find agents by capability *)
 let find_agents_by_capability config ~capability =

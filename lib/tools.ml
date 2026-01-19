@@ -136,7 +136,7 @@ let all_schemas : tool_schema list = [
 
   {
     name = "masc_claim";
-    description = "Claim a task from the backlog BEFORE starting work. This prevents other agents from working on the same task (collision avoidance). Always claim → work → done. Other agents will see 'Claimed by [you]' in masc_tasks.";
+    description = "Claim a task from the backlog BEFORE starting work. This prevents other agents from working on the same task (collision avoidance). Prefer masc_transition(action='claim') for CAS-guarded transitions.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -154,8 +154,66 @@ let all_schemas : tool_schema list = [
   };
 
   {
+    name = "masc_transition";
+    description = "Unified task state transition (single entrypoint). Actions: claim, start, done, cancel, release. Supports CAS via expected_version (backlog.version). Use notes for done, reason for cancel.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Your agent name");
+        ]);
+        ("task_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Task ID (e.g., 'task-001')");
+        ]);
+        ("action", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Transition action: claim | start | done | cancel | release");
+        ]);
+        ("expected_version", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Optional CAS guard (current backlog.version). Transition fails if mismatched");
+        ]);
+        ("notes", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Completion notes (used with action='done')");
+        ]);
+        ("reason", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Cancellation reason (used with action='cancel')");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"; `String "task_id"; `String "action"]);
+    ];
+  };
+
+  {
+    name = "masc_release";
+    description = "Release a claimed or in-progress task back to backlog. Prefer masc_transition(action='release') for a single entrypoint.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Your agent name");
+        ]);
+        ("task_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Task ID to release");
+        ]);
+        ("expected_version", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Optional CAS guard (current backlog.version). Transition fails if mismatched");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"; `String "task_id"]);
+    ];
+  };
+
+  {
     name = "masc_done";
-    description = "Mark a task as completed.";
+    description = "Mark a task as completed. Prefer masc_transition(action='done') for CAS-guarded transitions.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -179,7 +237,7 @@ let all_schemas : tool_schema list = [
   (* A2A CancelTask API *)
   {
     name = "masc_cancel_task";
-    description = "Cancel a running or pending task. A2A compatible.";
+    description = "Cancel a running or pending task. A2A compatible. Prefer masc_transition(action='cancel') for CAS-guarded transitions.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -200,6 +258,25 @@ let all_schemas : tool_schema list = [
     ];
   };
 
+  {
+    name = "masc_task_history";
+    description = "Fetch recent task transition history from event logs. Useful for audits or debugging transitions.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("task_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Task ID to filter (e.g., 'task-001')");
+        ]);
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Max events to return (default: 50)");
+          ("default", `Int 50);
+        ]);
+      ]);
+      ("required", `List [`String "task_id"]);
+    ];
+  };
   {
     name = "masc_tasks";
     description = "List all tasks on the quest board.";
@@ -554,6 +631,30 @@ let all_schemas : tool_schema list = [
         ]);
       ]);
       ("required", `List [`String "agent_name"; `String "capabilities"]);
+    ];
+  };
+
+  {
+    name = "masc_agent_update";
+    description = "Update agent metadata (status/capabilities). Use for external agents or manual corrections. Status guards prevent illegal transitions.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent name or nickname");
+        ]);
+        ("status", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional status: active | busy | listening | inactive");
+        ]);
+        ("capabilities", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Optional capability list (overwrites existing)");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"]);
     ];
   };
 

@@ -36,7 +36,7 @@ type registry = {
   mutable sessions: (string, session) Hashtbl.t;
   mutable rate_trackers: (string, rate_tracker) Hashtbl.t;
   config: rate_limit_config;
-  mutable lock: Lwt_mutex.t;
+  lock: Eio.Mutex.t;
 }
 
 (** Create new registry *)
@@ -44,36 +44,38 @@ let create ?(config = default_rate_limit) () = {
   sessions = Hashtbl.create 16;
   rate_trackers = Hashtbl.create 16;
   config;
-  lock = Lwt_mutex.create ();
+  lock = Eio.Mutex.create ();
 }
+
+(** Run a critical section with mutex protection. *)
+let with_lock registry f =
+  Eio.Mutex.lock registry.lock;
+  Fun.protect ~finally:(fun () -> Eio.Mutex.unlock registry.lock) f
 
 (** Register a new session *)
 let register registry ~agent_name =
-  let open Lwt.Syntax in
-  let* () = Lwt_mutex.lock registry.lock in
-  let now = Unix.gettimeofday () in
-  let session = {
-    agent_name;
-    connected_at = now;
-    last_activity = now;
-    is_listening = false;
-    message_queue = [];
-  } in
-  Hashtbl.replace registry.sessions agent_name session;
-  Log.Session.info "Session registered: %s (total: %d)"
-    agent_name (Hashtbl.length registry.sessions);
-  Lwt_mutex.unlock registry.lock;
-  Lwt.return session
+  with_lock registry (fun () ->
+    let now = Unix.gettimeofday () in
+    let session = {
+      agent_name;
+      connected_at = now;
+      last_activity = now;
+      is_listening = false;
+      message_queue = [];
+    } in
+    Hashtbl.replace registry.sessions agent_name session;
+    Log.Session.info "Session registered: %s (total: %d)"
+      agent_name (Hashtbl.length registry.sessions);
+    session
+  )
 
 (** Unregister session *)
 let unregister registry ~agent_name =
-  let open Lwt.Syntax in
-  let* () = Lwt_mutex.lock registry.lock in
-  Hashtbl.remove registry.sessions agent_name;
-  Log.Session.info "Session unregistered: %s (total: %d)"
-    agent_name (Hashtbl.length registry.sessions);
-  Lwt_mutex.unlock registry.lock;
-  Lwt.return_unit
+  with_lock registry (fun () ->
+    Hashtbl.remove registry.sessions agent_name;
+    Log.Session.info "Session unregistered: %s (total: %d)"
+      agent_name (Hashtbl.length registry.sessions)
+  )
 
 (** Update activity timestamp *)
 let update_activity registry ~agent_name ?(is_listening = None) () =
@@ -219,85 +221,81 @@ let get_rate_limit_status registry ~agent_name ~role =
 
 (** Push message to session queue *)
 let push_message registry ~from_agent ~content ~mention =
-  let open Lwt.Syntax in
-  let* () = Lwt_mutex.lock registry.lock in
+  with_lock registry (fun () ->
+    let notification = `Assoc [
+      ("type", `String "masc/message");
+      ("from", `String from_agent);
+      ("content", `String content);
+      ("mention", match mention with Some m -> `String m | None -> `Null);
+      ("timestamp", `String (now_iso ()));
+    ] in
 
-  let notification = `Assoc [
-    ("type", `String "masc/message");
-    ("from", `String from_agent);
-    ("content", `String content);
-    ("mention", match mention with Some m -> `String m | None -> `Null);
-    ("timestamp", `String (now_iso ()));
-  ] in
-
-  let targets = ref [] in
-  Hashtbl.iter (fun name session ->
-    (* Don't send to self *)
-    if name <> from_agent then begin
-      (* Check mention filter *)
-      let should_send = match mention with
-        | None -> true  (* Broadcast *)
-        | Some m -> m = name  (* Direct mention *)
-      in
-      if should_send then begin
-        session.message_queue <- session.message_queue @ [notification];
-        targets := name :: !targets
+    let targets = ref [] in
+    Hashtbl.iter (fun name session ->
+      (* Don't send to self *)
+      if name <> from_agent then begin
+        (* Check mention filter *)
+        let should_send = match mention with
+          | None -> true  (* Broadcast *)
+          | Some m -> m = name  (* Direct mention *)
+        in
+        if should_send then begin
+          session.message_queue <- session.message_queue @ [notification];
+          targets := name :: !targets
+        end
       end
-    end
-  ) registry.sessions;
+    ) registry.sessions;
 
-  if !targets <> [] then
-    Log.Session.debug "Pushed to: %s" (String.concat ", " !targets);
+    if !targets <> [] then
+      Log.Session.debug "Pushed to: %s" (String.concat ", " !targets);
 
-  Lwt_mutex.unlock registry.lock;
-  Lwt.return !targets
+    !targets
+  )
 
 (** Pop message from queue (for listen) *)
 let pop_message registry ~agent_name =
-  match Hashtbl.find_opt registry.sessions agent_name with
-  | Some session ->
-      (match session.message_queue with
-       | msg :: rest ->
-           session.message_queue <- rest;
-           Some msg
-       | [] -> None)
-  | None -> None
+  with_lock registry (fun () ->
+    match Hashtbl.find_opt registry.sessions agent_name with
+    | Some session ->
+        (match session.message_queue with
+         | msg :: rest ->
+             session.message_queue <- rest;
+             Some msg
+         | [] -> None)
+    | None -> None
+  )
 
 (** Wait for message (blocking with timeout) *)
 let wait_for_message registry ~agent_name ~timeout =
-  let open Lwt.Syntax in
   let start_time = Unix.gettimeofday () in
   let check_interval = 2.0 in
 
   (* Ensure session exists *)
-  let* _ =
-    match Hashtbl.find_opt registry.sessions agent_name with
-    | Some _ -> Lwt.return_unit
-    | None -> register registry ~agent_name |> Lwt.map ignore
-  in
+  (match Hashtbl.find_opt registry.sessions agent_name with
+   | Some _ -> ()
+   | None -> ignore (register registry ~agent_name));
 
   update_activity registry ~agent_name ~is_listening:(Some true) ();
 
   let rec wait_loop () =
     let elapsed = Unix.gettimeofday () -. start_time in
     if elapsed >= timeout then
-      Lwt.return_none
+      None
     else begin
       match pop_message registry ~agent_name with
       | Some msg ->
-          update_activity registry ~agent_name ~is_listening:(Some false) ();
-          Lwt.return_some msg
+          Some msg
       | None ->
-          let* () = Lwt_unix.sleep check_interval in
+          Unix.sleepf check_interval;
           wait_loop ()
     end
   in
 
-  Lwt.catch
-    (fun () -> wait_loop ())
-    (fun _ ->
-      update_activity registry ~agent_name ~is_listening:(Some false) ();
-      Lwt.return_none)
+  let result =
+    try wait_loop () with _ -> None
+  in
+  update_activity registry ~agent_name ~is_listening:(Some false) ();
+  result
 
 (** Get inactive agents (idle > threshold seconds) *)
 let get_inactive_agents registry ~threshold =

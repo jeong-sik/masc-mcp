@@ -29,11 +29,15 @@ let masc_mcp_tools = [
   "mcp__masc__masc_tasks";
   "mcp__masc__masc_claim";
   "mcp__masc__masc_claim_next";
+  "mcp__masc__masc_transition";
+  "mcp__masc__masc_release";
+  "mcp__masc__masc_task_history";
   "mcp__masc__masc_done";
   "mcp__masc__masc_broadcast";
   "mcp__masc__masc_join";
   "mcp__masc__masc_leave";
   "mcp__masc__masc_who";
+  "mcp__masc__masc_agent_update";
   "mcp__masc__masc_lock";
   "mcp__masc__masc_unlock";
   "mcp__masc__masc_add_task";
@@ -67,7 +71,7 @@ You are running as a MASC-managed agent. Follow these rules strictly:
    - 0.0-0.5: Continue normally
    - 0.5-0.8: Prepare DNA (context summary) - will auto-prepare
    - 0.8+: Auto-handoff to successor agent
-4. **Task Completion**: Call `mcp__masc__masc_done` then `mcp__masc__masc_leave`
+4. **Task Completion**: Call `mcp__masc__masc_transition` with action="done" then `mcp__masc__masc_leave`
 
 Example lifecycle:
 ```
@@ -77,7 +81,7 @@ mcp__masc__masc_heartbeat(agent_name="gemini")  // every 2 min
 ... more work ...
 mcp__masc__masc_memento_mori(context_ratio=0.6, full_context="summary of work so far")
 ... continue or handoff ...
-mcp__masc__masc_done(agent_name="gemini", task_id="task-XXX")
+mcp__masc__masc_transition(agent_name="gemini", task_id="task-XXX", action="done")
 mcp__masc__masc_leave(agent_name="gemini")
 ```
 
@@ -242,14 +246,6 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
 
 (** Spawn and wait for result (synchronous) *)
 let spawn_sync = spawn
-
-(** Spawn and wait for result (non-blocking Lwt version)
-    Uses Lwt_preemptive.detach to run blocking spawn in a separate OS thread,
-    allowing the Lwt scheduler to continue processing other tasks (like HTTP). *)
-let spawn_lwt ~agent_name ~prompt ?timeout_seconds ?working_dir () =
-  Lwt_preemptive.detach (fun () ->
-    spawn ~agent_name ~prompt ?timeout_seconds ?working_dir ()
-  ) ()
 
 (** Helper for optional int to JSON *)
 let int_opt_to_json = function

@@ -1,6 +1,8 @@
 (** MASC MCP Server - Entry Point
     MCP Streamable HTTP Transport with legacy compatibility *)
 
+[@@@ocaml.alert "-deprecated"]
+
 open Cmdliner
 
 (** Use Shutdown from library *)
@@ -326,12 +328,15 @@ let handle_get_mcp ?legacy_messages_endpoint _state conn req =
 
   let stream, push_to_stream = Lwt_stream.create () in
   let stop, stop_wakener = Lwt.wait () in
-  let ic_ref : Lwt_io.input_channel option ref = ref None in
+  let ic_ref : Cohttp_lwt_unix.Server.IO.ic option ref = ref None in
   let close_connection () =
     (try push_to_stream None with _ -> ());
     match !ic_ref with
     | None -> ()
-    | Some ic -> Lwt.async (fun () -> Lwt_io.close ic)
+    | Some ic ->
+        Lwt.async (fun () ->
+          Cohttp_lwt_unix.Net.close_in ic;
+          Lwt.return_unit)
   in
 
   (* Register SSE client *)
@@ -402,7 +407,7 @@ let handle_get_mcp ?legacy_messages_endpoint _state conn req =
     (* Detect disconnect via read-side EOF (avoids lingering CLOSE_WAIT fds) *)
     Lwt.async (fun () ->
       let rec wait_for_eof () =
-        let* chunk = Lwt_io.read ~count:1 ic in
+        let* chunk = Cohttp_lwt_unix.Server.IO.read ic 1 in
         if String.equal chunk "" then Lwt.return_unit else wait_for_eof ()
       in
       let* () = wait_for_eof () in
@@ -412,10 +417,10 @@ let handle_get_mcp ?legacy_messages_endpoint _state conn req =
 
     let write_chunk s =
       let header = Printf.sprintf "%x\r\n" (String.length s) in
-      let* () = Lwt_io.write oc header in
-      let* () = Lwt_io.write oc s in
-      let* () = Lwt_io.write oc "\r\n" in
-      Lwt_io.flush oc
+      let* () = Cohttp_lwt_unix.Server.IO.write oc header in
+      let* () = Cohttp_lwt_unix.Server.IO.write oc s in
+      let* () = Cohttp_lwt_unix.Server.IO.write oc "\r\n" in
+      Cohttp_lwt_unix.Server.IO.flush oc
     in
 
     let rec write_loop () =
@@ -445,7 +450,7 @@ let handle_get_mcp ?legacy_messages_endpoint _state conn req =
       )
       (fun () ->
         stop_sse_conn_by_key conn_key;
-        Lwt.catch (fun () -> Lwt_io.close ic) (fun _ -> Lwt.return_unit)
+        Lwt.catch (fun () -> Cohttp_lwt_unix.Net.close_in ic; Lwt.return_unit) (fun _ -> Lwt.return_unit)
       )
   in
 

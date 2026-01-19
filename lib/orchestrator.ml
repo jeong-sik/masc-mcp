@@ -124,13 +124,12 @@ You have access to MASC MCP tools via mcp__masc__* prefix.
 
 Start by calling mcp__masc__masc_status to see the current room state.|}
 
-(** Spawn the orchestrator agent (non-blocking Lwt version) *)
-let spawn_orchestrator config room_config =
-  let open Lwt.Syntax in
+(** Spawn the orchestrator agent (Eio-friendly, runs in a domain if provided) *)
+let spawn_orchestrator ?domain_mgr config room_config =
   (* TOCTOU defense: re-check pause before spawn *)
   if Room.is_paused room_config then begin
     Printf.printf "⏸️ Orchestrator: Room paused before spawn, aborting\n%!";
-    Lwt.return { Spawn.success = false; output = "Room paused"; exit_code = 0; elapsed_ms = 0;
+    { Spawn.success = false; output = "Room paused"; exit_code = 0; elapsed_ms = 0;
       input_tokens = None; output_tokens = None; cache_creation_tokens = None;
       cache_read_tokens = None; cost_usd = None }
   end else begin
@@ -141,12 +140,17 @@ let spawn_orchestrator config room_config =
     ~content:"🎯 Auto-orchestrator activated - spawning coordinator with MCP tools" in
 
   let prompt = make_orchestrator_prompt ~port:config.port in
-  (* Use spawn_lwt for non-blocking execution - allows HTTP server to respond during spawn *)
-  let* result = Spawn.spawn_lwt
-    ~agent_name:config.orchestrator_agent
-    ~prompt
-    ~timeout_seconds:config.agent_timeout_s
-    ()
+  let run () =
+    Spawn.spawn
+      ~agent_name:config.orchestrator_agent
+      ~prompt
+      ~timeout_seconds:config.agent_timeout_s
+      ()
+  in
+  let result =
+    match domain_mgr with
+    | Some dm -> Eio.Domain_manager.run dm run
+    | None -> run ()
   in
 
   if result.success then
@@ -155,51 +159,41 @@ let spawn_orchestrator config room_config =
     Printf.printf "❌ Orchestrator failed (exit %d) in %dms\n%!"
       result.exit_code result.elapsed_ms;
 
-  Lwt.return result
+  result
   end  (* end of else begin for pause check *)
 
 (** Main orchestrator loop *)
-let rec run_loop config room_config () =
-  let open Lwt.Syntax in
-
+let rec run_loop ~sw ~clock ?domain_mgr config room_config () =
   if not config.enabled then (
     (* Disabled - just sleep and check again later in case config changes *)
-    let* () = Lwt_unix.sleep 60.0 in
-    run_loop config room_config ()
+    Eio.Time.sleep clock 60.0;
+    run_loop ~sw ~clock ?domain_mgr config room_config ()
   ) else (
-    (* Check if orchestration needed - run in separate thread to avoid blocking Lwt scheduler *)
-    let* needs_orchestration = Lwt_preemptive.detach
-      (fun () -> should_orchestrate room_config) () in
+    let needs_orchestration = should_orchestrate room_config in
 
-    if needs_orchestration then (
-      (* Run spawn in background - fully non-blocking *)
-      Lwt.async (fun () ->
-        Lwt.catch
-          (fun () ->
-            let* _result = spawn_orchestrator config room_config in
-            Lwt.return_unit)
-          (fun exn ->
-            Printf.eprintf "[Orchestrator] spawn failed: %s\n%!" (Printexc.to_string exn);
-            Lwt.return_unit))
-    );
+    if needs_orchestration then
+      Eio.Fiber.fork ~sw (fun () ->
+        try
+          ignore (spawn_orchestrator ?domain_mgr config room_config)
+        with exn ->
+          Printf.eprintf "[Orchestrator] spawn failed: %s\n%!" (Printexc.to_string exn)
+      );
 
     (* Wait for next check interval *)
-    let* () = Lwt_unix.sleep config.check_interval_s in
-    run_loop config room_config ()
+    Eio.Time.sleep clock config.check_interval_s;
+    run_loop ~sw ~clock ?domain_mgr config room_config ()
   )
 
 (** Start the orchestrator background loop *)
-let start room_config =
+let start ~sw ~clock ?domain_mgr room_config =
   let config = load_config () in
   if config.enabled then (
     Printf.printf "🎮 Orchestrator loop enabled (interval: %.0fs, agent: %s)\n%!"
       config.check_interval_s config.orchestrator_agent;
-    Lwt.async (fun () ->
-      Lwt.catch
-        (fun () -> run_loop config room_config ())
-        (fun exn ->
-          Printf.eprintf "[Orchestrator] loop crashed: %s\n%!" (Printexc.to_string exn);
-          Lwt.return_unit))
+    Eio.Fiber.fork ~sw (fun () ->
+      try run_loop ~sw ~clock ?domain_mgr config room_config ()
+      with exn ->
+        Printf.eprintf "[Orchestrator] loop crashed: %s\n%!" (Printexc.to_string exn))
   ) else (
     Printf.printf "💤 Orchestrator loop disabled (set MASC_ORCHESTRATOR_ENABLED=1 to enable)\n%!"
   )

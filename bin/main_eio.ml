@@ -106,7 +106,7 @@ let server_state : Mcp_server.server_state option ref = ref None
 
 (** Health check handler *)
 let health_handler _request reqd =
-  let json = {|{"status":"ok","server":"masc-mcp-eio","version":"2.2.0"}|} in
+  let json = {|{"status":"ok","server":"masc-mcp-eio","version":"2.2.1"}|} in
   Http.Response.json json reqd
 
 (** CORS preflight handler *)
@@ -288,7 +288,8 @@ let run_server ~sw ~env ~port ~base_path =
   end in
 
   (* Initialize server state with Eio context *)
-  server_state := Some (Mcp_eio.create_state_eio ~sw ~env:caqti_env ~base_path);
+  let state = Mcp_eio.create_state_eio ~sw ~env:caqti_env ~base_path in
+  server_state := Some state;
 
   let config = { Http.default_config with port; host = "127.0.0.1" } in
   let routes = make_routes () in
@@ -298,8 +299,13 @@ let run_server ~sw ~env ~port ~base_path =
   let addr = `Tcp (ip, config.port) in
   let socket = Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:config.max_connections addr in
 
+  let resolved_base = state.room_config.base_path in
+  let masc_dir = Filename.concat resolved_base ".masc" in
   Printf.printf "🚀 MASC MCP Server (Eio) listening on http://%s:%d\n%!" config.host config.port;
-  Printf.printf "   Base path: %s\n%!" base_path;
+  Printf.printf "   Base path: %s\n%!" resolved_base;
+  if resolved_base <> base_path then
+    Printf.printf "   Base path (input): %s\n%!" base_path;
+  Printf.printf "   MASC dir: %s\n%!" masc_dir;
 
   let rec accept_loop () =
     let flow, client_addr = Eio.Net.accept ~sw socket in
@@ -324,7 +330,7 @@ let port =
   Arg.(value & opt int 8935 & info ["p"; "port"] ~docv:"PORT" ~doc)
 
 let base_path =
-  let doc = "Base path for MASC data (.masc folder location)" in
+  let doc = "Base path for MASC data (.masc folder location; worktrees resolve to git root)" in
   Arg.(value & opt string (default_base_path ()) & info ["base-path"] ~docv:"PATH" ~doc)
 
 (** Graceful shutdown exception *)
@@ -375,7 +381,7 @@ let run_cmd port base_path =
 
 let cmd =
   let doc = "MASC MCP Server (Eio native)" in
-  let info = Cmd.info "masc-mcp-eio" ~version:"2.2.0-eio" ~doc in
+  let info = Cmd.info "masc-mcp-eio" ~version:"2.2.1-eio" ~doc in
   Cmd.v info Term.(const run_cmd $ port $ base_path)
 
 let () = exit (Cmd.eval cmd)

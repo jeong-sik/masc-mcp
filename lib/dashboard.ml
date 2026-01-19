@@ -127,6 +127,14 @@ let tasks_section (config : Room_utils.config) : section =
   else content in
   { title = "Tasks"; content; empty_msg = "(no tasks)" }
 
+(** Get locks section *)
+let locks_section (config : Room_utils.config) : section =
+  let count = Room_utils.lock_count config in
+  let content =
+    if count = 0 then [] else [Printf.sprintf "%d active" count]
+  in
+  { title = "Locks"; content; empty_msg = "(no locks)" }
+
 (** Truncate path to max_path_length with leading ellipsis *)
 let truncate_path (path : string) : string =
   if String.length path > max_path_length then
@@ -198,6 +206,7 @@ let generate (config : Room_utils.config) : string =
   let sections = [
     agents_section config;
     tasks_section config;
+    locks_section config;
     messages_section config;
     tempo_section config;
     worktrees_section config;
@@ -209,6 +218,7 @@ let generate (config : Room_utils.config) : string =
 let generate_compact (config : Room_utils.config) : string =
   let agents = Room.get_agents_raw config in
   let tasks = Room.get_tasks_raw config in
+  let locks = Room_utils.lock_count config in
   let tempo = Tempo.get_tempo config in
   let pending = List.filter (fun t -> t.Types.task_status = Types.Todo) tasks in
   let active = List.filter (fun t ->
@@ -217,8 +227,9 @@ let generate_compact (config : Room_utils.config) : string =
     | Types.Claimed _ -> true
     | _ -> false
   ) tasks in
-  Printf.sprintf "Agents: %d | Tasks: %d active, %d pending | Tempo: %.0fs"
+  Printf.sprintf "Agents: %d | Tasks: %d active, %d pending | Locks: %d | Tempo: %.0fs"
     (List.length agents)
     (List.length active)
     (List.length pending)
+    locks
     tempo.Tempo.current_interval_s

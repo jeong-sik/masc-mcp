@@ -164,7 +164,7 @@ let create_state ~base_path =
   let config = Room.default_config base_path in
   let registry = Session.create () in
   (* Restore sessions from disk for persistence across restarts *)
-  let agents_path = Filename.concat base_path ".masc/agents" in
+  let agents_path = Filename.concat config.base_path ".masc/agents" in
   Session.restore_from_disk registry ~agents_path;
   {
     room_config = config;
@@ -177,7 +177,7 @@ let create_state ~base_path =
 let create_state_eio ~sw ~env ~base_path =
   let config = Room.default_config_eio ~sw ~env base_path in
   let registry = Session.create () in
-  let agents_path = Filename.concat base_path ".masc/agents" in
+  let agents_path = Filename.concat config.base_path ".masc/agents" in
   Session.restore_from_disk registry ~agents_path;
   {
     room_config = config;
@@ -220,7 +220,7 @@ let protocol_version_from_params params =
 (** Server info *)
 let server_info = `Assoc [
   ("name", `String "masc-mcp");
-  ("version", `String "2.0.1");
+  ("version", `String "2.2.1");
 ]
 
 let capabilities = `Assoc [

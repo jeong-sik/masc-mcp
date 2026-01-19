@@ -4,7 +4,53 @@
 
 set -e
 
-MASC_DIR="${ME_ROOT:-.}/.masc"
+resolve_base_path() {
+    if [ -n "$MASC_BASE_PATH" ]; then
+        echo "$MASC_BASE_PATH"
+        return
+    fi
+
+    if [ -n "$ME_ROOT" ]; then
+        echo "$ME_ROOT"
+        return
+    fi
+
+    if [ -f ".git" ]; then
+        local gitdir
+        gitdir="$(sed -n 's/^gitdir: //p' .git)"
+        if [ -n "$gitdir" ]; then
+            case "$gitdir" in
+                */.git/worktrees/*)
+                    echo "${gitdir%/.git/worktrees/*}"
+                    return
+                    ;;
+                */.git)
+                    echo "${gitdir%/.git}"
+                    return
+                    ;;
+            esac
+        fi
+    fi
+
+    if [ -d ".git" ]; then
+        pwd -P
+        return
+    fi
+
+    if command -v git >/dev/null 2>&1; then
+        local git_root
+        git_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+        if [ -n "$git_root" ]; then
+            echo "$git_root"
+            return
+        fi
+    fi
+
+    pwd -P
+}
+
+BASE_PATH="$(resolve_base_path)"
+MASC_DIR="$BASE_PATH/.masc"
 INTERVAL="${1:-2}"
 
 # Colors

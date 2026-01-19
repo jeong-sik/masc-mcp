@@ -360,7 +360,10 @@ let close_sse_conn info =
   if not info.closed then begin
     info.closed <- true;
     info.stop := true;
-    (try Httpun.Body.Writer.close info.writer with _ -> ())
+    (try Httpun.Body.Writer.close info.writer with
+     | exn ->
+         (* Expected during client disconnect - log for debugging *)
+         Printf.eprintf "[DEBUG] close_sse_conn: %s\n%!" (Printexc.to_string exn))
   end
 
 let stop_sse_session session_id =
@@ -382,7 +385,10 @@ let send_raw info data =
         Httpun.Body.Writer.flush info.writer (fun () -> ())
       );
       true
-    with _ ->
+    with exn ->
+      (* Expected during client disconnect - log for debugging *)
+      Printf.eprintf "[DEBUG] send_raw failed (%s): %s\n%!"
+        info.session_id (Printexc.to_string exn);
       close_sse_conn info;
       false
 

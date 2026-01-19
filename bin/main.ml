@@ -407,8 +407,15 @@ let handle_get_mcp ?legacy_messages_endpoint _state conn req =
     (* Detect disconnect via read-side EOF (avoids lingering CLOSE_WAIT fds) *)
     Lwt.async (fun () ->
       let rec wait_for_eof () =
-        let* chunk = Cohttp_lwt_unix.Server.IO.read ic 1 in
-        if String.equal chunk "" then Lwt.return_unit else wait_for_eof ()
+        Lwt.catch
+          (fun () ->
+            let* chunk = Cohttp_lwt_unix.Server.IO.read ic 1 in
+            if String.equal chunk "" then Lwt.return_unit else wait_for_eof ()
+          )
+          (fun _exn ->
+            (* Channel closed or other IO error - client disconnected abruptly *)
+            Lwt.return_unit
+          )
       in
       let* () = wait_for_eof () in
       stop_sse_conn_by_key conn_key;

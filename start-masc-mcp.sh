@@ -1,6 +1,7 @@
 #!/bin/bash
 # MASC MCP Server (OCaml) - Start Script (HTTP/SSE default)
-# Usage: ./start-masc-mcp.sh [--stdio] [--http] [--eio] [--port PORT] [--base-path PATH]
+# Usage: ./start-masc-mcp.sh [--stdio] [--http] [--port PORT] [--base-path PATH]
+# Note: Eio is the default runtime; --eio is optional.
 
 set -e
 
@@ -123,7 +124,8 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "Unknown option: $1" >&2
-            echo "Usage: $0 [--stdio] [--http] [--eio] [--lwt] [--port PORT] [--base-path PATH]" >&2
+            echo "Usage: $0 [--stdio] [--http] [--port PORT] [--base-path PATH]" >&2
+            echo "Note: Eio is the default runtime; --eio is optional." >&2
             exit 1
             ;;
     esac

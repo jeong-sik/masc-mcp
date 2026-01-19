@@ -201,67 +201,65 @@ let graphql_headers origin =
   [("content-type", "application/json")]
   @ cors_headers origin
 
-(** GraphiQL playground HTML (GET /graphql) *)
+(** GraphQL Playground HTML (GET /graphql) *)
 let graphql_playground_html ~nonce =
   Printf.sprintf {|
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="user-scalable=no,initial-scale=1,minimum-scale=1,maximum-scale=1" />
     <title>MASC GraphQL Playground</title>
-    <link rel="stylesheet" href="/graphiql/graphiql.min.css" />
-    <style nonce="%s">
-      html, body, #graphiql { height: 100%%; margin: 0; }
-    </style>
+    <link rel="stylesheet" href="/static/css/index.css" />
   </head>
   <body>
-    <div id="graphiql">Loading...</div>
-    <script src="/graphiql/react.production.min.js"></script>
-    <script src="/graphiql/react-dom.production.min.js"></script>
-    <script src="/graphiql/graphiql.min.js"></script>
+    <div id="root"></div>
     <script nonce="%s">
-      const graphQLFetcher = function (graphQLParams) {
-        return fetch("/graphql", {
-          method: "post",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(graphQLParams),
-        }).then(function (response) {
-          return response.json();
-        });
-      };
-      const defaultQuery =
-        "{ status { protocolVersion project messageSeq activeAgents paused } " +
-        "tasks(first: 10) { totalCount edges { node { id title priority status { status assignee } } } } }";
-      ReactDOM.render(
-        React.createElement(GraphiQL, {
-          fetcher: graphQLFetcher,
-          defaultQuery: defaultQuery
-        }),
-        document.getElementById("graphiql")
-      );
+      window.addEventListener("load", function () {
+        var root = document.getElementById("root");
+        GraphQLPlayground.init(root, { endpoint: "/graphql" });
+      });
     </script>
+    <script src="/static/js/index.js"></script>
   </body>
 </html>
-|} nonce nonce
+|} nonce
 
 let graphql_csp_header nonce =
   Printf.sprintf
     "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; \
      connect-src 'self'; img-src 'self' data:; \
      script-src 'self' 'nonce-%s' 'unsafe-eval'; \
-     style-src 'self' 'nonce-%s'; \
-     font-src 'self' data:"
-    nonce nonce
+     style-src 'self' 'unsafe-inline'; \
+     font-src 'self' data:; \
+     worker-src 'self' blob:"
+    nonce
+
+(** Resolve assets root *)
+let assets_root () =
+  let is_dir path =
+    Sys.file_exists path && Sys.is_directory path
+  in
+  let exe_assets =
+    let exe_dir = Filename.dirname Sys.executable_name in
+    let root = Filename.dirname (Filename.dirname (Filename.dirname exe_dir)) in
+    Filename.concat root "assets"
+  in
+  match Sys.getenv_opt "MASC_ASSETS_DIR" with
+  | Some path when is_dir path -> path
+  | _ when is_dir (Filename.concat (Sys.getcwd ()) "assets") ->
+      Filename.concat (Sys.getcwd ()) "assets"
+  | _ when is_dir exe_assets -> exe_assets
+  | _ -> Filename.concat (Sys.getcwd ()) "assets"
 
 (** Local GraphiQL assets *)
 let graphiql_asset_root () =
-  Filename.concat (Sys.getcwd ()) "assets/graphiql"
+  Filename.concat (assets_root ()) "graphiql"
 
 let graphiql_asset_path name =
   Filename.concat (graphiql_asset_root ()) name
 
-let graphiql_asset_content_type name =
+let asset_content_type name =
   if Filename.check_suffix name ".css" then
     "text/css; charset=utf-8"
   else if Filename.check_suffix name ".js" then
@@ -277,7 +275,22 @@ let serve_graphiql_asset name _request reqd =
   let path = graphiql_asset_path name in
   match read_file path with
   | Ok body ->
-      Http.Response.bytes ~content_type:(graphiql_asset_content_type name) body reqd
+      Http.Response.bytes ~content_type:(asset_content_type name) body reqd
+  | Error _ ->
+      Http.Response.not_found reqd
+
+(** Local GraphQL Playground assets *)
+let playground_asset_root () =
+  Filename.concat (assets_root ()) "playground"
+
+let playground_asset_path name =
+  Filename.concat (playground_asset_root ()) name
+
+let serve_playground_asset name _request reqd =
+  let path = playground_asset_path name in
+  match read_file path with
+  | Ok body ->
+      Http.Response.bytes ~content_type:(asset_content_type name) body reqd
   | Error _ ->
       Http.Response.not_found reqd
 
@@ -686,6 +699,10 @@ let make_routes () =
   Http.Router.empty
   |> Http.Router.get "/health" health_handler
   |> Http.Router.get "/" (fun _req reqd -> Http.Response.text "MASC MCP Server" reqd)
+  |> Http.Router.get "/static/css/index.css"
+       (serve_playground_asset "static/css/index.css")
+  |> Http.Router.get "/static/js/index.js"
+       (serve_playground_asset "static/js/index.js")
   |> Http.Router.get "/graphiql/graphiql.min.css"
        (serve_graphiql_asset "graphiql.min.css")
   |> Http.Router.get "/graphiql/graphiql.min.js"

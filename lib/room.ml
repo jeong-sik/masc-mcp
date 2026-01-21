@@ -1473,10 +1473,20 @@ let gc config ?(days=7) () =
   end else
     results := Printf.sprintf "✅ No old messages (threshold: %d days)" days :: !results;
 
+  (* 4. Cleanup backend pubsub - PostgreSQL specific, no-op for others *)
+  let pubsub_cleanup_count = ref 0 in
+  (match backend_cleanup_pubsub config ~days ~max_messages:10000 with
+   | Ok count when count > 0 ->
+       pubsub_cleanup_count := count;
+       results := Printf.sprintf "🗃️ Cleaned %d pubsub message(s) from backend" count :: !results
+   | Ok _ -> ()  (* No messages to clean *)
+   | Error e ->
+       results := Printf.sprintf "⚠️ Backend pubsub cleanup failed: %s" (Backend.show_error e) :: !results);
+
   (* Log event *)
   log_event config (Printf.sprintf
-    "{\"type\":\"gc\",\"stale_tasks\":%d,\"old_messages\":%d,\"preserved\":%d,\"days\":%d,\"ts\":\"%s\"}"
-    !stale_count !old_msg_count !preserved_count days (now_iso ()));
+    "{\"type\":\"gc\",\"stale_tasks\":%d,\"old_messages\":%d,\"preserved\":%d,\"pubsub_cleaned\":%d,\"days\":%d,\"ts\":\"%s\"}"
+    !stale_count !old_msg_count !preserved_count !pubsub_cleanup_count days (now_iso ()));
 
   String.concat "\n" (List.rev !results)
 

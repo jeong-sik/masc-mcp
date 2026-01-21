@@ -11,6 +11,7 @@ let test_config () = {
   postgres_url = None;
   node_id = "test-node-1";
   cluster_name = "test-cluster";
+  pubsub_max_messages = 1000;
 }
 
 (* Test: generate unique node IDs *)

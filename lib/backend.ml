@@ -26,7 +26,14 @@ type config = {
   postgres_url: string option;  (* PostgreSQL connection URL for PostgresNative backend *)
   node_id: string;
   cluster_name: string;
+  pubsub_max_messages: int;     (* Max messages per channel before LTRIM, default: 1000 *)
 }
+
+(** Get pubsub max messages from env or default *)
+let pubsub_max_messages_from_env () =
+  match Sys.getenv_opt "MASC_PUBSUB_MAX_MESSAGES" with
+  | Some s -> (try int_of_string s with _ -> 1000)
+  | None -> 1000
 
 let generate_node_id () =
   let hostname = try Unix.gethostname () with _ -> "unknown" in
@@ -41,6 +48,7 @@ let default_config = {
   postgres_url = None;
   node_id = generate_node_id ();
   cluster_name = "default";
+  pubsub_max_messages = pubsub_max_messages_from_env ();
 }
 
 let get_status config : Yojson.Safe.t =
@@ -723,6 +731,7 @@ module RedisNative : BACKEND = struct
     port: int;
     password: string option;
     namespace: string;
+    pubsub_max_messages: int;   (* Max messages before LTRIM *)
   }
 
   (* Parse redis:// URL into components *)
@@ -763,7 +772,8 @@ module RedisNative : BACKEND = struct
     | None -> Error (ConnectionFailed "Redis URL not configured")
     | Some url ->
         let (host, port, password) = parse_redis_url url in
-        Ok { host; port; password; namespace = cfg.cluster_name }
+        Ok { host; port; password; namespace = cfg.cluster_name;
+             pubsub_max_messages = cfg.pubsub_max_messages }
 
   let close _t = ()
 
@@ -869,8 +879,8 @@ module RedisNative : BACKEND = struct
     let msg_json = Redis_common.make_message_json message in
     with_connection t (fun conn ->
       let len = Redis_sync.Client.lpush conn nkey [msg_json] in
-      (* Trim to 1000 messages *)
-      let _ = Redis_sync.Client.ltrim conn nkey 0 999 in
+      (* Trim to max_messages (configurable via MASC_PUBSUB_MAX_MESSAGES, default 1000) *)
+      let _ = Redis_sync.Client.ltrim conn nkey 0 (t.pubsub_max_messages - 1) in
       min len 1)
 
   let subscribe t ~channel ~callback =
@@ -921,6 +931,11 @@ module PostgresNative : sig
   include BACKEND
   (* create_eio requires Caqti-compatible Eio environment (net, clock, mono_clock) *)
   val create_eio : sw:Eio.Switch.t -> env:Caqti_eio.stdenv -> config -> (t, error) result
+
+  (* Cleanup old pubsub messages - PostgreSQL specific *)
+  val cleanup_pubsub_by_age : t -> days:int -> (int, error) result
+  val cleanup_pubsub_by_limit : t -> max_messages:int -> (int, error) result
+  val cleanup_pubsub : t -> days:int -> max_messages:int -> (int, error) result
 end = struct
   type t = {
     pool: (Caqti_eio.connection, Caqti_error.t) Caqti_eio.Pool.t;
@@ -1048,6 +1063,25 @@ end = struct
     (Caqti_type.unit ->. Caqti_type.unit)
     "CREATE INDEX IF NOT EXISTS idx_masc_pubsub_channel ON masc_pubsub(channel, id)"
 
+  let create_pubsub_created_at_index_q =
+    (Caqti_type.unit ->. Caqti_type.unit)
+    "CREATE INDEX IF NOT EXISTS idx_masc_pubsub_created_at ON masc_pubsub(created_at)"
+
+  (* Cleanup old pubsub messages - returns count of deleted rows *)
+  let cleanup_pubsub_q =
+    (Caqti_type.int ->! Caqti_type.int)
+    "WITH deleted AS (DELETE FROM masc_pubsub WHERE created_at < NOW() - $1 * INTERVAL '1 day' RETURNING 1) SELECT COUNT(*)::int FROM deleted"
+
+  (* Cleanup keeping max N messages per channel *)
+  let cleanup_pubsub_limit_q =
+    (Caqti_type.int ->! Caqti_type.int)
+    "WITH ranked AS (\
+       SELECT id, ROW_NUMBER() OVER (PARTITION BY channel ORDER BY id DESC) as rn \
+       FROM masc_pubsub\
+     ), deleted AS (\
+       DELETE FROM masc_pubsub WHERE id IN (SELECT id FROM ranked WHERE rn > $1) RETURNING 1\
+     ) SELECT COUNT(*)::int FROM deleted"
+
   (* Helper to convert Caqti_error to our error type *)
   let caqti_error_to_masc err =
     OperationFailed (Caqti_error.show err)
@@ -1082,6 +1116,7 @@ end = struct
               let* () = C.exec create_pubsub_table_q () in
               let* () = C.exec create_index_q () in
               let* () = C.exec create_pubsub_index_q () in
+              let* () = C.exec create_pubsub_created_at_index_q () in
               Ok ()
             ) pool in
             (match init_result with
@@ -1241,6 +1276,33 @@ end = struct
     | Ok 1 -> Ok true
     | Ok _ -> Ok false
     | Error err -> Error (caqti_error_to_masc err)
+
+  (* Cleanup old pubsub messages by age (days) *)
+  let cleanup_pubsub_by_age t ~days =
+    match Caqti_eio.Pool.use (fun conn ->
+      let module C = (val conn : Caqti_eio.CONNECTION) in
+      C.find cleanup_pubsub_q days
+    ) t.pool with
+    | Ok count -> Ok count
+    | Error err -> Error (caqti_error_to_masc err)
+
+  (* Cleanup pubsub messages keeping only max_messages per channel *)
+  let cleanup_pubsub_by_limit t ~max_messages =
+    match Caqti_eio.Pool.use (fun conn ->
+      let module C = (val conn : Caqti_eio.CONNECTION) in
+      C.find cleanup_pubsub_limit_q max_messages
+    ) t.pool with
+    | Ok count -> Ok count
+    | Error err -> Error (caqti_error_to_masc err)
+
+  (* Combined cleanup: by age first, then by limit *)
+  let cleanup_pubsub t ~days ~max_messages =
+    let age_result = cleanup_pubsub_by_age t ~days in
+    let limit_result = cleanup_pubsub_by_limit t ~max_messages in
+    match (age_result, limit_result) with
+    | (Ok age_count, Ok limit_count) -> Ok (age_count + limit_count)
+    | (Error e, _) -> Error e
+    | (_, Error e) -> Error e
 end
 
 (* ============================================ *)

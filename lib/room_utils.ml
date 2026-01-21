@@ -164,6 +164,7 @@ let backend_config_for base_path =
     Backend.base_path = Filename.concat base_path ".masc";
     Backend.cluster_name;
     Backend.node_id = Backend.generate_node_id ();
+    Backend.pubsub_max_messages = Backend.pubsub_max_messages_from_env ();
   }
 
 let create_backend cfg =
@@ -429,6 +430,19 @@ let backend_name config =
   | RedisRest _ -> "redis-rest"
   | RedisNative _ -> "redis-native"
   | PostgresNative _ -> "postgres-native"
+
+(** Cleanup pubsub messages - only effective for PostgreSQL backend.
+    Other backends either have auto-cleanup (Redis LTRIM) or use FS cleanup in gc.
+    Returns the number of deleted messages. *)
+let backend_cleanup_pubsub config ~days ~max_messages =
+  match config.backend with
+  | PostgresNative t -> Backend.PostgresNative.cleanup_pubsub t ~days ~max_messages
+  | Memory _ | FileSystem _ | RedisRest _ | RedisNative _ ->
+      (* No-op for non-PostgreSQL backends:
+         - FileSystem: handled separately by gc (file deletion)
+         - Redis: auto-limited by LTRIM in publish
+         - Memory: ephemeral, no persistence *)
+      Ok 0
 
 (* ============================================ *)
 (* Key/path conversion                          *)

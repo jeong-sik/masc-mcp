@@ -2663,6 +2663,91 @@ of their context limits and gracefully hand over work to successors.|};
       ("required", `List [`String "room_id"]);
     ];
   };
+
+  (* ============================================ *)
+  (* Audit & Governance Tools (Trust Building)   *)
+  (* ============================================ *)
+
+  {
+    name = "masc_audit_query";
+    description = "Query audit logs to inspect agent actions and security events. Returns recent security events: auth success/failure, anomalies, violations. Use for trust verification and debugging collaboration issues.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Filter by agent name (optional)");
+        ]);
+        ("event_type", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [
+            `String "auth_success";
+            `String "auth_failure";
+            `String "anomaly_detected";
+            `String "security_violation";
+            `String "all"
+          ]);
+          ("description", `String "Filter by event type (default: all)");
+          ("default", `String "all");
+        ]);
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Maximum events to return (default: 50)");
+          ("default", `Int 50);
+        ]);
+        ("since_hours", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Only show events from last N hours (default: 24)");
+          ("default", `Float 24.0);
+        ]);
+      ]);
+    ];
+  };
+
+  {
+    name = "masc_audit_stats";
+    description = "Get security statistics and trust metrics for agents. Shows auth success rate, anomaly count, task completion rate per agent. Use to evaluate agent reliability before delegation.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Specific agent to analyze (optional, shows all if omitted)");
+        ]);
+      ]);
+    ];
+  };
+
+  {
+    name = "masc_governance_set";
+    description = "Configure governance policies for the room. Enables audit logging, anomaly detection, and agent isolation. Enterprise security for production use.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("level", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [
+            `String "development";
+            `String "production";
+            `String "enterprise";
+            `String "paranoid"
+          ]);
+          ("description", `String "Security level: development (permissive), production (basic), enterprise (audit+encryption), paranoid (max isolation)");
+          ("default", `String "production");
+        ]);
+        ("audit_enabled", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Enable audit logging (default: true for production+)");
+          ("default", `Bool true);
+        ]);
+        ("anomaly_detection", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Enable anomaly detection (auth spikes, low success rate)");
+          ("default", `Bool false);
+        ]);
+      ]);
+    ];
+  };
 ]
 
 (** Get tool by name *)

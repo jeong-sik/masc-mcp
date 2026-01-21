@@ -62,21 +62,8 @@ let should_orchestrate room_config =
 
   (* Get active (non-zombie) agents *)
   let agents = Room.get_agents_raw room_config in
-  let now = Unix.time () in
-  let zombie_threshold = 300.0 in (* 5 minutes *)
-  let parse_timestamp s : float option =
-    (* ISO 8601 format: 2024-01-01T12:00:00Z or similar *)
-    try Some (Scanf.sscanf s "%d-%d-%dT%d:%d:%d" (fun y mo d h mi s ->
-      let tm = { Unix.tm_sec = s; tm_min = mi; tm_hour = h;
-                 tm_mday = d; tm_mon = mo - 1; tm_year = y - 1900;
-                 tm_wday = 0; tm_yday = 0; tm_isdst = false } in
-      fst (Unix.mktime tm)))
-    with _ -> None
-  in
   let active_agents = List.filter (fun (agent: Types.agent) ->
-    match parse_timestamp agent.last_seen with
-    | Some ts -> now -. ts < zombie_threshold
-    | None -> false  (* Parse failure = treat as zombie *)
+    not (Resilience.Zombie.is_zombie agent.last_seen)
   ) agents in
 
   (* Need orchestration if: important tasks exist AND no active agents *)
@@ -125,11 +112,11 @@ You have access to MASC MCP tools via mcp__masc__* prefix.
 Start by calling mcp__masc__masc_status to see the current room state.|}
 
 (** Spawn the orchestrator agent (Eio-friendly, runs in a domain if provided) *)
-let spawn_orchestrator ?domain_mgr config room_config =
+let spawn_orchestrator ~sw ~proc_mgr ?domain_mgr config room_config =
   (* TOCTOU defense: re-check pause before spawn *)
   if Room.is_paused room_config then begin
     Printf.printf "⏸️ Orchestrator: Room paused before spawn, aborting\n%!";
-    { Spawn.success = false; output = "Room paused"; exit_code = 0; elapsed_ms = 0;
+    { Spawn_eio.success = false; output = "Room paused"; exit_code = 0; elapsed_ms = 0;
       input_tokens = None; output_tokens = None; cache_creation_tokens = None;
       cache_read_tokens = None; cost_usd = None }
   end else begin
@@ -141,7 +128,9 @@ let spawn_orchestrator ?domain_mgr config room_config =
 
   let prompt = make_orchestrator_prompt ~port:config.port in
   let run () =
-    Spawn.spawn
+    Spawn_eio.spawn
+      ~sw
+      ~proc_mgr
       ~agent_name:config.orchestrator_agent
       ~prompt
       ~timeout_seconds:config.agent_timeout_s
@@ -160,38 +149,53 @@ let spawn_orchestrator ?domain_mgr config room_config =
       result.exit_code result.elapsed_ms;
 
   result
-  end  (* end of else begin for pause check *)
+  end
 
 (** Main orchestrator loop *)
-let rec run_loop ~sw ~clock ?domain_mgr config room_config () =
+let rec run_loop ~sw ~proc_mgr ~clock ?domain_mgr config room_config () =
   if not config.enabled then (
     (* Disabled - just sleep and check again later in case config changes *)
     Eio.Time.sleep clock 60.0;
-    run_loop ~sw ~clock ?domain_mgr config room_config ()
+    run_loop ~sw ~proc_mgr ~clock ?domain_mgr config room_config ()
   ) else (
     let needs_orchestration = should_orchestrate room_config in
 
     if needs_orchestration then
       Eio.Fiber.fork ~sw (fun () ->
         try
-          ignore (spawn_orchestrator ?domain_mgr config room_config)
+          ignore (spawn_orchestrator ~sw ~proc_mgr ?domain_mgr config room_config)
         with exn ->
           Printf.eprintf "[Orchestrator] spawn failed: %s\n%!" (Printexc.to_string exn)
       );
 
     (* Wait for next check interval *)
     Eio.Time.sleep clock config.check_interval_s;
-    run_loop ~sw ~clock ?domain_mgr config room_config ()
+    run_loop ~sw ~proc_mgr ~clock ?domain_mgr config room_config ()
   )
 
 (** Start the orchestrator background loop *)
-let start ~sw ~clock ?domain_mgr room_config =
+let start ~sw ~proc_mgr ~clock ?domain_mgr room_config =
   let config = load_config () in
+
+  (* Start Zero-Zombie background cleanup loop *)
+  Eio.Fiber.fork ~sw (fun () ->
+    Printf.printf "🧟 Zero-Zombie Protocol: Automatic cleanup enabled (interval: 60s)\n%!";
+    Resilience.ZeroZombie.run_loop ~interval:60.0 ~clock
+      ~cleanup_fn:(fun () ->
+        let status = Room.cleanup_zombies room_config in
+        (* Extract agent names from status message if any were cleaned *)
+        if String.length status > 0 && String.sub status 0 (min 3 (String.length status)) = "✅" then
+          (* For simplicity in the protocol stats, we just log that something happened.
+             Actual room status parsing is complex, so we return a dummy list to signal success. *)
+          ["(automatic-cleanup)"]
+        else []
+      ) ());
+
   if config.enabled then (
     Printf.printf "🎮 Orchestrator loop enabled (interval: %.0fs, agent: %s)\n%!"
       config.check_interval_s config.orchestrator_agent;
     Eio.Fiber.fork ~sw (fun () ->
-      try run_loop ~sw ~clock ?domain_mgr config room_config ()
+      try run_loop ~sw ~proc_mgr ~clock ?domain_mgr config room_config ()
       with exn ->
         Printf.eprintf "[Orchestrator] loop crashed: %s\n%!" (Printexc.to_string exn))
   ) else (

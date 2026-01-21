@@ -329,6 +329,9 @@ and broadcast config ~from_agent ~content =
     (Printf.sprintf "%09d_%s_broadcast.json" seq (safe_filename from_agent)) in
   write_json config msg_file (message_to_yojson msg);
 
+  (* Publish to distributed backend if available *)
+  let _ = backend_publish config ~channel:"broadcast" ~message:(Yojson.Safe.to_string (message_to_yojson msg)) in
+
   Printf.sprintf "📢 [%s] %s" safe_agent safe_content
 
 (** Pause the room - stops orchestrator from spawning new agents *)
@@ -387,38 +390,21 @@ let reset config =
 (* Zombie Detection (moved up for status use)  *)
 (* ============================================ *)
 
-(** Default heartbeat timeout in seconds (5 minutes) *)
-let heartbeat_timeout_seconds = 300.0
+(** Default heartbeat timeout in seconds (5 minutes) - DEPRECATED: Use Resilience.default_zombie_threshold *)
+let heartbeat_timeout_seconds = Resilience.default_zombie_threshold
 
 (** Parse ISO timestamp to Unix time - returns None if parsing fails *)
-let parse_iso_time_opt iso_str =
-  try
-    (* Format: YYYY-MM-DDTHH:MM:SSZ *)
-    Scanf.sscanf iso_str "%04d-%02d-%02dT%02d:%02d:%02dZ"
-      (fun year mon day hour min sec ->
-        let tm = {
-          Unix.tm_sec = sec; tm_min = min; tm_hour = hour;
-          tm_mday = day; tm_mon = mon - 1; tm_year = year - 1900;
-          tm_wday = 0; tm_yday = 0; tm_isdst = false;
-        } in
-        let local_time, _ = Unix.mktime tm in
-        let utc_tm = Unix.gmtime local_time in
-        let utc_time, _ = Unix.mktime utc_tm in
-        let offset = local_time -. utc_time in
-        Some (local_time +. offset))
-  with _ -> None
+let parse_iso_time_opt = Resilience.Time.parse_iso8601_opt
 
 (** Parse ISO timestamp - returns current time if parsing fails (safe default) *)
 let parse_iso_time iso_str =
   match parse_iso_time_opt iso_str with
   | Some t -> t
-  | None -> Unix.gettimeofday ()
+  | None -> Resilience.Time.now ()
 
 (** Check if agent is zombie (no heartbeat for timeout period) *)
 let is_zombie_agent last_seen_iso =
-  let last_seen = parse_iso_time last_seen_iso in
-  let now = Unix.gettimeofday () in
-  (now -. last_seen) > heartbeat_timeout_seconds
+  Resilience.Zombie.is_zombie last_seen_iso
 
 (** Get room status *)
 let status config =
@@ -550,6 +536,54 @@ let add_task config ~title ~priority ~description =
 
   let _ = broadcast config ~from_agent:"system" ~content:(Printf.sprintf "📋 New quest: %s" title) in
   Printf.sprintf "✅ Added %s: %s" task_id title
+
+(** Add multiple tasks in a batch *)
+let batch_add_tasks config tasks =
+  ensure_initialized config;
+
+  let lock_file = Filename.concat (tasks_dir config) ".backlog.lock" in
+  mkdir_p (Filename.dirname lock_file);
+
+  let fd = Unix.openfile lock_file [Unix.O_CREAT; Unix.O_RDWR] 0o644 in
+  Unix.lockf fd Unix.F_LOCK 0;
+
+  let result =
+    try
+      let backlog = read_backlog config in
+      let next_num = ref (next_task_number config backlog) in
+      let added_tasks = List.map (fun (title, priority, description) ->
+        let task_id = Printf.sprintf "task-%03d" !next_num in
+        incr next_num;
+        {
+          id = task_id;
+          title;
+          description;
+          task_status = Todo;
+          priority;
+          files = [];
+          created_at = now_iso ();
+          worktree = None;
+        }
+      ) tasks in
+
+      let new_backlog = {
+        tasks = backlog.tasks @ added_tasks;
+        last_updated = now_iso ();
+        version = backlog.version + 1;
+      } in
+      write_backlog config new_backlog;
+
+      let summary = String.concat ", " (List.map (fun (t : Types.task) -> t.id) added_tasks) in
+      let msg = Printf.sprintf "📋 New batch of %d quests added: %s" (List.length added_tasks) summary in
+      let _ = broadcast config ~from_agent:"system" ~content:msg in
+      Printf.sprintf "✅ Added %d tasks: %s" (List.length added_tasks) summary
+    with e ->
+      Printf.sprintf "❌ Error adding batch tasks: %s" (Printexc.to_string e)
+  in
+
+  Unix.lockf fd Unix.F_ULOCK 0;
+  Unix.close fd;
+  result
 
 (** Claim task with file locking (TOCTOU prevention) *)
 let claim_task config ~agent_name ~task_id =

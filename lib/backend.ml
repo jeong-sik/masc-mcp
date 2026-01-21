@@ -1005,7 +1005,22 @@ end = struct
     (Caqti_type.unit ->! Caqti_type.int)
     "SELECT 1"
 
-  (* Schema creation query *)
+  (* Pub/Sub queries (using table as queue to match RedisNative behavior) *)
+  let publish_q =
+    (Caqti_type.(t2 string string) ->. Caqti_type.unit)
+    "INSERT INTO masc_pubsub (channel, message) VALUES ($1, $2)"
+
+  let subscribe_q =
+    (Caqti_type.string ->? Caqti_type.string)
+    "DELETE FROM masc_pubsub WHERE id = (\
+       SELECT id FROM masc_pubsub \
+       WHERE channel = $1 \
+       ORDER BY id \
+       LIMIT 1 \
+       FOR UPDATE SKIP LOCKED\
+     ) RETURNING message"
+
+  (* Schema creation queries *)
   let create_schema_q =
     (Caqti_type.unit ->. Caqti_type.unit)
     "CREATE TABLE IF NOT EXISTS masc_kv (\
@@ -1016,9 +1031,22 @@ end = struct
        updated_at TIMESTAMP DEFAULT NOW() \
      )"
 
+  let create_pubsub_table_q =
+    (Caqti_type.unit ->. Caqti_type.unit)
+    "CREATE TABLE IF NOT EXISTS masc_pubsub (\
+       id SERIAL PRIMARY KEY, \
+       channel TEXT NOT NULL, \
+       message TEXT NOT NULL, \
+       created_at TIMESTAMP DEFAULT NOW() \
+     )"
+
   let create_index_q =
     (Caqti_type.unit ->. Caqti_type.unit)
     "CREATE INDEX IF NOT EXISTS idx_masc_kv_expires ON masc_kv(expires_at)"
+
+  let create_pubsub_index_q =
+    (Caqti_type.unit ->. Caqti_type.unit)
+    "CREATE INDEX IF NOT EXISTS idx_masc_pubsub_channel ON masc_pubsub(channel, id)"
 
   (* Helper to convert Caqti_error to our error type *)
   let caqti_error_to_masc err =
@@ -1051,7 +1079,9 @@ end = struct
             let init_result = Caqti_eio.Pool.use (fun conn ->
               let module C = (val conn : Caqti_eio.CONNECTION) in
               let* () = C.exec create_schema_q () in
+              let* () = C.exec create_pubsub_table_q () in
               let* () = C.exec create_index_q () in
+              let* () = C.exec create_pubsub_index_q () in
               Ok ()
             ) pool in
             (match init_result with
@@ -1185,13 +1215,23 @@ end = struct
     | Ok () -> Ok true
     | Error err -> Error (caqti_error_to_masc err)
 
-  (* Pub/Sub not directly supported in PostgreSQL KV model *)
-  (* Use LISTEN/NOTIFY for real pub/sub - TODO: implement later *)
-  let publish _t ~channel:_ ~message:_ =
-    Ok 0  (* No subscribers in simple KV mode *)
+  (* Pub/Sub using table as queue *)
+  let publish t ~channel ~message =
+    match Caqti_eio.Pool.use (fun conn ->
+      let module C = (val conn : Caqti_eio.CONNECTION) in
+      C.exec publish_q (channel, message)
+    ) t.pool with
+    | Ok () -> Ok 1
+    | Error err -> Error (caqti_error_to_masc err)
 
-  let subscribe _t ~channel:_ ~callback:_ =
-    Ok ()  (* No-op for now *)
+  let subscribe t ~channel ~callback =
+    match Caqti_eio.Pool.use (fun conn ->
+      let module C = (val conn : Caqti_eio.CONNECTION) in
+      C.find_opt subscribe_q channel
+    ) t.pool with
+    | Ok (Some msg) -> callback msg; Ok ()
+    | Ok None -> Ok ()
+    | Error err -> Error (caqti_error_to_masc err)
 
   let health_check t =
     match Caqti_eio.Pool.use (fun conn ->

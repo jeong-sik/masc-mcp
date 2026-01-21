@@ -21,8 +21,10 @@
    federation
    gcm_compat
    graphql_api
+   handover_eio
    hebbian_eio
    http_server_eio
+   institution_eio
    level2_config
    level4_config
    log
@@ -33,15 +35,18 @@
    mcp_server_eio
    mcp_session
    metrics_store_eio
+   mind_eio
    mitosis
    mode
    nickname
+   noosphere_eio
    notify
    orchestrator
    planning_eio
    progress
    redis_common
    relay
+   resilience
    response
    room
    room_eio
@@ -55,8 +60,12 @@
    sdp
    session
    spawn
+   spawn_eio
    sse
    subscriptions
+   swarm_behaviors_eio
+   swarm_eio
+   telemetry_eio
    tempo
    tools
    transport

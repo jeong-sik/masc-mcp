@@ -206,6 +206,44 @@ let test_unified_backend () =
       | Ok v -> Alcotest.(check string) "unified get" "unified value" v
       | Error _ -> Alcotest.fail "unified get failed")
 
+(** Test Postgres backend if URL provided *)
+let test_postgres_backend () =
+  match Sys.getenv_opt "MASC_POSTGRES_URL" with
+  | None -> () (* Skip if no Postgres URL *)
+  | Some url ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let config = Backend_eio.{
+        base_path = ".masc";
+        node_id = "test_pg_node";
+        cluster_name = "test_pg";
+      } in
+      match Backend_eio.Postgres.create ~sw ~env:(env :> Caqti_eio.stdenv) ~url config with
+      | Error _ -> Alcotest.fail "Postgres create failed"
+      | Ok backend ->
+          let key = "pg:test:key" in
+          let value = "pg value" in
+          
+          (* Set *)
+          (match Backend_eio.Postgres.set backend key value with
+           | Ok () -> ()
+           | Error _ -> Alcotest.fail "pg set failed");
+           
+          (* Get *)
+          (match Backend_eio.Postgres.get backend key with
+           | Ok v -> Alcotest.(check string) "pg value matches" value v
+           | Error _ -> Alcotest.fail "pg get failed");
+           
+          (* Exists *)
+          Alcotest.(check bool) "pg exists" true (Backend_eio.Postgres.exists backend key);
+          
+          (* Delete *)
+          (match Backend_eio.Postgres.delete backend key with
+           | Ok () -> ()
+           | Error _ -> Alcotest.fail "pg delete failed");
+           
+          Alcotest.(check bool) "pg not exists" false (Backend_eio.Postgres.exists backend key)
+
 let () =
   Alcotest.run "Backend_eio" [
     "basic", [
@@ -228,5 +266,8 @@ let () =
     ];
     "unified", [
       Alcotest.test_case "unified backend" `Quick test_unified_backend;
+    ];
+    "postgres", [
+      Alcotest.test_case "postgres backend" `Quick test_postgres_backend;
     ];
   ]

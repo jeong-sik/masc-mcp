@@ -877,6 +877,8 @@ let run_server ~sw ~env ~port ~base_path =
   let mono_clock = Eio.Stdenv.mono_clock env in
   let net = Eio.Stdenv.net env in
   let domain_mgr = Eio.Stdenv.domain_mgr env in
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let fs = Eio.Stdenv.fs env in
 
   (* Store switch and clock references for handlers *)
   current_sw := Some sw;
@@ -892,11 +894,11 @@ let run_server ~sw ~env ~port ~base_path =
   end in
 
   (* Initialize server state with Eio context *)
-  let state = Mcp_eio.create_state_eio ~sw ~env:caqti_env ~base_path in
+  let state = Mcp_eio.create_state_eio ~sw ~env:caqti_env ~proc_mgr ~fs ~clock ~base_path in
   server_state := Some state;
   Mcp_server.set_sse_callback state Sse.broadcast;
   Progress.set_sse_callback Sse.broadcast;
-  Masc_mcp.Orchestrator.start ~sw ~clock ~domain_mgr state.room_config;
+  Masc_mcp.Orchestrator.start ~sw ~proc_mgr ~clock ~domain_mgr state.room_config;
 
   let config = { Http.default_config with port; host = "127.0.0.1" } in
   let routes = make_routes () in

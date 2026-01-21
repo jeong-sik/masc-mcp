@@ -374,7 +374,7 @@ let disconnect_client t ~client_id =
   | Some ic -> safe_close_client t ic
   | None -> ()
 
-let cleanup_zombies t ?(timeout = 300.0) () =
+let cleanup_zombies t ?(timeout = Resilience.default_zombie_threshold) () =
   let now = Unix.gettimeofday () in
   let stale_before = now -. timeout in
   let to_remove = ref [] in

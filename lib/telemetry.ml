@@ -27,6 +27,7 @@ type event =
   | Task_completed of { task_id: string; duration_ms: int; success: bool }
   | Handoff_triggered of { from_agent: string; to_agent: string; reason: string }
   | Error_occurred of { code: string; message: string; context: string }
+  | Tool_called of { tool_name: string; success: bool; duration_ms: int; agent_id: string option }
 [@@deriving yojson, show]
 
 (** Timestamped event record for storage *)
@@ -68,6 +69,7 @@ let event_type_name = function
   | Task_completed _ -> "task_completed"
   | Handoff_triggered _ -> "handoff_triggered"
   | Error_occurred _ -> "error_occurred"
+  | Tool_called _ -> "tool_called"
 
 let event_to_json event =
   let record = {
@@ -290,6 +292,25 @@ let track_handoff config ~from_agent ~to_agent ~reason =
 (** Track error *)
 let track_error config ~code ~message ~context =
   track config (Error_occurred { code; message; context })
+
+(** Track tool call *)
+let track_tool_called config ~tool_name ~success ~duration_ms ?agent_id () =
+  track config (Tool_called { tool_name; success; duration_ms; agent_id })
+
+(** Sync version of track - for use in Eio context *)
+let track_sync config event : unit =
+  ensure_masc_dir config;
+  let file = telemetry_file config in
+  let json_line = event_to_json event ^ "\n" in
+  let oc = open_out_gen [Open_append; Open_creat] 0o600 file in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    output_string oc json_line;
+    flush oc
+  )
+
+(** Sync version of track_tool_called - for use in Eio/mcp_server_eio.ml *)
+let track_tool_called_sync config ~tool_name ~success ~duration_ms ?agent_id () =
+  track_sync config (Tool_called { tool_name; success; duration_ms; agent_id })
 
 (* ============================================ *)
 (* Log rotation / cleanup                       *)

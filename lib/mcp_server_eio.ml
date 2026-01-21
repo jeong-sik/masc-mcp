@@ -20,8 +20,8 @@ let create_state ?test_mode:_ ~base_path () =
   Mcp_server.create_state ~base_path
 
 (** Create state with Eio context - required for PostgresNative backend *)
-let create_state_eio ~sw ~env ~base_path =
-  Mcp_server.create_state_eio ~sw ~env ~base_path
+let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~base_path =
+  Mcp_server.create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~base_path
 
 let is_jsonrpc_v2 = Mcp_server.is_jsonrpc_v2
 let is_jsonrpc_response = Mcp_server.is_jsonrpc_response
@@ -289,7 +289,7 @@ let detect_mode first_line =
 
     All legacy bridges have been removed.
 *)
-let execute_tool_eio ~clock state ~name ~arguments =
+let execute_tool_eio ~sw ~clock state ~name ~arguments =
   (* clock parameter used for Session_eio.wait_for_message *)
   let open Yojson.Safe.Util in
 
@@ -447,6 +447,19 @@ let execute_tool_eio ~clock state ~name ~arguments =
       let priority = get_int "priority" 3 in
       let description = get_string "description" "" in
       (true, Room.add_task config ~title ~priority ~description)
+
+  | "masc_batch_add_tasks" ->
+      let tasks_json = match arguments |> member "tasks" with
+        | `List l -> l
+        | _ -> []
+      in
+      let tasks = List.map (fun t ->
+        let title = t |> member "title" |> to_string in
+        let priority = t |> member "priority" |> to_int_option |> Option.value ~default:3 in
+        let description = t |> member "description" |> to_string_option |> Option.value ~default:"" in
+        (title, priority, description)
+      ) tasks_json in
+      (true, Room.batch_add_tasks config tasks)
 
   | "masc_claim" ->
       let task_id = get_string "task_id" "" in
@@ -750,6 +763,68 @@ Time: %s
   | "masc_worktree_list" ->
       let json = Room.worktree_list config in
       (true, Yojson.Safe.pretty_to_string json)
+
+  (* Cellular Agent Handover tools - Eio native *)
+  | "masc_handover_create" ->
+      let task_id = get_string "task_id" "" in
+      let session_id = get_string "session_id" "" in
+      let reason_str = get_string "reason" "explicit" in
+      let reason = match reason_str with
+        | "context_limit" -> Handover_eio.ContextLimit (get_int "context_pct" 80)
+        | "timeout" -> Handover_eio.Timeout 300
+        | "error" -> Handover_eio.FatalError "Unknown error"
+        | "complete" -> Handover_eio.TaskComplete
+        | _ -> Handover_eio.Explicit
+      in
+      let h = {
+        (Handover_eio.create_handover ~from_agent:agent_name ~task_id ~session_id ~reason) with
+        current_goal = get_string "goal" "";
+        progress_summary = get_string "progress" "";
+        completed_steps = get_string_list "completed_steps";
+        pending_steps = get_string_list "pending_steps";
+        key_decisions = get_string_list "decisions";
+        assumptions = get_string_list "assumptions";
+        warnings = get_string_list "warnings";
+        unresolved_errors = get_string_list "errors";
+        modified_files = get_string_list "files";
+        context_usage_percent = get_int "context_pct" 0;
+      } in
+      (match state.Mcp_server.fs with
+       | Some fs ->
+           (match Handover_eio.save_handover ~fs config h with
+            | Ok () -> (true, Printf.sprintf "✅ Handover DNA created: %s" h.id)
+            | Error e -> (false, Printf.sprintf "❌ Failed to save handover: %s" e))
+       | None -> (false, "❌ Filesystem not available"))
+
+  | "masc_handover_list" ->
+      let pending_only = get_bool "pending_only" false in
+      (match state.Mcp_server.fs with
+       | Some fs ->
+           let handovers =
+             if pending_only then Handover_eio.get_pending_handovers ~fs config
+             else Handover_eio.list_handovers ~fs config
+           in
+           let json = `List (List.map Handover_eio.handover_to_json handovers) in
+           (true, Yojson.Safe.pretty_to_string json)
+       | None -> (false, "❌ Filesystem not available"))
+
+  | "masc_handover_claim" ->
+      let handover_id = get_string "handover_id" "" in
+      (match state.Mcp_server.fs with
+       | Some fs ->
+           (match Handover_eio.claim_handover ~fs config ~handover_id ~agent_name with
+            | Ok h -> (true, Printf.sprintf "✅ Handover %s claimed by %s" h.id agent_name)
+            | Error e -> (false, Printf.sprintf "❌ Failed to claim handover: %s" e))
+       | None -> (false, "❌ Filesystem not available"))
+
+  | "masc_handover_get" ->
+      let handover_id = get_string "handover_id" "" in
+      (match state.Mcp_server.fs with
+       | Some fs ->
+           (match Handover_eio.load_handover ~fs config handover_id with
+            | Ok h -> (true, Handover_eio.format_as_markdown h)
+            | Error e -> (false, Printf.sprintf "❌ Failed to get handover: %s" e))
+       | None -> (false, "❌ Filesystem not available"))
 
   (* Heartbeat & Agent Health tools *)
   | "masc_heartbeat" ->
@@ -1321,8 +1396,12 @@ Expires: %s
         | `String s when s <> "" -> Some s
         | _ -> None
       in
-      let result = Spawn.spawn ~agent_name:spawn_agent_name ~prompt ~timeout_seconds ?working_dir () in
-      (result.Spawn.success, Spawn.result_to_string result)
+      (match state.Mcp_server.proc_mgr with
+       | Some pm ->
+           let result = Spawn_eio.spawn ~sw ~proc_mgr:pm ~agent_name:spawn_agent_name ~prompt ~timeout_seconds ?working_dir () in
+           (result.Spawn_eio.success, Spawn_eio.result_to_human_string result)
+       | None ->
+           (false, "❌ Process manager not available in this environment"))
 
   (* Dashboard tool *)
   | "masc_dashboard" ->
@@ -1453,18 +1532,123 @@ Expires: %s
         in
         (success, Yojson.Safe.pretty_to_string result)
 
+  (* Swarm / Level 4 Emergent Intelligence tools - Eio native *)
+  | "masc_swarm_init" ->
+      let behavior = get_string "behavior" "flocking" |> Swarm_eio.behavior_of_string in
+      let selection_pressure = get_float "selection_pressure" 0.3 in
+      let mutation_rate = get_float "mutation_rate" 0.1 in
+      let swarm_cfg = {
+        (Swarm_eio.default_config ()) with
+        behavior;
+        selection_pressure;
+        mutation_rate;
+      } in
+      (match state.Mcp_server.fs with
+       | Some fs ->
+           let swarm = Swarm_eio.create ~fs config ~swarm_config:swarm_cfg () in
+           (true, Printf.sprintf "✅ Swarm %s initialized with %s behavior" swarm.swarm_cfg.name (Swarm_eio.behavior_to_string behavior))
+       | None -> (false, "❌ Filesystem not available"))
+
+  | "masc_swarm_join" ->
+      let join_agent_name = get_string "agent_name" agent_name in
+      (match state.Mcp_server.fs with
+       | Some fs ->
+           (match Swarm_eio.join ~fs config ~agent_id:join_agent_name ~agent_name:join_agent_name with
+            | Some _ -> (true, Printf.sprintf "✅ Agent %s joined the swarm" join_agent_name)
+            | None -> (false, "❌ Failed to join swarm (full or nonexistent)"))
+       | None -> (false, "❌ Filesystem not available"))
+
+  | "masc_swarm_leave" ->
+      let leave_agent_name = get_string "agent_name" agent_name in
+      (match state.Mcp_server.fs with
+       | Some fs ->
+           (match Swarm_eio.leave ~fs config ~agent_id:leave_agent_name with
+            | Some _ -> (true, Printf.sprintf "✅ Agent %s left the swarm" leave_agent_name)
+            | None -> (false, "❌ Failed to leave swarm"))
+       | None -> (false, "❌ Filesystem not available"))
+
+  | "masc_swarm_status" ->
+      (match state.Mcp_server.fs with
+       | Some fs -> (true, Yojson.Safe.pretty_to_string (Swarm_eio.status ~fs config))
+       | None -> (false, "❌ Filesystem not available"))
+
+  | "masc_swarm_evolve" ->
+      (match state.Mcp_server.fs with
+       | Some fs ->
+           (match Swarm_eio.evolve ~fs config with
+            | Some s -> (true, Printf.sprintf "✅ Swarm evolved to generation %d" s.generation)
+            | None -> (false, "❌ Evolution failed"))
+       | None -> (false, "❌ Filesystem not available"))
+
+  | "masc_swarm_propose" ->
+      let description = get_string "description" "" in
+      let threshold = match arguments |> member "threshold" with `Float f -> Some f | _ -> None in
+      (match state.Mcp_server.fs with
+       | Some fs ->
+           (match Swarm_eio.propose ~fs config ~description ~proposed_by:agent_name ?threshold () with
+            | Some p -> (true, Printf.sprintf "✅ Proposal %s created" p.proposal_id)
+            | None -> (false, "❌ Failed to create proposal"))
+       | None -> (false, "❌ Filesystem not available"))
+
+  | "masc_swarm_vote" ->
+      let proposal_id = get_string "proposal_id" "" in
+      let vote_for = get_bool "vote_for" true in
+      (match state.Mcp_server.fs with
+       | Some fs ->
+           (match Swarm_eio.vote ~fs config ~proposal_id ~agent_id:agent_name ~vote_for with
+            | Some p -> (true, Printf.sprintf "✅ Vote recorded. Status: %s" (Swarm_eio.status_to_string p.status))
+            | None -> (false, "❌ Failed to record vote"))
+       | None -> (false, "❌ Filesystem not available"))
+
+  | "masc_swarm_deposit" ->
+      let path_id = get_string "path_id" "" in
+      let strength = get_float "strength" 0.2 in
+      (match state.Mcp_server.fs with
+       | Some fs ->
+           (match Swarm_eio.deposit_pheromone ~fs config ~path_id ~agent_id:agent_name ~strength with
+            | Some _ -> (true, Printf.sprintf "✅ Pheromone deposited on path: %s" path_id)
+            | None -> (false, "❌ Failed to deposit pheromone"))
+       | None -> (false, "❌ Filesystem not available"))
+
+  | "masc_swarm_trails" ->
+      let limit = get_int "limit" 5 in
+      (match state.Mcp_server.fs with
+       | Some fs ->
+           let trails = Swarm_eio.get_strongest_trails ~fs config ~limit in
+           let json = `List (List.map Swarm_eio.pheromone_to_json trails) in
+           (true, Yojson.Safe.pretty_to_string json)
+       | None -> (false, "❌ Filesystem not available"))
+
   | _ ->
       (false, Printf.sprintf "❌ Unknown tool: %s" name)
 
 (** {1 Eio-Native JSON-RPC Handlers} *)
 
 (** Eio-native handler for tools/call - uses execute_tool_eio directly *)
-let handle_call_tool_eio ~clock state id params =
+let handle_call_tool_eio ~sw ~clock state id params =
   let open Yojson.Safe.Util in
   let name = params |> member "name" |> to_string in
   let arguments = params |> member "arguments" in
 
-  let (success, message) = execute_tool_eio ~clock state ~name ~arguments in
+  (* Measure execution time for telemetry *)
+  let start_time = Eio.Time.now clock in
+  let (success, message) = execute_tool_eio ~sw ~clock state ~name ~arguments in
+  let end_time = Eio.Time.now clock in
+  let duration_ms = int_of_float ((end_time -. start_time) *. 1000.0) in
+
+  (* Track tool call in telemetry (controlled by MASC_TELEMETRY_ENABLED) *)
+  let telemetry_enabled =
+    match Sys.getenv_opt "MASC_TELEMETRY_ENABLED" with
+    | Some "false" | Some "0" -> false
+    | _ -> true  (* Default: enabled *)
+  in
+  if telemetry_enabled then
+    (match state.Mcp_server.fs with
+     | Some fs ->
+         (try Telemetry_eio.track_tool_called ~fs state.Mcp_server.room_config
+                ~tool_name:name ~success ~duration_ms ()
+          with _ -> ())
+     | None -> ());
 
   let result = make_response ~id (`Assoc [
     ("content", `List [
@@ -1541,7 +1725,7 @@ let handle_list_prompts_eio id =
     Direct-style async using OCaml 5.x Effect Handlers.
     Uses execute_tool_eio for tool calls.
 *)
-let handle_request ~clock ~sw:_ state request_str =
+let handle_request ~clock ~sw state request_str =
   try
     let json =
       try Ok (Yojson.Safe.from_string request_str)
@@ -1578,7 +1762,7 @@ let handle_request ~clock ~sw:_ state request_str =
                 | "tools/list" -> handle_list_tools_eio state id
                 | "tools/call" ->
                     (match req.params with
-                    | Some params -> handle_call_tool_eio ~clock state id params
+                    | Some params -> handle_call_tool_eio ~sw ~clock state id params
                     | None -> make_error ~id (-32602) "Missing params")
                 | method_ -> make_error ~id (-32601) ("Method not found: " ^ method_))
   with exn ->

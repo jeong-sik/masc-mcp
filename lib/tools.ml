@@ -135,6 +135,40 @@ let all_schemas : tool_schema list = [
   };
 
   {
+    name = "masc_batch_add_tasks";
+    description = "Add multiple tasks to the quest board at once.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("tasks", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [
+            ("type", `String "object");
+            ("properties", `Assoc [
+              ("title", `Assoc [
+                ("type", `String "string");
+                ("description", `String "Task title");
+              ]);
+              ("priority", `Assoc [
+                ("type", `String "integer");
+                ("description", `String "Priority 1-5 (1=highest)");
+                ("default", `Int 3);
+              ]);
+              ("description", `Assoc [
+                ("type", `String "string");
+                ("description", `String "Task description");
+              ]);
+            ]);
+            ("required", `List [`String "title"]);
+          ]);
+          ("description", `String "List of tasks to add");
+        ]);
+      ]);
+      ("required", `List [`String "tasks"]);
+    ];
+  };
+
+  {
     name = "masc_claim";
     description = "Claim a task from the backlog BEFORE starting work. This prevents other agents from working on the same task (collision avoidance). Prefer masc_transition(action='claim') for CAS-guarded transitions.";
     input_schema = `Assoc [

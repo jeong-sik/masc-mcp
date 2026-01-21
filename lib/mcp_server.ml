@@ -425,6 +425,9 @@ type server_state = {
   session_registry: Session.registry;
   mutable on_sse_broadcast: (Yojson.Safe.t -> unit) option;  (* SSE push callback *)
   mutable encryption_config: Encryption.config;  (* P3: Data encryption *)
+  proc_mgr: Eio_unix.Process.mgr_ty Eio.Resource.t option; (* For agent spawning *)
+  fs: Eio.Fs.dir_ty Eio.Path.t option; (* For filesystem access *)
+  clock: float Eio.Time.clock_ty Eio.Resource.t option; (* For timestamps/sleep *)
 }
 
 let create_state ~base_path =
@@ -438,10 +441,13 @@ let create_state ~base_path =
     session_registry = registry;
     on_sse_broadcast = None;
     encryption_config = Encryption.default_config;
+    proc_mgr = None;
+    fs = None;
+    clock = None;
   }
 
 (** Create state with Eio context - required for PostgresNative backend *)
-let create_state_eio ~sw ~env ~base_path =
+let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~base_path =
   let config = Room.default_config_eio ~sw ~env base_path in
   let registry = Session.create () in
   let agents_path = Filename.concat config.base_path ".masc/agents" in
@@ -451,6 +457,9 @@ let create_state_eio ~sw ~env ~base_path =
     session_registry = registry;
     on_sse_broadcast = None;
     encryption_config = Encryption.default_config;
+    proc_mgr = Some proc_mgr;
+    fs = Some fs;
+    clock = Some clock;
   }
 
 (** Register SSE broadcast callback *)

@@ -31,9 +31,16 @@ module Subscriptions = Subscriptions
 
 module Checkpoint_types = Checkpoint_types
 module Auth = Auth
+module Institution_eio = Institution_eio
+module Telemetry_eio = Telemetry_eio
+module Swarm_eio = Swarm_eio
+module Swarm_behaviors_eio = Swarm_behaviors_eio
+module Handover_eio = Handover_eio
 module Backend = Backend
 module Backend_eio = Backend_eio
 module Cache_eio = Cache_eio
+module Mind_eio = Mind_eio
+module Noosphere_eio = Noosphere_eio
 module Metrics_store_eio = Metrics_store_eio
 module Planning_eio = Planning_eio
 module Hebbian_eio = Hebbian_eio

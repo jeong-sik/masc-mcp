@@ -406,6 +406,22 @@ let backend_health_check config =
   | RedisNative t -> Backend.RedisNative.health_check t
   | PostgresNative t -> Backend.PostgresNative.health_check t
 
+let backend_publish config ~channel ~message =
+  match config.backend with
+  | Memory t -> Backend.MemoryBackend.publish t ~channel ~message
+  | FileSystem t -> Backend.FileSystemBackend.publish t ~channel ~message
+  | RedisRest t -> Backend.RedisBackend.publish t ~channel ~message
+  | RedisNative t -> Backend.RedisNative.publish t ~channel ~message
+  | PostgresNative t -> Backend.PostgresNative.publish t ~channel ~message
+
+let backend_subscribe config ~channel ~callback =
+  match config.backend with
+  | Memory t -> Backend.MemoryBackend.subscribe t ~channel ~callback
+  | FileSystem t -> Backend.FileSystemBackend.subscribe t ~channel ~callback
+  | RedisRest t -> Backend.RedisBackend.subscribe t ~channel ~callback
+  | RedisNative t -> Backend.RedisNative.subscribe t ~channel ~callback
+  | PostgresNative t -> Backend.PostgresNative.subscribe t ~channel ~callback
+
 let backend_name config =
   match config.backend with
   | Memory _ -> "memory"

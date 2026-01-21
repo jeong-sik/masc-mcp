@@ -208,7 +208,7 @@ let increment_turn t ~agent_id =
 
 (** {1 Zombie Cleanup} *)
 
-let cleanup_zombies t ?(timeout = 300.0) () =
+let cleanup_zombies t ?(timeout = Resilience.default_zombie_threshold) () =
   let now = Unix.gettimeofday () in
   let to_remove = Hashtbl.fold (fun agent_id session acc ->
     if now -. session.last_activity > timeout then

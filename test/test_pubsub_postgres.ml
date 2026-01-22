@@ -47,18 +47,35 @@ let test_notify_payload_limit () =
 
 (** Test graceful degradation for large messages *)
 let test_graceful_degradation () =
-  (* Large messages (> 7900 bytes) behavior:
+  (* Large payloads (channel + message + 1 > 7900 bytes) behavior:
      1. INSERT into table: ✓ Always succeeds (no size limit)
      2. pg_notify: ✗ Skipped (would fail with 8KB limit)
      3. Subscribers: ✓ Poll table, no message loss
 
      This is graceful degradation - publish succeeds but
-     real-time notification is skipped for oversized payloads. *)
+     real-time notification is skipped for oversized payloads.
+
+     Total payload = len(channel) + len(message) + 1 (separator) *)
   let threshold = 7900 in
+  let channel = "masc_broadcast" in  (* typical 14 bytes *)
   let small_msg = String.make 100 'x' in
   let large_msg = String.make 10000 'x' in
-  check bool "small gets NOTIFY" true (String.length small_msg <= threshold);
-  check bool "large skips NOTIFY" true (String.length large_msg > threshold)
+  let small_total = String.length channel + String.length small_msg + 1 in
+  let large_total = String.length channel + String.length large_msg + 1 in
+  check bool "small gets NOTIFY" true (small_total <= threshold);
+  check bool "large skips NOTIFY" true (large_total > threshold)
+
+(** Test edge case: long channel name *)
+let test_long_channel_name () =
+  (* Edge case: channel name itself contributes to payload limit *)
+  let threshold = 7900 in
+  let long_channel = String.make 100 'c' in  (* 100 byte channel *)
+  let msg_at_limit = String.make (threshold - 100 - 1) 'x' in
+  let msg_over_limit = String.make (threshold - 100) 'x' in
+  let total_at = String.length long_channel + String.length msg_at_limit + 1 in
+  let total_over = String.length long_channel + String.length msg_over_limit + 1 in
+  check bool "at limit gets NOTIFY" true (total_at <= threshold);
+  check bool "over limit skips NOTIFY" true (total_over > threshold)
 
 (** Test hybrid approach documentation *)
 let test_hybrid_approach_doc () =
@@ -76,6 +93,7 @@ let () =
     "limits", [
       test_case "payload limit" `Quick test_notify_payload_limit;
       test_case "graceful degradation" `Quick test_graceful_degradation;
+      test_case "long channel name" `Quick test_long_channel_name;
     ];
     "docs", [
       test_case "hybrid approach" `Quick test_hybrid_approach_doc;

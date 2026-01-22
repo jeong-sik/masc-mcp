@@ -1053,11 +1053,15 @@ end = struct
       (* Insert into table for reliability (persistent queue) *)
       let* () = C.exec publish_q (channel, message) in
       (* Send NOTIFY for real-time push to LISTEN clients
-         Skip NOTIFY for large messages (> 7900 bytes) - subscribers poll anyway *)
-      if String.length message <= pg_notify_max_payload then
+         Skip NOTIFY for large payloads - subscribers poll anyway *)
+      let total_payload = String.length channel + String.length message + 1 in
+      if total_payload <= pg_notify_max_payload then
         C.exec notify_q (channel, message)
-      else
+      else begin
+        Log.debug ~ctx:"Pubsub" "NOTIFY skipped: payload too large (%d bytes, limit %d)"
+          total_payload pg_notify_max_payload;
         Ok ()  (* Graceful degradation: table insert succeeded *)
+      end
     ) t.pool with
     | Ok () -> Ok 1
     | Error err -> Error (caqti_error_to_masc err)

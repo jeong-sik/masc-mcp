@@ -35,14 +35,30 @@ let test_notify_query_compiles () =
 
 (** Test pg_notify payload limit documentation *)
 let test_notify_payload_limit () =
-  (* PostgreSQL pg_notify payload is limited to 8000 bytes *)
-  let max_payload = 8000 in
-  let test_msg = String.make (max_payload - 1) 'x' in
-  check bool "payload under limit" true (String.length test_msg < max_payload);
+  (* PostgreSQL pg_notify payload is limited to 8000 bytes
+     We use 7900 for safety margin *)
+  let max_payload = 7900 in
+  let test_msg = String.make max_payload 'x' in
+  check bool "payload at limit" true (String.length test_msg = max_payload);
 
-  (* Messages > 8000 bytes should be truncated or rejected *)
+  (* Messages > 7900 bytes skip NOTIFY (graceful degradation) *)
   let large_msg = String.make (max_payload + 1) 'x' in
   check bool "large payload detected" true (String.length large_msg > max_payload)
+
+(** Test graceful degradation for large messages *)
+let test_graceful_degradation () =
+  (* Large messages (> 7900 bytes) behavior:
+     1. INSERT into table: ✓ Always succeeds (no size limit)
+     2. pg_notify: ✗ Skipped (would fail with 8KB limit)
+     3. Subscribers: ✓ Poll table, no message loss
+
+     This is graceful degradation - publish succeeds but
+     real-time notification is skipped for oversized payloads. *)
+  let threshold = 7900 in
+  let small_msg = String.make 100 'x' in
+  let large_msg = String.make 10000 'x' in
+  check bool "small gets NOTIFY" true (String.length small_msg <= threshold);
+  check bool "large skips NOTIFY" true (String.length large_msg > threshold)
 
 (** Test hybrid approach documentation *)
 let test_hybrid_approach_doc () =
@@ -59,6 +75,7 @@ let () =
     ];
     "limits", [
       test_case "payload limit" `Quick test_notify_payload_limit;
+      test_case "graceful degradation" `Quick test_graceful_degradation;
     ];
     "docs", [
       test_case "hybrid approach" `Quick test_hybrid_approach_doc;

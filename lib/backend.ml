@@ -818,6 +818,9 @@ end = struct
     (Caqti_type.(t2 string string) ->. Caqti_type.unit)
     "SELECT pg_notify($1, $2)"
 
+  (* PostgreSQL pg_notify payload limit (actual limit is 8000, use 7900 for safety margin) *)
+  let pg_notify_max_payload = 7900
+
   let subscribe_q =
     (Caqti_type.string ->? Caqti_type.string)
     "DELETE FROM masc_pubsub WHERE id = (\
@@ -1049,8 +1052,12 @@ end = struct
       let module C = (val conn : Caqti_eio.CONNECTION) in
       (* Insert into table for reliability (persistent queue) *)
       let* () = C.exec publish_q (channel, message) in
-      (* Send NOTIFY for real-time push to LISTEN clients *)
-      C.exec notify_q (channel, message)
+      (* Send NOTIFY for real-time push to LISTEN clients
+         Skip NOTIFY for large messages (> 7900 bytes) - subscribers poll anyway *)
+      if String.length message <= pg_notify_max_payload then
+        C.exec notify_q (channel, message)
+      else
+        Ok ()  (* Graceful degradation: table insert succeeded *)
     ) t.pool with
     | Ok () -> Ok 1
     | Error err -> Error (caqti_error_to_masc err)

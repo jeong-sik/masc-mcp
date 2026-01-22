@@ -797,10 +797,26 @@ end = struct
     (Caqti_type.unit ->! Caqti_type.int)
     "SELECT 1"
 
-  (* Pub/Sub queries (using table as queue for message passing) *)
+  (* Pub/Sub queries (using table as queue for message passing)
+
+     PostgreSQL LISTEN/NOTIFY Integration:
+     - publish: INSERT + pg_notify for real-time push
+     - subscribe: Table polling for reliability (messages persist)
+
+     Hybrid approach benefits:
+     - NOTIFY: Instant notification to LISTEN clients (< 1ms)
+     - Table queue: Reliability (no message loss if client disconnected)
+     - Caqti limitation: LISTEN requires dedicated connection outside pool
+  *)
   let publish_q =
     (Caqti_type.(t2 string string) ->. Caqti_type.unit)
     "INSERT INTO masc_pubsub (channel, message) VALUES ($1, $2)"
+
+  (* pg_notify sends real-time notification to all LISTEN clients
+     Payload limited to 8000 bytes by PostgreSQL *)
+  let notify_q =
+    (Caqti_type.(t2 string string) ->. Caqti_type.unit)
+    "SELECT pg_notify($1, $2)"
 
   let subscribe_q =
     (Caqti_type.string ->? Caqti_type.string)
@@ -1027,11 +1043,14 @@ end = struct
     | Ok () -> Ok true
     | Error err -> Error (caqti_error_to_masc err)
 
-  (* Pub/Sub using table as queue *)
+  (* Pub/Sub using table as queue + NOTIFY for real-time *)
   let publish t ~channel ~message =
     match Caqti_eio.Pool.use (fun conn ->
       let module C = (val conn : Caqti_eio.CONNECTION) in
-      C.exec publish_q (channel, message)
+      (* Insert into table for reliability (persistent queue) *)
+      let* () = C.exec publish_q (channel, message) in
+      (* Send NOTIFY for real-time push to LISTEN clients *)
+      C.exec notify_q (channel, message)
     ) t.pool with
     | Ok () -> Ok 1
     | Error err -> Error (caqti_error_to_masc err)

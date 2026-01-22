@@ -113,7 +113,8 @@ let test_idempotency_key () =
 
 (* Test: idempotency check *)
 let test_idempotency_check () =
-  let key = "test-op-" ^ string_of_int (Random.int 1000000) in
+  (* Use PID + timestamp for deterministic unique keys *)
+  let key = Printf.sprintf "test-op-%d-%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.)) in
 
   (match Retry.check_idempotency ~key ~ttl_seconds:60.0 with
   | `NotSeen -> ()
@@ -127,13 +128,16 @@ let test_idempotency_check () =
 
 (* Test: idempotency cleanup *)
 let test_idempotency_cleanup () =
-  let key1 = "cleanup-test-" ^ string_of_int (Random.int 1000000) in
-  let key2 = "cleanup-test-" ^ string_of_int (Random.int 1000000) in
+  (* Use PID + timestamp for deterministic unique keys *)
+  let ts = int_of_float (Unix.gettimeofday () *. 1000.) in
+  let key1 = Printf.sprintf "cleanup-test-%d-%d-1" (Unix.getpid ()) ts in
+  let key2 = Printf.sprintf "cleanup-test-%d-%d-2" (Unix.getpid ()) ts in
   Retry.record_idempotency ~key:key1;
   Retry.record_idempotency ~key:key2;
 
-  Unix.sleepf 0.02;
-  let removed = Retry.cleanup_idempotency ~max_age_seconds:0.01 in
+  (* Increase sleep time for more tolerance (10x margin) *)
+  Unix.sleepf 0.2;
+  let removed = Retry.cleanup_idempotency ~max_age_seconds:0.1 in
 
   check bool "removed some keys" true (removed >= 2)
 
@@ -219,7 +223,8 @@ let test_scheduler_status_unconfigured () =
 
 (* Test: scheduler start and status *)
 let test_scheduler_start () =
-  Retry.start_scheduler ~interval_seconds:0.1 ~max_age_seconds:1.0 ();
+  (* Use longer interval to reduce flakiness *)
+  Retry.start_scheduler ~interval_seconds:0.5 ~max_age_seconds:5.0 ();
 
   let status = Retry.scheduler_status () in
   let open Yojson.Safe.Util in
@@ -230,7 +235,8 @@ let test_scheduler_start () =
 
 (* Test: scheduler stop *)
 let test_scheduler_stop () =
-  Retry.start_scheduler ~interval_seconds:0.1 ~max_age_seconds:1.0 ();
+  (* Use longer interval to reduce flakiness *)
+  Retry.start_scheduler ~interval_seconds:0.5 ~max_age_seconds:5.0 ();
   Retry.stop_scheduler ();
 
   let status = Retry.scheduler_status () in

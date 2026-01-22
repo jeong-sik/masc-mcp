@@ -33,6 +33,7 @@
   (graphql_parser (>= 0.14.0))
   (cmdliner (>= 1.1))
   (cohttp (>= 5.0))
+  (cohttp-eio (>= 6.0))
   (ppx_deriving_yojson (>= 3.6))
   (ppx_deriving (>= 5.2))
   (sqlite3 (>= 5.1))

@@ -264,12 +264,12 @@ let test_is_retryable_error_empty_string () =
   Alcotest.(check bool) "empty not retryable" false result
 
 let test_is_retryable_error_short_strings () =
-  (* Short strings should not crash (boundary check) *)
+  (* Short strings should not crash and should return false (not retryable) *)
   let short_errors = ["a"; "ab"; "co"; "ti"; "ht"; "x"; ""] in
   List.iter (fun s ->
-    let _ = Masc_mcp.Voice_bridge.is_retryable_error s in
-    (* Just verify no crash on short strings *)
-    Alcotest.(check bool) (Printf.sprintf "no crash on '%s'" s) true true
+    let result = Masc_mcp.Voice_bridge.is_retryable_error s in
+    (* Short random strings should not be retryable *)
+    Alcotest.(check bool) (Printf.sprintf "'%s' not retryable" s) false result
   ) short_errors
 
 let test_is_retryable_error_connection_errors () =

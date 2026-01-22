@@ -10,7 +10,7 @@
     @since MASC v3.0
 *)
 
-open Lwt.Infix
+(* Eio-style direct implementation - no Lwt dependency *)
 
 (** {1 Types} *)
 
@@ -333,7 +333,7 @@ let set_local_description pc ~type_ =
   (match pc.on_gathering_change with Some cb -> cb GatheringComplete | None -> ());
 
   log Log_debug (Printf.sprintf "[WebRTC] PC %d: set local description (%s)" pc.pc_id type_);
-  Lwt.return sdp
+  sdp
 
 let set_remote_description pc ~sdp ~type_ =
   pc.remote_sdp <- Some sdp;
@@ -355,7 +355,7 @@ let set_remote_description pc ~sdp ~type_ =
   ) pc.channels;
 
   log Log_debug (Printf.sprintf "[WebRTC] PC %d: set remote description (%s)" pc.pc_id type_);
-  Lwt.return_unit
+  ()
 
 let add_remote_candidate pc ~candidate ~mid =
   ignore (candidate, mid);  (* Stub: candidates are simulated *)
@@ -403,11 +403,8 @@ let create_data_channel pc ~label ?(init = default_channel_init) () =
   (* If already connected, open immediately *)
   if pc.ice_state = Connected || pc.ice_state = Completed then begin
     dc.state <- Open;
-    Lwt.async (fun () ->
-      Lwt_unix.sleep 0.01 >>= fun () ->
-      (match dc.on_open with Some cb -> cb () | None -> ());
-      Lwt.return_unit
-    )
+    (* Eio: synchronous callback - no async simulation needed for stub *)
+    (match dc.on_open with Some cb -> cb () | None -> ())
   end;
 
   log Log_debug (Printf.sprintf "[WebRTC] PC %d: created DataChannel '%s' (id=%d)" pc.pc_id label id);
@@ -433,21 +430,16 @@ let is_open dc = dc.state = Open
 
 let send dc data =
   if dc.state <> Open then
-    Lwt.fail_with "DataChannel not open"
+    raise (Failure "DataChannel not open")
   else begin
     dc.buffered <- dc.buffered + Bytes.length data;
     (* Stub: add to message queue for loopback testing *)
     dc.message_queue <- dc.message_queue @ [(data, true)];
 
-    (* Simulate async send completion *)
-    Lwt.async (fun () ->
-      Lwt_unix.sleep 0.001 >>= fun () ->
-      dc.buffered <- dc.buffered - Bytes.length data;
-      if dc.buffered <= dc.buffered_threshold then
-        (match dc.on_buffered_low with Some cb -> cb () | None -> ());
-      Lwt.return_unit
-    );
-    Lwt.return_unit
+    (* Eio: synchronous buffer management - no async simulation needed for stub *)
+    dc.buffered <- dc.buffered - Bytes.length data;
+    if dc.buffered <= dc.buffered_threshold then
+      (match dc.on_buffered_low with Some cb -> cb () | None -> ())
   end
 
 let send_string dc data =
@@ -498,10 +490,10 @@ let deliver_queued_messages dc =
     @param pc1 First peer connection
     @param pc2 Second peer connection *)
 let connect_loopback pc1 pc2 =
-  let%lwt offer = create_offer pc1 in
-  let%lwt () = set_remote_description pc2 ~sdp:offer ~type_:"offer" in
-  let%lwt answer = create_answer pc2 in
-  let%lwt () = set_remote_description pc1 ~sdp:answer ~type_:"answer" in
+  let offer = create_offer pc1 in
+  set_remote_description pc2 ~sdp:offer ~type_:"offer";
+  let answer = create_answer pc2 in
+  set_remote_description pc1 ~sdp:answer ~type_:"answer";
 
   (* Notify each side of the other's channels *)
   List.iter (fun dc ->
@@ -511,9 +503,7 @@ let connect_loopback pc1 pc2 =
       let dc2 = create_data_channel pc2 ~label:dc.label () in
       cb dc2
     | None -> ()
-  ) pc1.channels;
-
-  Lwt.return_unit
+  ) pc1.channels
 
 (** {1 Status} *)
 

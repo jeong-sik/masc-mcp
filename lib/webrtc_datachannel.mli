@@ -158,15 +158,15 @@ val close_peer_connection : peer_connection -> unit
 
     @param pc Peer connection
     @param type_ "offer" or "answer"
-    @return SDP string Lwt promise *)
-val set_local_description : peer_connection -> type_:string -> string Lwt.t
+    @return SDP string value *)
+val set_local_description : peer_connection -> type_:string -> string
 
 (** Set remote description (from signaling).
 
     @param pc Peer connection
     @param sdp SDP string
     @param type_ "offer" or "answer" *)
-val set_remote_description : peer_connection -> sdp:string -> type_:string -> unit Lwt.t
+val set_remote_description : peer_connection -> sdp:string -> type_:string -> unit
 
 (** Add ICE candidate from signaling.
 
@@ -250,15 +250,15 @@ val is_open : data_channel -> bool
 
     @param dc DataChannel
     @param data Bytes to send
-    @return Unit Lwt promise *)
-val send : data_channel -> bytes -> unit Lwt.t
+    @return Unit value *)
+val send : data_channel -> bytes -> unit
 
 (** Send string data.
 
     @param dc DataChannel
     @param data String to send
-    @return Unit Lwt promise *)
-val send_string : data_channel -> string -> unit Lwt.t
+    @return Unit value *)
+val send_string : data_channel -> string -> unit
 
 (** Set message callback.
 
@@ -312,14 +312,14 @@ val generate_session_id : unit -> string
 (** Create offer SDP.
 
     @param pc Peer connection
-    @return Offer SDP string Lwt promise *)
-val create_offer : peer_connection -> string Lwt.t
+    @return Offer SDP string value *)
+val create_offer : peer_connection -> string
 
 (** Create answer SDP.
 
     @param pc Peer connection
-    @return Answer SDP string Lwt promise *)
-val create_answer : peer_connection -> string Lwt.t
+    @return Answer SDP string value *)
+val create_answer : peer_connection -> string
 
 (** {1 Status} *)
 
@@ -356,5 +356,5 @@ val deliver_queued_messages : data_channel -> int
 
     @param pc1 First peer connection (offerer)
     @param pc2 Second peer connection (answerer)
-    @return Unit Lwt promise *)
-val connect_loopback : peer_connection -> peer_connection -> unit Lwt.t
+    @return Unit value *)
+val connect_loopback : peer_connection -> peer_connection -> unit

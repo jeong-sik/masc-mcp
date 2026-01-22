@@ -5,8 +5,9 @@ open Masc_mcp
 
 (* Test helpers *)
 let setup_test_room () =
+  (* Use PID + timestamp for deterministic unique dir *)
   let test_dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc_multi_room_test_%d" (Random.int 100000)) in
+    (Printf.sprintf "masc_multi_room_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir test_dir 0o755;
   let config = Room.default_config test_dir in
   (config, test_dir)

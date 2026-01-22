@@ -22,7 +22,7 @@ let rec rm_rf path =
 let with_temp_masc_dir f =
   let base =
     Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "masc-checkpoint-fs-%d-%06d" (Unix.getpid ()) (Random.int 1_000_000))
+      (Printf.sprintf "masc-checkpoint-fs-%d-%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000000.)))
   in
   Unix.mkdir base 0o755;
   let masc_dir = Filename.concat base ".masc" in

@@ -1200,6 +1200,13 @@ let is_valid_filename name =
     c = '_' || c = '-' || c = '.'
   ) name
 
+(** Extract seq number from filename like "000001885_unknown_broadcast.json" or "1664_codex_broadcast.json" *)
+let extract_seq_from_filename name =
+  try
+    let idx = String.index name '_' in
+    int_of_string (String.sub name 0 idx)
+  with _ -> 0
+
 (** Get raw message list (for dashboard) *)
 let get_messages_raw config ~since_seq ~limit =
   ensure_initialized config;
@@ -1209,8 +1216,7 @@ let get_messages_raw config ~since_seq ~limit =
     Sys.readdir msgs_path
     |> Array.to_list
     |> List.filter is_valid_filename  (* Skip files with invalid chars *)
-    |> List.sort compare
-    |> List.rev
+    |> List.sort (fun a b -> compare (extract_seq_from_filename b) (extract_seq_from_filename a))
     |> List.filter_map (fun name ->
         let path = Filename.concat msgs_path name in
         try
@@ -1271,7 +1277,8 @@ let get_messages config ~since_seq ~limit =
 
   let msgs_path = messages_dir config in
   if Sys.file_exists msgs_path then begin
-    let files = Sys.readdir msgs_path |> Array.to_list |> List.sort compare |> List.rev in
+    let files = Sys.readdir msgs_path |> Array.to_list
+      |> List.sort (fun a b -> compare (extract_seq_from_filename b) (extract_seq_from_filename a)) in
     let count = ref 0 in
     List.iter (fun name ->
       if !count < limit then begin

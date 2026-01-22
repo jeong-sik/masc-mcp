@@ -101,3 +101,17 @@
  (name test_compression)
  (modules test_compression)
  (libraries masc_mcp alcotest zstd))
+
+; ============================================================
+; Disabled: Lwt-based tests (require cohttp-lwt-unix, ppx_lwt)
+; These modules are not currently in masc_mcp library.
+; ============================================================
+; (test
+;  (name test_voice_bridge)
+;  (modules test_voice_bridge)
+;  (libraries masc_mcp alcotest lwt lwt.unix cohttp-lwt-unix yojson))
+;
+; (test
+;  (name test_webrtc_datachannel)
+;  (modules test_webrtc_datachannel)
+;  (libraries masc_mcp alcotest lwt lwt.unix))

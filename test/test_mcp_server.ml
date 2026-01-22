@@ -6,7 +6,7 @@ open Lwt.Syntax
 (* Test that SSE callback is called on broadcast *)
 let test_sse_callback_called () =
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc_test_%d" (Random.int 100000)) in
+    (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
   let state = Mcp_server.create_state ~base_path:tmp_dir in
@@ -54,7 +54,7 @@ let test_sse_callback_called () =
 (* Test that SSE callback is not called when not registered *)
 let test_sse_no_callback () =
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc_test_%d" (Random.int 100000)) in
+    (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
   let state = Mcp_server.create_state ~base_path:tmp_dir in
@@ -81,7 +81,7 @@ let test_sse_no_callback () =
 (* Test mention parsing in broadcast *)
 let test_mention_parsing () =
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc_test_%d" (Random.int 100000)) in
+    (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
   let state = Mcp_server.create_state ~base_path:tmp_dir in

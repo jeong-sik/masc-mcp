@@ -108,9 +108,17 @@ let test_on_event_callback () =
   let stream = create () in
   let received = ref None in
   on_event stream (fun event -> received := Some event);
-  (* Note: Can't easily trigger events without real WebSocket connections,
-     but we can verify the callback is set *)
-  check bool "callback registered" true true
+  (* Note: Can't trigger events without real WebSocket connections,
+     but we can verify callback registration doesn't affect stream state *)
+  let status_before = get_status_json stream in
+  (* Set another callback to verify multiple registrations work *)
+  let count = ref 0 in
+  on_event stream (fun _ -> incr count);
+  let status_after = get_status_json stream in
+  (* Callback registration should not affect observable stream state *)
+  check string "stream state unchanged" status_before status_after;
+  (* Verify initial callback ref is still None (no events fired) *)
+  check bool "no events fired yet" true (Option.is_none !received)
 
 (** {1 Test Suites} *)
 

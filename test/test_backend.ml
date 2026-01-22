@@ -275,7 +275,12 @@ let test_path_traversal_prevention () =
 
       (* Test: valid keys should still work *)
       (match Backend.FileSystemBackend.set backend ~key:"valid:key:name" ~value:"ok" with
-      | Ok () -> check bool "valid key works" true true
+      | Ok () ->
+          (* Verify the value was actually stored *)
+          (match Backend.FileSystemBackend.get backend ~key:"valid:key:name" with
+          | Ok (Some v) -> check string "valid key value" "ok" v
+          | Ok None -> fail "valid key not found after set"
+          | Error _ -> fail "valid key get failed")
       | Error _ -> fail "valid key should work")
 
 (* Test: FileSystem backend - atomic set_if_not_exists *)
@@ -284,7 +289,7 @@ let test_filesystem_atomic_set () =
   match Backend.FileSystemBackend.create cfg with
   | Error _ -> fail "Failed to create"
   | Ok backend ->
-      let key = "atomic:key:" ^ string_of_int (Random.int 1000000) in
+      let key = "atomic:key:" ^ Printf.sprintf "%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.)) in
       (* First set should succeed *)
       (match Backend.FileSystemBackend.set_if_not_exists backend ~key ~value:"first" with
       | Ok true -> ()
@@ -310,7 +315,7 @@ let test_filesystem_locking () =
   match Backend.FileSystemBackend.create cfg with
   | Error _ -> fail "Failed to create"
   | Ok backend ->
-      let key = "locktest:" ^ string_of_int (Random.int 1000000) in
+      let key = "locktest:" ^ Printf.sprintf "%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.)) in
 
       (* Acquire *)
       (match Backend.FileSystemBackend.acquire_lock backend ~key ~ttl_seconds:60 ~owner:"agent1" with
@@ -334,7 +339,7 @@ let test_ttl_boundary_validation () =
   | Error _ -> fail "Failed to create"
   | Ok backend ->
       (* Test 1: Zero TTL should work (internally clamped to 1) *)
-      let key1 = "ttl:zero:" ^ string_of_int (Random.int 1000000) in
+      let key1 = "ttl:zero:" ^ Printf.sprintf "%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.)) in
       (match Backend.FileSystemBackend.acquire_lock backend ~key:key1 ~ttl_seconds:0 ~owner:"agent1" with
       | Ok true -> ()
       | Ok false -> fail "zero TTL lock should succeed"
@@ -342,7 +347,7 @@ let test_ttl_boundary_validation () =
       let _ = Backend.FileSystemBackend.release_lock backend ~key:key1 ~owner:"agent1" in
 
       (* Test 2: Negative TTL should work (internally clamped to 1) *)
-      let key2 = "ttl:negative:" ^ string_of_int (Random.int 1000000) in
+      let key2 = "ttl:negative:" ^ Printf.sprintf "%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.)) in
       (match Backend.FileSystemBackend.acquire_lock backend ~key:key2 ~ttl_seconds:(-100) ~owner:"agent1" with
       | Ok true -> ()
       | Ok false -> fail "negative TTL lock should succeed"
@@ -350,7 +355,7 @@ let test_ttl_boundary_validation () =
       let _ = Backend.FileSystemBackend.release_lock backend ~key:key2 ~owner:"agent1" in
 
       (* Test 3: Very large TTL should be capped to 86400 (24h) *)
-      let key3 = "ttl:large:" ^ string_of_int (Random.int 1000000) in
+      let key3 = "ttl:large:" ^ Printf.sprintf "%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.)) in
       (match Backend.FileSystemBackend.acquire_lock backend ~key:key3 ~ttl_seconds:999999 ~owner:"agent1" with
       | Ok true -> ()
       | Ok false -> fail "large TTL lock should succeed"
@@ -365,7 +370,7 @@ let test_corrupted_lock_recovery () =
   | Error _ -> fail "Failed to create"
   | Ok backend ->
       (* Use simple key without colons for easier path construction *)
-      let key = "corrupttest" ^ string_of_int (Random.int 1000000) in
+      let key = "corrupttest" ^ Printf.sprintf "%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.)) in
       (* First, create a valid lock *)
       (match Backend.FileSystemBackend.acquire_lock backend ~key ~ttl_seconds:60 ~owner:"agent1" with
       | Ok true -> ()

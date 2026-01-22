@@ -108,7 +108,15 @@ let handle_read_resource_eio state id params =
         let read_messages_json ~since_seq ~limit =
           let msgs_path = Room.messages_dir config in
           if Sys.file_exists msgs_path then
-            let files = Sys.readdir msgs_path |> Array.to_list |> List.sort compare |> List.rev in
+            (* Extract seq number from filename like "000001885_unknown_broadcast.json" or "1664_codex_broadcast.json" *)
+            let extract_seq name =
+              try
+                let idx = String.index name '_' in
+                int_of_string (String.sub name 0 idx)
+              with _ -> 0
+            in
+            let files = Sys.readdir msgs_path |> Array.to_list
+              |> List.sort (fun a b -> compare (extract_seq b) (extract_seq a)) in
             let count = ref 0 in
             let msgs = ref [] in
             List.iter (fun name ->

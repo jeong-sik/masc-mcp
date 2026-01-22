@@ -36,15 +36,18 @@ let test_get_backend () =
   cleanup ()
 
 let test_init_with_log_level () =
-  let _ = init ~level:Log_debug () in
-  check bool "init succeeded" true true;
+  let backend = init ~level:Log_debug () in
+  (* Verify init returns a valid backend *)
+  check bool "init returns valid backend" true (backend = Stub || backend = Native);
   cleanup ()
 
 let test_init_with_callback () =
   let logs = ref [] in
   let callback level msg = logs := (level, msg) :: !logs in
-  let _ = init ~level:Log_info ~log_callback:callback () in
-  check bool "init with callback" true true;
+  let backend = init ~level:Log_info ~log_callback:callback () in
+  (* Verify init returns a valid backend *)
+  check bool "init returns valid backend" true (backend = Stub || backend = Native);
+  (* Note: Callback may or may not be called during init depending on impl *)
   cleanup ()
 
 (** {1 Peer Connection Tests} *)
@@ -245,7 +248,8 @@ let test_send_data () =
 
   (* Send data *)
   run_lwt (send dc (Bytes.of_string "hello"));
-  check bool "send succeeded" true true;
+  (* Verify channel is still usable after send *)
+  check bool "channel still open after send" true (is_open dc);
 
   close_data_channel dc;
   close_peer_connection pc;
@@ -260,7 +264,8 @@ let test_send_string () =
   run_lwt (Lwt_unix.sleep 0.02);
 
   run_lwt (send_string dc "hello world");
-  check bool "send_string succeeded" true true;
+  (* Verify channel is still usable after send_string *)
+  check bool "channel still open after send_string" true (is_open dc);
 
   close_data_channel dc;
   close_peer_connection pc;

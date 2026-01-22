@@ -107,7 +107,7 @@ let test_lock_stats_after_operation () =
 
   (* Create a temp config for testing using the utility function *)
   let temp_dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc_test_%d" (Random.int 100000)) in
+    (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir temp_dir 0o755;
   let config = Room_utils.default_config temp_dir in
 

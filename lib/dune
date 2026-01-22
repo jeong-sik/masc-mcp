@@ -72,10 +72,12 @@
    transport_grpc_next
    types
    validation
+   voice_bridge_eio
    voice_stream
    void
    webrtc_bindings
-   webrtc_common)
+   webrtc_common
+   webrtc_datachannel)
  (libraries
    yojson
    base64
@@ -117,6 +119,7 @@
    gluten-eio
    ipaddr
    cohttp
+   cohttp-eio
    ;; Compact Protocol v5: unified DSL + compression
    compact-protocol
    zstd

@@ -37,8 +37,9 @@ let intent_to_string = function
 (* ============================================ *)
 
 let temp_masc_dir () =
+  (* Use PID + timestamp for deterministic unique dir *)
   let dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc_security_test_%d" (Random.int 100000)) in
+    (Printf.sprintf "masc_security_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir dir 0o700;
   dir
 
@@ -243,8 +244,8 @@ let test_state_persistence () =
   Printf.printf "[TEST] Security state persistence (Putin/Zuckerberg)...\n%!";
   with_temp_masc (fun dir ->
     let config = { paranoid_config with audit_enabled = false } in
-    (* Use a unique agent name to avoid collisions with other tests *)
-    let agent = Printf.sprintf "persistent_agent_%d" (Random.int 1000000) in
+    (* Use a unique agent name to avoid collisions with other tests - PID + timestamp *)
+    let agent = Printf.sprintf "persistent_agent_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.)) in
 
     (* Quarantine an agent *)
     quarantine_agent config dir agent "Test quarantine" 3600.0;

@@ -88,14 +88,12 @@ let test_compression_large_data () =
   Alcotest.(check bool) "result smaller" true (String.length result < String.length large_data)
 
 let test_compression_roundtrip () =
-  let original = String.init 500 (fun i -> Char.chr (65 + (i mod 26))) in  (* ABC...ZABC... *)
+  (* Use highly repetitive data that will definitely compress *)
+  let original = String.make 500 'A' ^ String.make 500 'B' ^ String.make 500 'C' in
   let (compressed_data, did_compress) = Compression.compress_zstd original in
-  if did_compress then begin
-    let decompressed = Zstd.decompress (String.length original) compressed_data in
-    Alcotest.(check string) "roundtrip preserves data" original decompressed
-  end else
-    (* Data might not compress well - that's OK *)
-    Alcotest.(check pass) "no compression needed" () ()
+  Alcotest.(check bool) "data should compress" true did_compress;
+  let decompressed = Zstd.decompress (String.length original) compressed_data in
+  Alcotest.(check string) "roundtrip preserves data" original decompressed
 
 let test_accepts_zstd_positive () =
   let headers = Httpun.Headers.of_list [("accept-encoding", "gzip, deflate, zstd")] in

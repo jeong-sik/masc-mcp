@@ -12,12 +12,11 @@ let rec rm_rf path =
       Unix.unlink path
   end
 
-(** Generate unique test directory *)
+(** Generate unique test directory - deterministic using PID + timestamp *)
 let make_test_dir () =
-  let unique_id = Printf.sprintf "masc_room_eio_test_%d_%d_%d"
-    (int_of_float (Unix.gettimeofday () *. 1000000.))
+  let unique_id = Printf.sprintf "masc_room_eio_test_%d_%d"
     (Unix.getpid ())
-    (Random.int 100000) in
+    (int_of_float (Unix.gettimeofday () *. 1000000.)) in
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ()) unique_id in
   (try Unix.mkdir tmp_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   tmp_dir

@@ -2,10 +2,10 @@
 
 open Masc_mcp.Voice_session_manager
 
-(** Helper to create a temp directory *)
+(** Helper to create a temp directory - deterministic using PID + timestamp *)
 let with_temp_dir f =
   let dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc_test_%d" (Random.int 100000)) in
+    (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir dir 0o755;
   Fun.protect ~finally:(fun () ->
     (* Cleanup: remove files and dir *)

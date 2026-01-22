@@ -23,7 +23,7 @@ let contains_portal result = String.sub result 0 4 = "\xF0\x9F\x8C\x80"  (* 🌀
 
 let test_init_creates_folder () =
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc_test_%d" (Random.int 100000)) in
+    (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
   let config = Room.default_config tmp_dir in
@@ -44,7 +44,7 @@ let test_init_creates_folder () =
 
 let test_join_creates_agent () =
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc_test_%d" (Random.int 100000)) in
+    (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
   let config = Room.default_config tmp_dir in
@@ -67,7 +67,7 @@ let test_join_creates_agent () =
 
 let test_add_and_claim_task () =
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc_test_%d" (Random.int 100000)) in
+    (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
   let config = Room.default_config tmp_dir in
@@ -91,7 +91,7 @@ let test_add_and_claim_task () =
 
 let test_add_task_uses_archive_max_id () =
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc_test_%d" (Random.int 100000)) in
+    (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
   let config = Room.default_config tmp_dir in
@@ -116,7 +116,7 @@ let test_add_task_uses_archive_max_id () =
 
 let test_broadcast_message () =
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc_test_%d" (Random.int 100000)) in
+    (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
   let config = Room.default_config tmp_dir in
@@ -136,7 +136,7 @@ let test_broadcast_message () =
 
 let test_worktree_list_no_git () =
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc_test_%d" (Random.int 100000)) in
+    (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
   let config = Room.default_config tmp_dir in
@@ -156,7 +156,7 @@ let test_worktree_list_no_git () =
 
 let test_worktree_create_no_git () =
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc_test_%d" (Random.int 100000)) in
+    (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
   let config = Room.default_config tmp_dir in
@@ -172,18 +172,18 @@ let test_worktree_create_no_git () =
 
 let test_event_log () =
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc_test_%d" (Random.int 100000)) in
+    (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
   let config = Room.default_config tmp_dir in
   let _ = Room.init config ~agent_name:None in
 
   (* Broadcast should create event log *)
-  let _ = Room.broadcast config ~from_agent:"claude" ~content:"Test event" in
+  let result = Room.broadcast config ~from_agent:"claude" ~content:"Test event" in
 
-  (* Check events dir exists (events are written on worktree ops, not broadcast currently) *)
-  (* For now just verify broadcast works *)
-  Alcotest.(check bool) "broadcast ok" true true;
+  (* Verify broadcast returned a valid response (contains timestamp marker) *)
+  Alcotest.(check bool) "broadcast returns response" true (String.length result > 0);
+  Alcotest.(check bool) "broadcast has timestamp" true (String.contains result '[');
 
   (* Cleanup *)
   let _ = Room.reset config in
@@ -198,7 +198,7 @@ let contains_error result = String.sub result 0 3 = "\xE2\x9D\x8C"  (* ❌ *)
 (* Helper to create fresh test environment *)
 let with_test_env f =
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc_test_%d" (Random.int 100000)) in
+    (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
   let config = Room.default_config tmp_dir in
   let _ = Room.init config ~agent_name:(Some "claude") in
@@ -455,7 +455,7 @@ let test_operations_preserve_state () =
 
 let test_event_log_on_join () =
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc_test_%d" (Random.int 100000)) in
+    (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
   let config = Room.default_config tmp_dir in
@@ -474,7 +474,7 @@ let test_event_log_on_join () =
 
 let test_event_log_on_claim_done () =
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc_test_%d" (Random.int 100000)) in
+    (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
   let config = Room.default_config tmp_dir in
@@ -781,7 +781,7 @@ let test_unicode_task_title () =
 
 let test_reset_clears_all_state () =
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc_test_%d" (Random.int 100000)) in
+    (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
   let config = Room.default_config tmp_dir in
@@ -799,7 +799,7 @@ let test_reset_clears_all_state () =
 
 let test_reinit_after_reset () =
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "masc_test_%d" (Random.int 100000)) in
+    (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
   let config = Room.default_config tmp_dir in

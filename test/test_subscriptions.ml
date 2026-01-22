@@ -251,37 +251,45 @@ let test_notification_to_json () =
 
 (** Hook function tests *)
 let test_notify_task_change () =
-  let _sub = Subscriptions.SubscriptionStore.subscribe
+  let sub = Subscriptions.SubscriptionStore.subscribe
     ~subscriber:"task_hook_agent"
     ~resource:Subscriptions.Tasks
     () in
-  (* Should not raise *)
+  (* Notify task change - hook function returns unit *)
   Subscriptions.notify_task_change
     ~change:Subscriptions.Created
     ~task_id:"hook-task"
     ~data:(`Assoc []);
-  check bool "task hook executed" true true
+  (* Verify notification was queued *)
+  let pending = Subscriptions.SubscriptionStore.pop_notifications sub.id in
+  check bool "task notification queued" true (List.length pending > 0)
 
 let test_notify_agent_change () =
-  let _sub = Subscriptions.SubscriptionStore.subscribe
+  let sub = Subscriptions.SubscriptionStore.subscribe
     ~subscriber:"agent_hook_agent"
     ~resource:Subscriptions.Agents
     () in
+  (* Notify agent change - hook function returns unit *)
   Subscriptions.notify_agent_change
     ~change:Subscriptions.Updated
     ~agent_name:"agent-x"
     ~data:(`Assoc []);
-  check bool "agent hook executed" true true
+  (* Verify notification was queued *)
+  let pending = Subscriptions.SubscriptionStore.pop_notifications sub.id in
+  check bool "agent notification queued" true (List.length pending > 0)
 
 let test_notify_message () =
-  let _sub = Subscriptions.SubscriptionStore.subscribe
+  let sub = Subscriptions.SubscriptionStore.subscribe
     ~subscriber:"msg_hook_agent"
     ~resource:Subscriptions.Messages
     () in
+  (* Notify message - hook function returns unit *)
   Subscriptions.notify_message
     ~message_id:"msg-001"
     ~data:(`Assoc []);
-  check bool "message hook executed" true true
+  (* Verify notification was queued *)
+  let pending = Subscriptions.SubscriptionStore.pop_notifications sub.id in
+  check bool "message notification queued" true (List.length pending > 0)
 
 (** Test suites *)
 let type_tests = [

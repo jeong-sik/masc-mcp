@@ -71,7 +71,7 @@ let test_backend_json_compression () =
     let decompressed = BackendCompression.decompress_auto compressed in
     Alcotest.(check string) "JSON roundtrip" json decompressed
   end else
-    Alcotest.(check pass) "JSON too short for compression" () ()
+    Alcotest.skip () (* JSON too short for compression test *)
 
 let backend_tests = [
   "skip small data", `Quick, test_backend_compress_skip_small;
@@ -182,7 +182,6 @@ let test_compression_ratio_json () =
 
 let test_incompressible_data () =
   (* Already-compressed data won't compress further *)
-  let seed = "ZSTD header already present means this won't compress" in
   let already_compressed = BackendCompression.compress_with_header (String.make 500 'x') in
   (* Try to compress the already-compressed data *)
   let (result, _used_dict, did_compress) = BackendCompression.compress already_compressed in
@@ -192,8 +191,9 @@ let test_incompressible_data () =
     (* If it did compress, it should be marginal - allow up to 95% *)
     Alcotest.(check bool) "pre-compressed data doesn't shrink much" true (ratio > 0.9 || String.length already_compressed < 32)
   end else begin
-    ignore seed;
-    Alcotest.(check pass) "pre-compressed data not compressed further" () ()
+    (* Verify that the data wasn't compressed by checking it's unchanged or larger *)
+    Alcotest.(check bool) "pre-compressed data not compressed further"
+      true (String.length result >= String.length already_compressed)
   end
 
 let ratio_tests = [

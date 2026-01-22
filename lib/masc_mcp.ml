@@ -61,7 +61,7 @@ module Level2_config = Level2_config
 module Level4_config = Level4_config
 module Relay = Relay
 module Compression_dict = Compression_dict
-module Redis_common = Redis_common
+(* Redis_common module removed - PostgreSQL is now the only distributed backend *)
 
 module Sdp = Sdp
 module Dtls = Dtls

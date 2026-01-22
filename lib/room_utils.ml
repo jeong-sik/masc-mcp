@@ -6,8 +6,6 @@ open Types
 type storage_backend =
   | Memory of Backend.MemoryBackend.t
   | FileSystem of Backend.FileSystemBackend.t
-  | RedisRest of Backend.RedisBackend.t
-  | RedisNative of Backend.RedisNative.t
   | PostgresNative of Backend.PostgresNative.t
 
 (** Room configuration *)
@@ -110,12 +108,12 @@ let storage_type_from_env () =
 
 (** Auto-detect best backend based on environment variables
     Priority order:
-    1. REDIS_URL / MASC_REDIS_URL - if available, use Redis for high-performance
+    1. MASC_POSTGRES_URL / DATABASE_URL - if available, use PostgreSQL for distributed coordination
     2. FileSystem - zero-dependency default for personal/small use *)
 let auto_detect_backend () =
-  if env_opt "REDIS_URL" <> None || env_opt "MASC_REDIS_URL" <> None then begin
-    Log.Backend.info "Auto-detect: REDIS_URL found → Redis backend";
-    "redis"
+  if env_opt "MASC_POSTGRES_URL" <> None || env_opt "DATABASE_URL" <> None then begin
+    Log.Backend.info "Auto-detect: PostgreSQL URL found → PostgresNative backend";
+    "postgres"
   end else begin
     Log.Backend.info "Auto-detect: No distributed DB found → FileSystem backend (default)";
     "filesystem"
@@ -130,11 +128,6 @@ let backend_config_for base_path =
   let storage_type =
     if raw_storage_type = "auto" then auto_detect_backend ()
     else raw_storage_type
-  in
-  let redis_url =
-    match env_opt "MASC_REDIS_URL" with
-    | Some _ as url -> url
-    | None -> env_opt "REDIS_URL"  (* Fallback to standard REDIS_URL *)
   in
   let postgres_url =
     match env_opt "MASC_POSTGRES_URL" with
@@ -152,14 +145,12 @@ let backend_config_for base_path =
   in
   let backend_type =
     match storage_type with
-    | "redis" -> Backend.Redis
     | "postgres" | "postgresql" -> Backend.PostgresNative
     | "memory" -> Backend.Memory
     | _ -> Backend.FileSystem
   in
   {
     Backend.backend_type;
-    Backend.redis_url;
     Backend.postgres_url;
     Backend.base_path = Filename.concat base_path ".masc";
     Backend.cluster_name;
@@ -177,20 +168,6 @@ let create_backend cfg =
       (match Backend.FileSystemBackend.create cfg with
        | Ok backend -> Ok (FileSystem backend)
        | Error e -> Error e)
-  | Backend.Redis ->
-      (match cfg.redis_url with
-       | None -> Error (Backend.ConnectionFailed "Redis URL not configured")
-       | Some url ->
-           if Backend.is_native_redis_url url then
-             match Backend.RedisNative.create cfg with
-             | Ok backend -> Ok (RedisNative backend)
-             | Error e -> Error e
-           else if Backend.is_rest_redis_url url then
-             match Backend.RedisBackend.create cfg with
-             | Ok backend -> Ok (RedisRest backend)
-             | Error e -> Error e
-           else
-             Error (Backend.ConnectionFailed (Printf.sprintf "Unsupported Redis URL scheme: %s" url)))
   | Backend.PostgresNative ->
       (* PostgresNative requires Eio context - use create_backend_eio instead *)
       (match Backend.PostgresNative.create cfg with
@@ -212,9 +189,9 @@ let default_config base_path =
   (* Resolve to git root for worktree support - all worktrees share same .masc/ *)
   let resolved_path = resolve_masc_base_path base_path in
   let backend_config = backend_config_for resolved_path in
-  Log.Backend.info "MASC Backend: type=%s, redis_url=%s"
+  Log.Backend.info "MASC Backend: type=%s, postgres_url=%s"
     (Backend.show_backend_type backend_config.backend_type)
-    (match backend_config.redis_url with Some u -> u | None -> "none");
+    (match backend_config.postgres_url with Some _ -> "<configured>" | None -> "none");
   let backend =
     match create_backend backend_config with
     | Ok backend ->
@@ -222,15 +199,13 @@ let default_config base_path =
           (match backend with
            | Memory _ -> "Memory"
            | FileSystem _ -> "FileSystem"
-           | RedisRest _ -> "RedisRest"
-           | RedisNative _ -> "RedisNative"
            | PostgresNative _ -> "PostgresNative");
         backend
     | Error e ->
         Log.Backend.warn "Backend init failed (%s). Falling back to filesystem."
           (Backend.show_error e);
         let fallback_cfg =
-          { backend_config with Backend.backend_type = Backend.FileSystem; redis_url = None }
+          { backend_config with Backend.backend_type = Backend.FileSystem }
         in
         (match Backend.FileSystemBackend.create fallback_cfg with
          | Ok fs -> FileSystem fs
@@ -261,15 +236,13 @@ let default_config_eio ~sw ~env base_path =
           (match backend with
            | Memory _ -> "Memory"
            | FileSystem _ -> "FileSystem"
-           | RedisRest _ -> "RedisRest"
-           | RedisNative _ -> "RedisNative"
            | PostgresNative _ -> "PostgresNative");
         backend
     | Error e ->
         Log.Backend.warn "Backend init failed (%s). Falling back to filesystem."
           (Backend.show_error e);
         let fallback_cfg =
-          { backend_config with Backend.backend_type = Backend.FileSystem; redis_url = None }
+          { backend_config with Backend.backend_type = Backend.FileSystem }
         in
         (match Backend.FileSystemBackend.create fallback_cfg with
          | Ok fs -> FileSystem fs
@@ -305,48 +278,36 @@ let backend_get config ~key =
   match config.backend with
   | Memory t -> Backend.MemoryBackend.get t ~key
   | FileSystem t -> Backend.FileSystemBackend.get t ~key
-  | RedisRest t -> Backend.RedisBackend.get t ~key
-  | RedisNative t -> Backend.RedisNative.get t ~key
   | PostgresNative t -> Backend.PostgresNative.get t ~key
 
 let backend_set config ~key ~value =
   match config.backend with
   | Memory t -> Backend.MemoryBackend.set t ~key ~value
   | FileSystem t -> Backend.FileSystemBackend.set t ~key ~value
-  | RedisRest t -> Backend.RedisBackend.set t ~key ~value
-  | RedisNative t -> Backend.RedisNative.set t ~key ~value
   | PostgresNative t -> Backend.PostgresNative.set t ~key ~value
 
 let backend_delete config ~key =
   match config.backend with
   | Memory t -> Backend.MemoryBackend.delete t ~key
   | FileSystem t -> Backend.FileSystemBackend.delete t ~key
-  | RedisRest t -> Backend.RedisBackend.delete t ~key
-  | RedisNative t -> Backend.RedisNative.delete t ~key
   | PostgresNative t -> Backend.PostgresNative.delete t ~key
 
 let backend_exists config ~key =
   match config.backend with
   | Memory t -> Backend.MemoryBackend.exists t ~key
   | FileSystem t -> Backend.FileSystemBackend.exists t ~key
-  | RedisRest t -> Backend.RedisBackend.exists t ~key
-  | RedisNative t -> Backend.RedisNative.exists t ~key
   | PostgresNative t -> Backend.PostgresNative.exists t ~key
 
 let backend_list_keys config ~prefix =
   match config.backend with
   | Memory t -> Backend.MemoryBackend.list_keys t ~prefix
   | FileSystem t -> Backend.FileSystemBackend.list_keys t ~prefix
-  | RedisRest t -> Backend.RedisBackend.list_keys t ~prefix
-  | RedisNative t -> Backend.RedisNative.list_keys t ~prefix
   | PostgresNative t -> Backend.PostgresNative.list_keys t ~prefix
 
 let backend_get_all config ~prefix =
   match config.backend with
   | Memory t -> Backend.MemoryBackend.get_all t ~prefix
   | FileSystem t -> Backend.FileSystemBackend.get_all t ~prefix
-  | RedisRest t -> Backend.RedisBackend.get_all t ~prefix
-  | RedisNative t -> Backend.RedisNative.get_all t ~prefix
   | PostgresNative t -> Backend.PostgresNative.get_all t ~prefix
 
 let lock_count config =
@@ -371,76 +332,59 @@ let backend_set_if_not_exists config ~key ~value =
   match config.backend with
   | Memory t -> Backend.MemoryBackend.set_if_not_exists t ~key ~value
   | FileSystem t -> Backend.FileSystemBackend.set_if_not_exists t ~key ~value
-  | RedisRest t -> Backend.RedisBackend.set_if_not_exists t ~key ~value
-  | RedisNative t -> Backend.RedisNative.set_if_not_exists t ~key ~value
   | PostgresNative t -> Backend.PostgresNative.set_if_not_exists t ~key ~value
 
 let backend_acquire_lock config ~key ~ttl_seconds ~owner =
   match config.backend with
   | Memory t -> Backend.MemoryBackend.acquire_lock t ~key ~ttl_seconds ~owner
   | FileSystem t -> Backend.FileSystemBackend.acquire_lock t ~key ~ttl_seconds ~owner
-  | RedisRest t -> Backend.RedisBackend.acquire_lock t ~key ~ttl_seconds ~owner
-  | RedisNative t -> Backend.RedisNative.acquire_lock t ~key ~ttl_seconds ~owner
   | PostgresNative t -> Backend.PostgresNative.acquire_lock t ~key ~ttl_seconds ~owner
 
 let backend_release_lock config ~key ~owner =
   match config.backend with
   | Memory t -> Backend.MemoryBackend.release_lock t ~key ~owner
   | FileSystem t -> Backend.FileSystemBackend.release_lock t ~key ~owner
-  | RedisRest t -> Backend.RedisBackend.release_lock t ~key ~owner
-  | RedisNative t -> Backend.RedisNative.release_lock t ~key ~owner
   | PostgresNative t -> Backend.PostgresNative.release_lock t ~key ~owner
 
 let backend_extend_lock config ~key ~ttl_seconds ~owner =
   match config.backend with
   | Memory t -> Backend.MemoryBackend.extend_lock t ~key ~ttl_seconds ~owner
   | FileSystem t -> Backend.FileSystemBackend.extend_lock t ~key ~ttl_seconds ~owner
-  | RedisRest t -> Backend.RedisBackend.extend_lock t ~key ~ttl_seconds ~owner
-  | RedisNative t -> Backend.RedisNative.extend_lock t ~key ~ttl_seconds ~owner
   | PostgresNative t -> Backend.PostgresNative.extend_lock t ~key ~ttl_seconds ~owner
 
 let backend_health_check config =
   match config.backend with
   | Memory t -> Backend.MemoryBackend.health_check t
   | FileSystem t -> Backend.FileSystemBackend.health_check t
-  | RedisRest t -> Backend.RedisBackend.health_check t
-  | RedisNative t -> Backend.RedisNative.health_check t
   | PostgresNative t -> Backend.PostgresNative.health_check t
 
 let backend_publish config ~channel ~message =
   match config.backend with
   | Memory t -> Backend.MemoryBackend.publish t ~channel ~message
   | FileSystem t -> Backend.FileSystemBackend.publish t ~channel ~message
-  | RedisRest t -> Backend.RedisBackend.publish t ~channel ~message
-  | RedisNative t -> Backend.RedisNative.publish t ~channel ~message
   | PostgresNative t -> Backend.PostgresNative.publish t ~channel ~message
 
 let backend_subscribe config ~channel ~callback =
   match config.backend with
   | Memory t -> Backend.MemoryBackend.subscribe t ~channel ~callback
   | FileSystem t -> Backend.FileSystemBackend.subscribe t ~channel ~callback
-  | RedisRest t -> Backend.RedisBackend.subscribe t ~channel ~callback
-  | RedisNative t -> Backend.RedisNative.subscribe t ~channel ~callback
   | PostgresNative t -> Backend.PostgresNative.subscribe t ~channel ~callback
 
 let backend_name config =
   match config.backend with
   | Memory _ -> "memory"
   | FileSystem _ -> "filesystem"
-  | RedisRest _ -> "redis-rest"
-  | RedisNative _ -> "redis-native"
   | PostgresNative _ -> "postgres-native"
 
 (** Cleanup pubsub messages - only effective for PostgreSQL backend.
-    Other backends either have auto-cleanup (Redis LTRIM) or use FS cleanup in gc.
+    Other backends use FS cleanup in gc or are ephemeral.
     Returns the number of deleted messages. *)
 let backend_cleanup_pubsub config ~days ~max_messages =
   match config.backend with
   | PostgresNative t -> Backend.PostgresNative.cleanup_pubsub t ~days ~max_messages
-  | Memory _ | FileSystem _ | RedisRest _ | RedisNative _ ->
+  | Memory _ | FileSystem _ ->
       (* No-op for non-PostgreSQL backends:
          - FileSystem: handled separately by gc (file deletion)
-         - Redis: auto-limited by LTRIM in publish
          - Memory: ephemeral, no persistence *)
       Ok 0
 
@@ -450,12 +394,12 @@ let backend_cleanup_pubsub config ~days ~max_messages =
 
 (** Generate a short hash prefix for project isolation.
     Uses first 8 chars of MD5 hash of base_path.
-    This ensures different test directories get different Redis keys. *)
+    This ensures different test directories get different keys. *)
 let project_prefix config =
   let hash = Digest.string config.base_path |> Digest.to_hex in
   String.sub hash 0 8
 
-(** Convert absolute path to Redis/Memory key.
+(** Convert absolute path to backend key.
     For distributed backends: includes project hash prefix for isolation.
     Example: /tmp/test-abc/.masc/state.json -> "a1b2c3d4:state.json"
     For filesystem: returns relative path without prefix. *)
@@ -466,9 +410,9 @@ let key_of_path config path =
      String.sub path 0 (String.length prefix) = prefix then
     let rel = String.sub path (String.length prefix) (String.length path - String.length prefix) in
     let key = String.map (fun c -> if c = '/' then ':' else c) rel in
-    (* For Redis/Memory/Postgres backends, add project prefix for isolation *)
+    (* For Memory/Postgres backends, add project prefix for isolation *)
     match config.backend with
-    | RedisRest _ | RedisNative _ | Memory _ | PostgresNative _ ->
+    | Memory _ | PostgresNative _ ->
         Some (project_prefix config ^ ":" ^ key)
     | FileSystem _ ->
         Some key
@@ -505,7 +449,7 @@ let list_dir config path =
 (** Check if MASC room is initialized - backend-agnostic *)
 let is_initialized config =
   match config.backend with
-  | RedisRest _ | RedisNative _ | Memory _ | PostgresNative _ ->
+  | Memory _ | PostgresNative _ ->
       (* For distributed/memory/postgres backends, check state exists in backend *)
       let state_key = match key_of_path config (state_path config) with
         | Some k -> k

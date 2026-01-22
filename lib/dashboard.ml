@@ -168,7 +168,7 @@ let lock_count (config : Room_utils.config) : int =
   | Room_utils.FileSystem _ ->
       let locks_dir = Filename.concat (Room_utils.masc_dir config) "locks" in
       count_lock_files locks_dir
-  | Room_utils.RedisRest _ | Room_utils.RedisNative _ | Room_utils.Memory _ | Room_utils.PostgresNative _ ->
+  | Room_utils.Memory _ | Room_utils.PostgresNative _ ->
       let prefix = Printf.sprintf "locks:%s:" (Room_utils.project_prefix config) in
       (match Room_utils.backend_list_keys config ~prefix with
        | Ok keys -> List.length keys

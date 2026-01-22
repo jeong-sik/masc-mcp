@@ -1,6 +1,6 @@
 ; ============================================================
 ; Test Environment Configuration
-; Force filesystem backend to avoid Redis connection timeouts
+; Force filesystem backend to avoid external DB connection timeouts
 ; ============================================================
 (env
  (_

@@ -297,7 +297,7 @@ let generate_default ?(port=8935) ?(host="127.0.0.1") () : agent_card =
     extensions = [
       ("masc", `Assoc [
         ("roomPath", `String ".masc");
-        ("storageTypes", `List [`String "file"; `String "redis"]);
+        ("storageTypes", `List [`String "file"; `String "postgres"]);
         ("features", `Assoc [
           ("voting", `Bool true);
           ("worktree", `Bool true);

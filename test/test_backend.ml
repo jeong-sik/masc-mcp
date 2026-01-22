@@ -7,7 +7,6 @@ open Alcotest
 let test_config () = {
   Backend.backend_type = Backend.Memory;
   base_path = "/tmp/masc-test";
-  redis_url = None;
   postgres_url = None;
   node_id = "test-node-1";
   cluster_name = "test-cluster";
@@ -221,27 +220,6 @@ let test_filesystem_backend_basic () =
       | Ok _ -> ()
       | Error e -> fail (Backend.show_error e))
 
-(* Test: Redis backend - requires URL *)
-let test_redis_not_configured () =
-  let cfg = { Backend.default_config with backend_type = Backend.Redis; redis_url = None } in
-  match Backend.RedisBackend.create cfg with
-  | Error (Backend.ConnectionFailed _) -> ()
-  | Ok _ -> fail "Redis should fail without URL"
-  | Error e -> fail (Printf.sprintf "Unexpected error: %s" (Backend.show_error e))
-
-(* Test: Redis backend - creates with URL *)
-let test_redis_creates_with_url () =
-  let cfg = {
-    Backend.default_config with
-    backend_type = Backend.Redis;
-    redis_url = Some "https://fake-redis.upstash.io";
-    cluster_name = "test";
-  } in
-  match Backend.RedisBackend.create cfg with
-  | Error (Backend.BackendNotSupported _) -> ()
-  | Ok _ -> fail "Redis REST backend should be disabled"
-  | Error e -> fail (Printf.sprintf "Unexpected error: %s" (Backend.show_error e))
-
 (* Test: error messages *)
 let test_error_messages () =
   check bool "ConnectionFailed" true
@@ -249,7 +227,7 @@ let test_error_messages () =
   check bool "KeyNotFound" true
     (String.length (Backend.show_error (Backend.KeyNotFound "key")) > 5);
   check bool "BackendNotSupported" true
-    (String.length (Backend.show_error (Backend.BackendNotSupported "redis")) > 5)
+    (String.length (Backend.show_error (Backend.BackendNotSupported "unknown")) > 5)
 
 (* Security tests: Path traversal prevention *)
 let test_path_traversal_prevention () =
@@ -423,10 +401,6 @@ let () =
       test_case "path traversal prevention" `Quick test_path_traversal_prevention;
       test_case "TTL boundary validation" `Quick test_ttl_boundary_validation;
       test_case "corrupted lock recovery" `Quick test_corrupted_lock_recovery;
-    ];
-    "redis", [
-      test_case "requires url" `Quick test_redis_not_configured;
-      test_case "creates with url" `Quick test_redis_creates_with_url;
     ];
     "errors", [
       test_case "error messages" `Quick test_error_messages;

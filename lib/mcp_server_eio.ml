@@ -1692,7 +1692,7 @@ let handle_initialize_eio id params =
         ("serverInfo", Mcp_server.server_info);
         ("capabilities", Mcp_server.capabilities);
         ("instructions", `String "MASC (Multi-Agent Streaming Coordination) enables AI agent collaboration. \
-          ROOM: Agents sharing the same base path (.masc/ folder) or Redis cluster coordinate together. \
+          ROOM: Agents sharing the same base path (.masc/ folder) or PostgreSQL cluster coordinate together. \
           CLUSTER: Set MASC_CLUSTER_NAME for multi-machine coordination (defaults to basename of ME_ROOT). \
           READ: use resources/list + resources/read (status/tasks/agents/events/schema) for snapshots. \
           WRITE: prefer masc_transition (claim/start/done/cancel/release) with expected_version for CAS. \

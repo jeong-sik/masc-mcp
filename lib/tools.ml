@@ -35,7 +35,7 @@ let all_schemas : tool_schema list = [
 
   {
     name = "masc_join";
-    description = "Join the MASC room/cluster to collaborate with other AI agents. A 'room' is defined by shared .masc/ folder (FS mode) or same Redis + MASC_CLUSTER_NAME (distributed mode). Call at session start. Your presence will be visible to other agents (gemini, codex, etc). They can @mention you for help. Check masc_status after joining to see active agents and available tasks.";
+    description = "Join the MASC room/cluster to collaborate with other AI agents. A 'room' is defined by shared .masc/ folder (FS mode) or same PostgreSQL + MASC_CLUSTER_NAME (distributed mode). Call at session start. Your presence will be visible to other agents (gemini, codex, etc). They can @mention you for help. Check masc_status after joining to see active agents and available tasks.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -70,7 +70,7 @@ let all_schemas : tool_schema list = [
 
   {
     name = "masc_status";
-    description = "Get current room/cluster status: active agents with capabilities, task queue, recent broadcasts, and cluster info. Shows cluster name (from MASC_CLUSTER_NAME or basename of ME_ROOT) and storage backend (fs or redis).";
+    description = "Get current room/cluster status: active agents with capabilities, task queue, recent broadcasts, and cluster info. Shows cluster name (from MASC_CLUSTER_NAME or basename of ME_ROOT) and storage backend (fs or postgres).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -729,7 +729,7 @@ let all_schemas : tool_schema list = [
 
   {
     name = "masc_plan_init";
-    description = "Initialize a planning context for a task. Creates task_plan.md, notes.md, and deliverable.md structure. Works with file or Redis backend.";
+    description = "Initialize a planning context for a task. Creates task_plan.md, notes.md, and deliverable.md structure. Works with file or PostgreSQL backend.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

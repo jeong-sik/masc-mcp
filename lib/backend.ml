@@ -1,4 +1,4 @@
-(** Backend Module - Storage abstraction for MASC (Memory/FileSystem/Redis) *)
+(** Backend Module - Storage abstraction for MASC (Memory/FileSystem/PostgreSQL) *)
 
 (* ============================================ *)
 (* Backend Types                                *)
@@ -7,7 +7,6 @@
 type backend_type =
   | Memory
   | FileSystem
-  | Redis
   | PostgresNative  (* Eio-native PostgreSQL via caqti-eio *)
 [@@deriving show, eq]
 
@@ -22,7 +21,6 @@ type error =
 type config = {
   backend_type: backend_type;
   base_path: string;
-  redis_url: string option;
   postgres_url: string option;  (* PostgreSQL connection URL for PostgresNative backend *)
   node_id: string;
   cluster_name: string;
@@ -44,7 +42,6 @@ let generate_node_id () =
 let default_config = {
   backend_type = FileSystem;
   base_path = ".masc";
-  redis_url = None;
   postgres_url = None;
   node_id = generate_node_id ();
   cluster_name = "default";
@@ -55,7 +52,6 @@ let get_status config : Yojson.Safe.t =
   let backend_str = match config.backend_type with
     | Memory -> "memory"
     | FileSystem -> "filesystem"
-    | Redis -> "redis"
     | PostgresNative -> "postgres_native"
   in
   `Assoc [
@@ -63,7 +59,6 @@ let get_status config : Yojson.Safe.t =
     ("base_path", `String config.base_path);
     ("node_id", `String config.node_id);
     ("cluster_name", `String config.cluster_name);
-    ("redis_url", match config.redis_url with Some u -> `String u | None -> `Null);
     ("postgres_url", match config.postgres_url with Some u -> `String u | None -> `Null);
   ]
 
@@ -684,224 +679,6 @@ module FileSystemBackend : BACKEND = struct
 end
 
 (* ============================================ *)
-(* Redis Backend (HTTP/REST - Upstash style)    *)
-(* ============================================ *)
-
-module RedisBackend : BACKEND = struct
-  type t = unit
-
-  let create (cfg : config) : (t, error) result =
-    match cfg.redis_url with
-    | None -> Error (ConnectionFailed "Redis URL not configured")
-    | Some _ ->
-        Error (BackendNotSupported "Redis REST backend removed; use redis:// (redis-sync) or PostgresNative")
-
-  let close _t = ()
-
-  let not_supported () = Error (BackendNotSupported "Redis REST backend removed")
-
-  let get _t ~key:_ = not_supported ()
-  let set _t ~key:_ ~value:_ = not_supported ()
-  let delete _t ~key:_ = not_supported ()
-  let exists _t ~key:_ = false
-
-  let list_keys _t ~prefix:_ = not_supported ()
-  let get_all _t ~prefix:_ = not_supported ()
-
-  let set_if_not_exists _t ~key:_ ~value:_ = not_supported ()
-  let compare_and_swap _t ~key:_ ~expected:_ ~value:_ = not_supported ()
-
-  let acquire_lock _t ~key:_ ~ttl_seconds:_ ~owner:_ = not_supported ()
-  let release_lock _t ~key:_ ~owner:_ = not_supported ()
-  let extend_lock _t ~key:_ ~ttl_seconds:_ ~owner:_ = not_supported ()
-
-  let publish _t ~channel:_ ~message:_ = not_supported ()
-  let subscribe _t ~channel:_ ~callback:_ = not_supported ()
-
-  let health_check _t = Ok false
-end
-
-(* ============================================ *)
-(* Redis Backend (Native Protocol - redis-sync)  *)
-(* ============================================ *)
-
-module RedisNative : BACKEND = struct
-  type t = {
-    host: string;
-    port: int;
-    password: string option;
-    namespace: string;
-    pubsub_max_messages: int;   (* Max messages before LTRIM *)
-  }
-
-  (* Parse redis:// URL into components *)
-  let parse_redis_url url =
-    (* Format: redis://[:password@]host:port or redis://user:password@host:port *)
-    let url =
-      if String.length url > 8 && String.sub url 0 8 = "redis://" then
-        String.sub url 8 (String.length url - 8)
-      else url
-    in
-    (* Check for auth@ pattern *)
-    let (auth_part, host_part) =
-      match String.index_opt url '@' with
-      | Some i -> (Some (String.sub url 0 i), String.sub url (i+1) (String.length url - i - 1))
-      | None -> (None, url)
-    in
-    (* Parse host:port *)
-    let (host, port) =
-      match String.index_opt host_part ':' with
-      | Some i ->
-          let h = String.sub host_part 0 i in
-          let p_str = String.sub host_part (i+1) (String.length host_part - i - 1) in
-          (h, int_of_string_opt p_str |> Option.value ~default:6379)
-      | None -> (host_part, 6379)
-    in
-    (* Parse password from auth (user:password or just password) *)
-    let password = match auth_part with
-      | None -> None
-      | Some auth ->
-          match String.index_opt auth ':' with
-          | Some i -> Some (String.sub auth (i+1) (String.length auth - i - 1))  (* user:password *)
-          | None -> Some auth  (* just password *)
-    in
-    (host, port, password)
-
-  let create (cfg : config) : (t, error) result =
-    match cfg.redis_url with
-    | None -> Error (ConnectionFailed "Redis URL not configured")
-    | Some url ->
-        let (host, port, password) = parse_redis_url url in
-        Ok { host; port; password; namespace = cfg.cluster_name;
-             pubsub_max_messages = cfg.pubsub_max_messages }
-
-  let close _t = ()
-
-  let namespaced_key t key = Redis_common.make_namespaced_key ~namespace:t.namespace key
-
-  (* Create Redis connection spec - uses blocking redis-sync *)
-  let make_spec (cfg : t) : Redis_sync.Client.connection_spec =
-    { Redis_sync.Client.host = cfg.host; port = cfg.port }
-
-  (* Run command with connection (blocking; isolate if needed) *)
-  let with_connection (cfg : t) f =
-    let spec = make_spec cfg in
-    try
-      let conn = Redis_sync.Client.connect spec in
-      (* Auth if password provided *)
-      (match cfg.password with
-       | Some pwd -> let _ = Redis_sync.Client.auth conn pwd in ()
-       | None -> ());
-      let result = f conn in
-      Redis_sync.Client.disconnect conn;
-      Ok result
-    with exn ->
-      Error (OperationFailed (Printexc.to_string exn))
-
-  let get t ~key =
-    let nkey = namespaced_key t key in
-    with_connection t (fun conn ->
-      Redis_sync.Client.get conn nkey)
-
-  let set t ~key ~value =
-    let nkey = namespaced_key t key in
-    with_connection t (fun conn ->
-      let _ = Redis_sync.Client.set conn nkey value in
-      ())
-
-  let delete t ~key =
-    let nkey = namespaced_key t key in
-    with_connection t (fun conn ->
-      let count = Redis_sync.Client.del conn [nkey] in
-      count > 0)
-
-  let exists t ~key =
-    let nkey = namespaced_key t key in
-    match with_connection t (fun conn ->
-      Redis_sync.Client.exists conn nkey) with
-    | Ok b -> b
-    | Error _ -> false
-
-  let list_keys t ~prefix =
-    let nprefix = namespaced_key t prefix in
-    with_connection t (fun conn ->
-      let keys = Redis_sync.Client.keys conn (nprefix ^ "*") in
-      (* Remove namespace prefix *)
-      List.map (Redis_common.strip_namespace_prefix ~namespace:t.namespace) keys)
-
-  let get_all t ~prefix =
-    Redis_common.get_all_generic
-      ~list_keys:(fun p -> list_keys t ~prefix:p)
-      ~get:(fun k -> get t ~key:k)
-      ~prefix
-
-  let set_if_not_exists t ~key ~value =
-    let nkey = namespaced_key t key in
-    with_connection t (fun conn ->
-      Redis_sync.Client.setnx conn nkey value)
-
-  let compare_and_swap _t ~key:_ ~expected:_ ~value:_ =
-    (* Redis doesn't have native CAS, would need Lua script *)
-    Error (BackendNotSupported "CAS requires Lua scripting")
-
-  (* Distributed lock with atomic SET NX EX *)
-  let acquire_lock t ~key ~ttl_seconds ~owner =
-    let lock_key = Redis_common.make_lock_key key in
-    let nkey = namespaced_key t lock_key in
-    let value = Redis_common.make_owner_value owner in
-    with_connection t (fun conn ->
-      (* Atomic SET with NX (only if not exists) and EX (expiration in seconds) *)
-      Redis_sync.Client.set conn ~ex:ttl_seconds ~nx:true nkey value)
-
-  let release_lock t ~key ~owner =
-    Redis_common.release_lock_generic
-      ~get:(fun k -> get t ~key:k)
-      ~delete:(fun k -> delete t ~key:k)
-      ~key ~owner
-
-  let extend_lock t ~key ~ttl_seconds ~owner =
-    let lock_key = Redis_common.make_lock_key key in
-    match get t ~key:lock_key with
-    | Error e -> Error e
-    | Ok None -> Ok false
-    | Ok (Some value) ->
-        if Redis_common.verify_owner ~owner ~value then begin
-          let nkey = namespaced_key t lock_key in
-          with_connection t (fun conn ->
-            Redis_sync.Client.expire conn nkey ttl_seconds)
-        end else
-          Ok false
-
-  (* Pub/Sub using LIST as message queue *)
-  let publish t ~channel ~message =
-    let queue_key = Redis_common.make_pubsub_key channel in
-    let nkey = namespaced_key t queue_key in
-    let msg_json = Redis_common.make_message_json message in
-    with_connection t (fun conn ->
-      let len = Redis_sync.Client.lpush conn nkey [msg_json] in
-      (* Trim to max_messages (configurable via MASC_PUBSUB_MAX_MESSAGES, default 1000) *)
-      let _ = Redis_sync.Client.ltrim conn nkey 0 (t.pubsub_max_messages - 1) in
-      min len 1)
-
-  let subscribe t ~channel ~callback =
-    let queue_key = Redis_common.make_pubsub_key channel in
-    let nkey = namespaced_key t queue_key in
-    with_connection t (fun conn ->
-      let result = Redis_sync.Client.rpop conn nkey in
-      match result with
-      | None -> ()
-      | Some msg_json ->
-          match Redis_common.parse_message_json msg_json with
-          | Some message -> callback message
-          | None -> ())
-
-  let health_check t =
-    with_connection t (fun conn ->
-      let _ = Redis_sync.Client.ping conn in
-      true)
-end
-
-(* ============================================ *)
 (* PostgreSQL Backend (Eio-native, non-blocking) *)
 (* ============================================ *)
 
@@ -1020,7 +797,7 @@ end = struct
     (Caqti_type.unit ->! Caqti_type.int)
     "SELECT 1"
 
-  (* Pub/Sub queries (using table as queue to match RedisNative behavior) *)
+  (* Pub/Sub queries (using table as queue for message passing) *)
   let publish_q =
     (Caqti_type.(t2 string string) ->. Caqti_type.unit)
     "INSERT INTO masc_pubsub (channel, message) VALUES ($1, $2)"
@@ -1304,21 +1081,6 @@ end = struct
     | (Error e, _) -> Error e
     | (_, Error e) -> Error e
 end
-
-(* ============================================ *)
-(* URL Scheme Auto-Detection for Redis Backend  *)
-(* ============================================ *)
-
-(* Detect protocol from URL scheme *)
-let is_native_redis_url url =
-  let url_lower = String.lowercase_ascii url in
-  (String.length url_lower >= 8 && String.sub url_lower 0 8 = "redis://") ||
-  (String.length url_lower >= 9 && String.sub url_lower 0 9 = "rediss://")
-
-let is_rest_redis_url url =
-  let url_lower = String.lowercase_ascii url in
-  (String.length url_lower >= 8 && String.sub url_lower 0 8 = "https://") ||
-  (String.length url_lower >= 7 && String.sub url_lower 0 7 = "http://")
 
 (* ============================================ *)
 (* Async backend interface removed (Eio-only)  *)

@@ -34,7 +34,6 @@ depends: [
   "httpun-ws" {>= "0.2"}
   "httpun-ws-eio" {>= "0.2"}
   "bigstringaf" {>= "0.10"}
-  "redis-sync" {>= "0.7"}
   "caqti" {>= "2.1"}
   "caqti-eio" {>= "2.1"}
   "caqti-driver-postgresql" {>= "2.1"}
@@ -49,6 +48,7 @@ depends: [
   "h2-eio" {>= "0.10"}
   "alcotest" {with-test & >= "1.6"}
   "mtime" {>= "2.0"}
+  "uuidm" {>= "0.9"}
   "odoc" {with-doc}
 ]
 build: [

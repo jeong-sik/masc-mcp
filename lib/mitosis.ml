@@ -491,7 +491,7 @@ let write_status ~base_path ~cell ~config =
 
 (** Write mitosis status to both local file AND backend (for cross-machine collaboration).
     - Local file: Hook reads this to warn Claude about context pressure
-    - Backend (Redis): Other agents on different machines can see context pressure
+    - Backend (PostgreSQL): Other agents on different machines can see context pressure
     Key format: mitosis:{node_id} *)
 let write_status_with_backend ~room_config ~cell ~config =
   let open Room_utils in

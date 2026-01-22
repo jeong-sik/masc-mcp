@@ -44,7 +44,6 @@
    orchestrator
    planning_eio
    progress
-   redis_common
    relay
    resilience
    response
@@ -86,7 +85,6 @@
    httpun-ws
    httpun-ws-eio
    bigstringaf
-   redis-sync
    ;; PostgreSQL backend (Eio-native, non-blocking)
    caqti
    caqti-eio
@@ -120,6 +118,8 @@
    ipaddr
    cohttp
    cohttp-eio
+   ;; UUID generation (for mind_eio, noosphere_eio)
+   uuidm
    ;; Compact Protocol v5: unified DSL + compression
    compact-protocol
    zstd

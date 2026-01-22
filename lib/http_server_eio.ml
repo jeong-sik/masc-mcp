@@ -259,7 +259,7 @@ end
 
 (** Health check endpoint - JSON response *)
 let health_handler _request reqd =
-  let json = {|{"status":"ok","server":"masc-mcp","version":"2.2.2"}|} in
+  let json = {|{"status":"ok","server":"masc-mcp","version":"2.2.3"}|} in
   Response.json json reqd
 
 (** Default routes for MCP server *)

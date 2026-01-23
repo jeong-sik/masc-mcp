@@ -1,0 +1,959 @@
+(** gRPC Transport Layer - Protocol Buffers binding for MASC MCP
+
+    This module provides gRPC transport support for Multi-Agent Streaming
+    Coordination (MASC). It implements the A2A (Agent-to-Agent) protocol
+    over gRPC/HTTP2 for high-performance inter-agent communication.
+
+    {2 Architecture}
+
+    The gRPC transport layer consists of:
+    - Protobuf serialization/deserialization using [ocaml-protoc-plugin]
+    - Service handlers that delegate to {!Room} module
+    - H2-based TCP server with Lwt async I/O
+    - Client module for outbound RPC calls
+
+    {2 Error Handling}
+
+    All handlers use {!Types.masc_result} (Result type) for proper error
+    propagation. The pattern is:
+    - [Ok msg] -> gRPC OK status with success response
+    - [Error e] -> gRPC OK status with failure response (application-level error)
+    - Decode failure -> gRPC INVALID_ARGUMENT status
+
+    {2 OCaml 5.x Compatibility}
+
+    This module is compatible with OCaml 5.x and uses:
+    - [Result.bind] for monadic error handling
+    - [Option.value] with default values
+    - Lwt for cooperative concurrency (Domains not needed for I/O-bound work)
+
+    @see <https://grpc.io/docs/what-is-grpc/core-concepts/> gRPC Core Concepts
+    @see <https://github.com/issuu/ocaml-protoc-plugin> OCaml Protobuf Plugin
+*)
+
+module Pb = Masc_pb.Masc.V1
+
+(** {1 Configuration} *)
+
+(** gRPC server configuration.
+
+    @param host Bind address (default: 127.0.0.1)
+    @param port Listen port (default: 9935, different from HTTP 8935)
+    @param tls Enable TLS encryption
+    @param cert_file Path to TLS certificate file (PEM format)
+    @param key_file Path to TLS private key file (PEM format) *)
+type config = {
+  host: string;
+  port: int;
+  tls: bool;
+  cert_file: string option;
+  key_file: string option;
+}
+
+(** Default configuration for local development. *)
+let default_config = {
+  host = "127.0.0.1";
+  port = 9935;
+  tls = false;
+  cert_file = None;
+  key_file = None;
+}
+
+(** Create TLS-enabled configuration.
+
+    @param host Bind address
+    @param port Listen port
+    @param cert_file Path to certificate file
+    @param key_file Path to private key file
+    @return Configuration with TLS enabled *)
+let tls_config ~host ~port ~cert_file ~key_file = {
+  host;
+  port;
+  tls = true;
+  cert_file = Some cert_file;
+  key_file = Some key_file;
+}
+
+(** Service availability status. *)
+type service_status =
+  | NotInstalled  (** gRPC dependencies not installed *)
+  | Available     (** Ready to start *)
+  | Running of { host: string; port: int }  (** Server is running *)
+
+(** Check if gRPC dependencies are available.
+    @return [Available] if all required libraries are installed *)
+let check_dependencies () =
+  Available
+
+(** Get transport binding info for MCP Agent Card.
+    @param host Server host
+    @param port Server port
+    @return Transport binding with gRPC protocol *)
+let get_binding ~host ~port : Transport.binding =
+  {
+    Transport.protocol = Transport.Grpc;
+    url = Printf.sprintf "grpc://%s:%d" host port;
+    options = [];
+  }
+
+(** {1 Protobuf Serialization}
+
+    Encode/decode functions for Protocol Buffer messages.
+    Uses [ocaml-protoc-plugin] for type-safe serialization. *)
+
+(** {2 Response Encoders} *)
+
+let encode_status_response (msg : Pb.StatusResponse.t) : string =
+  Ocaml_protoc_plugin.Writer.contents (Pb.StatusResponse.to_proto msg)
+
+let encode_join_response (msg : Pb.JoinResponse.t) : string =
+  Ocaml_protoc_plugin.Writer.contents (Pb.JoinResponse.to_proto msg)
+
+let encode_leave_response (msg : Pb.LeaveResponse.t) : string =
+  Ocaml_protoc_plugin.Writer.contents (Pb.LeaveResponse.to_proto msg)
+
+let encode_add_task_response (msg : Pb.AddTaskResponse.t) : string =
+  Ocaml_protoc_plugin.Writer.contents (Pb.AddTaskResponse.to_proto msg)
+
+let encode_claim_task_response (msg : Pb.ClaimTaskResponse.t) : string =
+  Ocaml_protoc_plugin.Writer.contents (Pb.ClaimTaskResponse.to_proto msg)
+
+let encode_done_task_response (msg : Pb.DoneTaskResponse.t) : string =
+  Ocaml_protoc_plugin.Writer.contents (Pb.DoneTaskResponse.to_proto msg)
+
+let encode_cancel_task_response (msg : Pb.CancelTaskResponse.t) : string =
+  Ocaml_protoc_plugin.Writer.contents (Pb.CancelTaskResponse.to_proto msg)
+
+let encode_broadcast_response (msg : Pb.BroadcastResponse.t) : string =
+  Ocaml_protoc_plugin.Writer.contents (Pb.BroadcastResponse.to_proto msg)
+
+let encode_get_messages_response (msg : Pb.GetMessagesResponse.t) : string =
+  Ocaml_protoc_plugin.Writer.contents (Pb.GetMessagesResponse.to_proto msg)
+
+let encode_create_vote_response (msg : Pb.CreateVoteResponse.t) : string =
+  Ocaml_protoc_plugin.Writer.contents (Pb.CreateVoteResponse.to_proto msg)
+
+let encode_cast_vote_response (msg : Pb.CastVoteResponse.t) : string =
+  Ocaml_protoc_plugin.Writer.contents (Pb.CastVoteResponse.to_proto msg)
+
+(** {2 Planning Response Encoders} *)
+
+let encode_init_plan_response (msg : Pb.InitPlanResponse.t) : string =
+  Ocaml_protoc_plugin.Writer.contents (Pb.InitPlanResponse.to_proto msg)
+
+let encode_update_plan_response (msg : Pb.UpdatePlanResponse.t) : string =
+  Ocaml_protoc_plugin.Writer.contents (Pb.UpdatePlanResponse.to_proto msg)
+
+let encode_add_note_response (msg : Pb.AddNoteResponse.t) : string =
+  Ocaml_protoc_plugin.Writer.contents (Pb.AddNoteResponse.to_proto msg)
+
+let encode_get_plan_response (msg : Pb.GetPlanResponse.t) : string =
+  Ocaml_protoc_plugin.Writer.contents (Pb.GetPlanResponse.to_proto msg)
+
+(** {2 Request Decoders}
+
+    All decoders return [Option] - [None] on parse failure. *)
+
+let decode_join_request (data : string) : Pb.JoinRequest.t option =
+  let reader = Ocaml_protoc_plugin.Reader.create data in
+  Result.to_option (Pb.JoinRequest.from_proto reader)
+
+let decode_leave_request (data : string) : Pb.LeaveRequest.t option =
+  let reader = Ocaml_protoc_plugin.Reader.create data in
+  Result.to_option (Pb.LeaveRequest.from_proto reader)
+
+let decode_add_task_request (data : string) : Pb.AddTaskRequest.t option =
+  let reader = Ocaml_protoc_plugin.Reader.create data in
+  Result.to_option (Pb.AddTaskRequest.from_proto reader)
+
+let decode_claim_task_request (data : string) : Pb.ClaimTaskRequest.t option =
+  let reader = Ocaml_protoc_plugin.Reader.create data in
+  Result.to_option (Pb.ClaimTaskRequest.from_proto reader)
+
+let decode_done_task_request (data : string) : Pb.DoneTaskRequest.t option =
+  let reader = Ocaml_protoc_plugin.Reader.create data in
+  Result.to_option (Pb.DoneTaskRequest.from_proto reader)
+
+let decode_cancel_task_request (data : string) : Pb.CancelTaskRequest.t option =
+  let reader = Ocaml_protoc_plugin.Reader.create data in
+  Result.to_option (Pb.CancelTaskRequest.from_proto reader)
+
+let decode_broadcast_request (data : string) : Pb.BroadcastRequest.t option =
+  let reader = Ocaml_protoc_plugin.Reader.create data in
+  Result.to_option (Pb.BroadcastRequest.from_proto reader)
+
+let decode_get_messages_request (data : string) : Pb.GetMessagesRequest.t option =
+  let reader = Ocaml_protoc_plugin.Reader.create data in
+  Result.to_option (Pb.GetMessagesRequest.from_proto reader)
+
+let decode_create_vote_request (data : string) : Pb.CreateVoteRequest.t option =
+  let reader = Ocaml_protoc_plugin.Reader.create data in
+  Result.to_option (Pb.CreateVoteRequest.from_proto reader)
+
+let decode_cast_vote_request (data : string) : Pb.CastVoteRequest.t option =
+  let reader = Ocaml_protoc_plugin.Reader.create data in
+  Result.to_option (Pb.CastVoteRequest.from_proto reader)
+
+(** {2 Planning Request Decoders} *)
+
+let decode_init_plan_request (data : string) : Pb.InitPlanRequest.t option =
+  let reader = Ocaml_protoc_plugin.Reader.create data in
+  Result.to_option (Pb.InitPlanRequest.from_proto reader)
+
+let decode_update_plan_request (data : string) : Pb.UpdatePlanRequest.t option =
+  let reader = Ocaml_protoc_plugin.Reader.create data in
+  Result.to_option (Pb.UpdatePlanRequest.from_proto reader)
+
+let decode_add_note_request (data : string) : Pb.AddNoteRequest.t option =
+  let reader = Ocaml_protoc_plugin.Reader.create data in
+  Result.to_option (Pb.AddNoteRequest.from_proto reader)
+
+let decode_get_plan_request (data : string) : Pb.GetPlanRequest.t option =
+  let reader = Ocaml_protoc_plugin.Reader.create data in
+  Result.to_option (Pb.GetPlanRequest.from_proto reader)
+
+(** {2 Streaming Request Decoders} *)
+
+let decode_stream_messages_request (data : string) : Pb.StreamMessagesRequest.t option =
+  let reader = Ocaml_protoc_plugin.Reader.create data in
+  Result.to_option (Pb.StreamMessagesRequest.from_proto reader)
+
+let encode_message (msg : Pb.Message.t) : string =
+  Ocaml_protoc_plugin.Writer.contents (Pb.Message.to_proto msg)
+
+(** {2 Request Encoders (for Client)} *)
+
+let encode_claim_task_request (msg : Pb.ClaimTaskRequest.t) : string =
+  Ocaml_protoc_plugin.Writer.contents (Pb.ClaimTaskRequest.to_proto msg)
+
+let encode_broadcast_request (msg : Pb.BroadcastRequest.t) : string =
+  Ocaml_protoc_plugin.Writer.contents (Pb.BroadcastRequest.to_proto msg)
+
+(** {1 RPC Handlers}
+
+    Each handler follows the pattern:
+    1. Decode request (return INVALID_ARGUMENT on failure)
+    2. Call Room API (prefer [_r] variants for Result type)
+    3. Encode response with success/failure status *)
+
+(** Helper: Create gRPC error response *)
+let grpc_invalid_argument msg =
+  Lwt.return (Grpc.Status.(v ~message:msg Invalid_argument), None)
+
+(** Helper: Create gRPC OK response *)
+let grpc_ok encoded =
+  Lwt.return (Grpc.Status.(v OK), Some encoded)
+
+(** GetStatus handler - returns room status with agent/task counts.
+
+    @param room_config Room configuration
+    @param _data Unused (no request params)
+    @return StatusResponse with room info *)
+let get_status_handler (room_config: Room.config) (_data: string) : (Grpc.Status.t * string option) Lwt.t =
+  (* Count messages by listing files in messages directory *)
+  let message_count =
+    let msgs_path = Filename.concat room_config.base_path "messages" in
+    if Sys.file_exists msgs_path && Sys.is_directory msgs_path then
+      Array.length (Sys.readdir msgs_path)
+    else
+      0
+  in
+  let response = Pb.StatusResponse.make
+    ~room_path:room_config.base_path
+    ~project_name:room_config.backend_config.cluster_name
+    ~message_count
+    ()
+  in
+  grpc_ok (encode_status_response response)
+
+(** Join handler - register agent in room.
+
+    @param room_config Room configuration
+    @param data Serialized JoinRequest
+    @return JoinResponse with success status *)
+let join_handler (room_config: Room.config) (data: string) : (Grpc.Status.t * string option) Lwt.t =
+  match decode_join_request data with
+  | None -> grpc_invalid_argument "Invalid JoinRequest"
+  | Some req ->
+    let result = Room.join room_config ~agent_name:req.agent_name ~capabilities:req.capabilities in
+    let response = Pb.JoinResponse.make ~success:true ~message:result () in
+    grpc_ok (encode_join_response response)
+
+(** Leave handler - acknowledge agent departure.
+
+    Note: Room module doesn't have explicit leave, agent times out via heartbeat.
+
+    @param _room_config Unused
+    @param data Serialized LeaveRequest
+    @return LeaveResponse (always success) *)
+let leave_handler (_room_config: Room.config) (data: string) : (Grpc.Status.t * string option) Lwt.t =
+  match decode_leave_request data with
+  | None -> grpc_invalid_argument "Invalid LeaveRequest"
+  | Some _req ->
+    let response = Pb.LeaveResponse.make ~success:true () in
+    grpc_ok (encode_leave_response response)
+
+(** AddTask handler - create new task on quest board.
+
+    @param room_config Room configuration
+    @param data Serialized AddTaskRequest
+    @return AddTaskResponse with task_id *)
+let add_task_handler (room_config: Room.config) (data: string) : (Grpc.Status.t * string option) Lwt.t =
+  match decode_add_task_request data with
+  | None -> grpc_invalid_argument "Invalid AddTaskRequest"
+  | Some req ->
+    let result = Room.add_task room_config ~title:req.title ~description:req.description ~priority:req.priority in
+    (* result is task_id on success, error message on failure *)
+    let success = not (String.length result > 0 && result.[0] = '\xe2') in (* ❌ starts with emoji *)
+    let response = Pb.AddTaskResponse.make ~task_id:result ~success () in
+    grpc_ok (encode_add_task_response response)
+
+(** ClaimTask handler - assign task to agent.
+
+    Uses [Room.claim_task_r] for proper Result-based error handling.
+
+    @param room_config Room configuration
+    @param data Serialized ClaimTaskRequest
+    @return ClaimTaskResponse with success/failure *)
+let claim_task_handler (room_config: Room.config) (data: string) : (Grpc.Status.t * string option) Lwt.t =
+  match decode_claim_task_request data with
+  | None -> grpc_invalid_argument "Invalid ClaimTaskRequest"
+  | Some req ->
+    let result = Room.claim_task_r room_config ~agent_name:req.agent_name ~task_id:req.task_id in
+    let success, message = match result with
+      | Ok msg -> (true, msg)
+      | Error e -> (false, Types.masc_error_to_string e)
+    in
+    let response = Pb.ClaimTaskResponse.make ~success ~message () in
+    grpc_ok (encode_claim_task_response response)
+
+(** DoneTask handler - mark task as completed.
+
+    Uses [Room.complete_task_r] for proper Result-based error handling.
+
+    @param room_config Room configuration
+    @param data Serialized DoneTaskRequest
+    @return DoneTaskResponse with success/failure *)
+let done_task_handler (room_config: Room.config) (data: string) : (Grpc.Status.t * string option) Lwt.t =
+  match decode_done_task_request data with
+  | None -> grpc_invalid_argument "Invalid DoneTaskRequest"
+  | Some req ->
+    let result = Room.complete_task_r room_config ~agent_name:req.agent_name ~task_id:req.task_id ~notes:req.notes in
+    let success, message = match result with
+      | Ok msg -> (true, msg)
+      | Error e -> (false, Types.masc_error_to_string e)
+    in
+    let response = Pb.DoneTaskResponse.make ~success ~message () in
+    grpc_ok (encode_done_task_response response)
+
+(** CancelTask handler - cancel a task.
+
+    Uses [Room.cancel_task_r] for proper Result-based error handling.
+
+    @param room_config Room configuration
+    @param data Serialized CancelTaskRequest
+    @return CancelTaskResponse with success/failure *)
+let cancel_task_handler (room_config: Room.config) (data: string) : (Grpc.Status.t * string option) Lwt.t =
+  match decode_cancel_task_request data with
+  | None -> grpc_invalid_argument "Invalid CancelTaskRequest"
+  | Some req ->
+    let result = Room.cancel_task_r room_config ~agent_name:req.agent_name ~task_id:req.task_id ~reason:req.reason in
+    let success, message = match result with
+      | Ok msg -> (true, msg)
+      | Error e -> (false, Types.masc_error_to_string e)
+    in
+    let response = Pb.CancelTaskResponse.make ~success ~message () in
+    grpc_ok (encode_cancel_task_response response)
+
+(** Broadcast handler - send message to all agents.
+
+    @param room_config Room configuration
+    @param data Serialized BroadcastRequest
+    @return BroadcastResponse with message sequence number *)
+let broadcast_handler (room_config: Room.config) (data: string) : (Grpc.Status.t * string option) Lwt.t =
+  match decode_broadcast_request data with
+  | None -> grpc_invalid_argument "Invalid BroadcastRequest"
+  | Some req ->
+    (* Room.broadcast returns formatted string, not seq *)
+    let _msg = Room.broadcast room_config ~from_agent:req.agent_name ~content:req.message in
+    (* Seq is internal to Room module; we count messages as approximation *)
+    let msgs_path = Filename.concat room_config.base_path "messages" in
+    let seq =
+      if Sys.file_exists msgs_path && Sys.is_directory msgs_path then
+        Array.length (Sys.readdir msgs_path)
+      else 0
+    in
+    let response = Pb.BroadcastResponse.make ~success:true ~seq () in
+    grpc_ok (encode_broadcast_response response)
+
+(** GetMessages handler - retrieve recent messages.
+
+    @param room_config Room configuration
+    @param data Serialized GetMessagesRequest with since_seq and limit
+    @return GetMessagesResponse with message list *)
+let get_messages_handler (room_config: Room.config) (data: string) : (Grpc.Status.t * string option) Lwt.t =
+  match decode_get_messages_request data with
+  | None -> grpc_invalid_argument "Invalid GetMessagesRequest"
+  | Some req ->
+    (* Read messages directly from files (same pattern as Room.get_messages) *)
+    let msgs_path = Filename.concat room_config.base_path "messages" in
+    let messages =
+      if Sys.file_exists msgs_path && Sys.is_directory msgs_path then begin
+        let files = Sys.readdir msgs_path |> Array.to_list |> List.sort compare |> List.rev in
+        let count = ref 0 in
+        List.filter_map (fun name ->
+          if !count >= req.limit then None
+          else begin
+            let path = Filename.concat msgs_path name in
+            try
+              let json = Yojson.Safe.from_file path in
+              match Types.message_of_yojson json with
+              | Ok msg when msg.seq > req.since_seq ->
+                incr count;
+                Some (Pb.Message.make
+                  ~id:(string_of_int msg.seq)
+                  ~from:msg.from_agent
+                  ~content:msg.content
+                  ~timestamp:msg.timestamp
+                  ~seq:msg.seq
+                  ())
+              | _ -> None
+            with _ -> None
+          end
+        ) files
+      end else []
+    in
+    let response = Pb.GetMessagesResponse.make ~messages () in
+    grpc_ok (encode_get_messages_response response)
+
+(** CreateVote handler - start a new vote.
+
+    @param room_config Room configuration
+    @param data Serialized CreateVoteRequest
+    @return CreateVoteResponse with vote_id *)
+let create_vote_handler (room_config: Room.config) (data: string) : (Grpc.Status.t * string option) Lwt.t =
+  match decode_create_vote_request data with
+  | None -> grpc_invalid_argument "Invalid CreateVoteRequest"
+  | Some req ->
+    let result = Room.vote_create room_config
+      ~proposer:req.proposer
+      ~topic:req.topic
+      ~options:req.options
+      ~required_votes:req.required_votes
+    in
+    let success = not (String.length result > 0 && result.[0] = '\xe2') in
+    let response = Pb.CreateVoteResponse.make ~vote_id:result ~success () in
+    grpc_ok (encode_create_vote_response response)
+
+(** CastVote handler - cast a vote.
+
+    @param room_config Room configuration
+    @param data Serialized CastVoteRequest
+    @return CastVoteResponse with success/failure *)
+let cast_vote_handler (room_config: Room.config) (data: string) : (Grpc.Status.t * string option) Lwt.t =
+  match decode_cast_vote_request data with
+  | None -> grpc_invalid_argument "Invalid CastVoteRequest"
+  | Some req ->
+    let result = Room.vote_cast room_config
+      ~agent_name:req.agent_name
+      ~vote_id:req.vote_id
+      ~choice:req.choice
+    in
+    let success = not (String.length result > 0 && result.[0] = '\xe2') in
+    let response = Pb.CastVoteResponse.make ~success ~message:result () in
+    grpc_ok (encode_cast_vote_response response)
+
+(** {1 Planning Handlers}
+
+    Planning context is stored per-task in [.masc/plans/{task_id}.json].
+    Simple file-based storage - no Room module dependency. *)
+
+(** Plans directory path *)
+let plans_dir config = Filename.concat config.Room.base_path "plans"
+
+(** Ensure plans directory exists *)
+let ensure_plans_dir config =
+  let dir = plans_dir config in
+  if not (Sys.file_exists dir) then Unix.mkdir dir 0o755
+
+(** Plan file path for a task *)
+let plan_path config task_id =
+  Filename.concat (plans_dir config) (task_id ^ ".json")
+
+(** Read plan from file, returns None if not exists *)
+let read_plan config task_id =
+  let path = plan_path config task_id in
+  if Sys.file_exists path then
+    try Some (Yojson.Safe.from_file path) with _ -> None
+  else None
+
+(** Write plan to file *)
+let write_plan config task_id json =
+  ensure_plans_dir config;
+  Yojson.Safe.to_file (plan_path config task_id) json
+
+(** Create PlanningContext protobuf from JSON *)
+let planning_context_of_json task_id json =
+  let get_str key default = match json with
+    | `Assoc fields -> (match List.assoc_opt key fields with
+        | Some (`String s) -> s | _ -> default)
+    | _ -> default
+  in
+  let get_list key = match json with
+    | `Assoc fields -> (match List.assoc_opt key fields with
+        | Some (`List items) -> List.filter_map (function `String s -> Some s | _ -> None) items
+        | _ -> [])
+    | _ -> []
+  in
+  Pb.PlanningContext.make
+    ~task_id
+    ~task_plan:(get_str "task_plan" "")
+    ~notes:(get_list "notes")
+    ~deliverable:(get_str "deliverable" "")
+    ~created_at:(get_str "created_at" "")
+    ~updated_at:(get_str "updated_at" "")
+    ()
+
+(** InitPlan handler - initialize planning context for a task.
+
+    @param room_config Room configuration
+    @param data Serialized InitPlanRequest
+    @return InitPlanResponse with new context *)
+let init_plan_handler (room_config: Room.config) (data: string) : (Grpc.Status.t * string option) Lwt.t =
+  match decode_init_plan_request data with
+  | None -> grpc_invalid_argument "Invalid InitPlanRequest"
+  | Some task_id ->
+    let now = Types.now_iso () in
+    let json = `Assoc [
+      ("task_plan", `String "");
+      ("notes", `List []);
+      ("deliverable", `String "");
+      ("created_at", `String now);
+      ("updated_at", `String now);
+    ] in
+    write_plan room_config task_id json;
+    let context = planning_context_of_json task_id json in
+    let response = Pb.InitPlanResponse.make ~success:true ~context () in
+    grpc_ok (encode_init_plan_response response)
+
+(** UpdatePlan handler - update task plan content.
+
+    @param room_config Room configuration
+    @param data Serialized UpdatePlanRequest
+    @return UpdatePlanResponse with updated context *)
+let update_plan_handler (room_config: Room.config) (data: string) : (Grpc.Status.t * string option) Lwt.t =
+  match decode_update_plan_request data with
+  | None -> grpc_invalid_argument "Invalid UpdatePlanRequest"
+  | Some req ->
+    let existing = read_plan room_config req.task_id |> Option.value ~default:(`Assoc []) in
+    let now = Types.now_iso () in
+    let json = match existing with
+      | `Assoc fields ->
+        let updated = List.map (fun (k, v) ->
+          if k = "task_plan" then (k, `String req.content)
+          else if k = "updated_at" then (k, `String now)
+          else (k, v)
+        ) fields in
+        (* Add task_plan if not present *)
+        let has_plan = List.exists (fun (k, _) -> k = "task_plan") updated in
+        if has_plan then `Assoc updated
+        else `Assoc (("task_plan", `String req.content) :: ("updated_at", `String now) :: fields)
+      | _ -> `Assoc [("task_plan", `String req.content); ("updated_at", `String now)]
+    in
+    write_plan room_config req.task_id json;
+    let context = planning_context_of_json req.task_id json in
+    let response = Pb.UpdatePlanResponse.make ~success:true ~context () in
+    grpc_ok (encode_update_plan_response response)
+
+(** AddNote handler - add a note to the plan.
+
+    @param room_config Room configuration
+    @param data Serialized AddNoteRequest
+    @return AddNoteResponse with updated context *)
+let add_note_handler (room_config: Room.config) (data: string) : (Grpc.Status.t * string option) Lwt.t =
+  match decode_add_note_request data with
+  | None -> grpc_invalid_argument "Invalid AddNoteRequest"
+  | Some req ->
+    let existing = read_plan room_config req.task_id |> Option.value ~default:(`Assoc []) in
+    let now = Types.now_iso () in
+    let json = match existing with
+      | `Assoc fields ->
+        let notes = match List.assoc_opt "notes" fields with
+          | Some (`List items) -> items @ [`String req.note]
+          | _ -> [`String req.note]
+        in
+        let updated = List.filter (fun (k, _) -> k <> "notes" && k <> "updated_at") fields in
+        `Assoc (("notes", `List notes) :: ("updated_at", `String now) :: updated)
+      | _ -> `Assoc [("notes", `List [`String req.note]); ("updated_at", `String now)]
+    in
+    write_plan room_config req.task_id json;
+    let context = planning_context_of_json req.task_id json in
+    let response = Pb.AddNoteResponse.make ~success:true ~context () in
+    grpc_ok (encode_add_note_response response)
+
+(** GetPlan handler - retrieve plan with markdown formatting.
+
+    @param room_config Room configuration
+    @param data Serialized GetPlanRequest
+    @return GetPlanResponse with context and markdown *)
+let get_plan_handler (room_config: Room.config) (data: string) : (Grpc.Status.t * string option) Lwt.t =
+  match decode_get_plan_request data with
+  | None -> grpc_invalid_argument "Invalid GetPlanRequest"
+  | Some task_id ->
+    match read_plan room_config task_id with
+    | None ->
+      let response = Pb.GetPlanResponse.make ~success:false ~markdown:"" () in
+      grpc_ok (encode_get_plan_response response)
+    | Some json ->
+      let context = planning_context_of_json task_id json in
+      (* Generate markdown for LLM consumption *)
+      let markdown = Buffer.create 256 in
+      Buffer.add_string markdown (Printf.sprintf "# Plan: %s\n\n" task_id);
+      Buffer.add_string markdown "## Task Plan\n";
+      Buffer.add_string markdown (context.task_plan ^ "\n\n");
+      Buffer.add_string markdown "## Notes\n";
+      List.iter (fun note ->
+        Buffer.add_string markdown (Printf.sprintf "- %s\n" note)
+      ) context.notes;
+      Buffer.add_string markdown "\n## Deliverable\n";
+      Buffer.add_string markdown (context.deliverable ^ "\n");
+      let response = Pb.GetPlanResponse.make
+        ~success:true
+        ~context
+        ~markdown:(Buffer.contents markdown)
+        ()
+      in
+      grpc_ok (encode_get_plan_response response)
+
+(** {1 Streaming Handlers} *)
+
+(** StreamMessages handler - server-side streaming of messages.
+
+    {b Note}: Server-side streaming requires special gRPC infrastructure
+    (Grpc_lwt.Server.stream_handler). This is a placeholder that converts
+    to a unary response with recent messages.
+
+    TODO: Implement proper streaming when grpc-lwt streaming API is available.
+
+    @param room_config Room configuration
+    @param data Serialized StreamMessagesRequest
+    @return GetMessagesResponse (fallback to unary) *)
+let stream_messages_handler (room_config: Room.config) (data: string) :
+    (Grpc.Status.t * string option) Lwt.t =
+  (* Fallback: return recent messages as unary response *)
+  match decode_stream_messages_request data with
+  | None -> grpc_invalid_argument "Invalid StreamMessagesRequest"
+  | Some req ->
+    let msgs_path = Filename.concat room_config.base_path "messages" in
+    let messages =
+      if Sys.file_exists msgs_path && Sys.is_directory msgs_path then begin
+        let files = Sys.readdir msgs_path |> Array.to_list |> List.sort compare in
+        List.filter_map (fun name ->
+          let path = Filename.concat msgs_path name in
+          try
+            let json = Yojson.Safe.from_file path in
+            match Types.message_of_yojson json with
+            | Ok msg when msg.seq > req.since_seq ->
+              Some (Pb.Message.make
+                ~id:(string_of_int msg.seq)
+                ~from:msg.from_agent
+                ~content:msg.content
+                ~timestamp:msg.timestamp
+                ~seq:msg.seq
+                ())
+            | _ -> None
+          with _ -> None
+        ) files
+      end else []
+    in
+    let response = Pb.GetMessagesResponse.make ~messages () in
+    grpc_ok (encode_get_messages_response response)
+
+(** {1 Service Registration} *)
+
+(** Create MASC gRPC service with all RPC handlers.
+
+    @param room_config Room configuration to pass to handlers
+    @return Configured gRPC service *)
+let create_service (room_config: Room.config) : Grpc_lwt.Server.Service.t =
+  let open Grpc_lwt.Server in
+  let service = Service.v () in
+
+  (* Register all unary RPC handlers
+     Note: Use method_name only (no leading slash) as per ocaml-grpc convention *)
+  let handlers = [
+    (* Status *)
+    (Pb.MASCService.GetStatus.method_name, get_status_handler room_config);
+    (* Agent lifecycle *)
+    (Pb.MASCService.Join.method_name, join_handler room_config);
+    (Pb.MASCService.Leave.method_name, leave_handler room_config);
+    (* Task management *)
+    (Pb.MASCService.AddTask.method_name, add_task_handler room_config);
+    (Pb.MASCService.ClaimTask.method_name, claim_task_handler room_config);
+    (Pb.MASCService.DoneTask.method_name, done_task_handler room_config);
+    (Pb.MASCService.CancelTask.method_name, cancel_task_handler room_config);
+    (* Messaging *)
+    (Pb.MASCService.Broadcast.method_name, broadcast_handler room_config);
+    (Pb.MASCService.GetMessages.method_name, get_messages_handler room_config);
+    (* Voting *)
+    (Pb.MASCService.CreateVote.method_name, create_vote_handler room_config);
+    (Pb.MASCService.CastVote.method_name, cast_vote_handler room_config);
+    (* Planning *)
+    (Pb.MASCService.InitPlan.method_name, init_plan_handler room_config);
+    (Pb.MASCService.UpdatePlan.method_name, update_plan_handler room_config);
+    (Pb.MASCService.AddNote.method_name, add_note_handler room_config);
+    (Pb.MASCService.GetPlan.method_name, get_plan_handler room_config);
+    (* Streaming (fallback to unary) *)
+    (Pb.MASCService.StreamMessages.method_name, stream_messages_handler room_config);
+  ] in
+
+  let service = List.fold_left (fun svc (name, handler) ->
+    Service.add_rpc ~name ~rpc:(Rpc.Unary handler) svc
+  ) service handlers in
+
+  service
+
+(** {1 Server} *)
+
+(** Start gRPC server (returns server instance for integration).
+
+    @param config Server configuration
+    @param room_config Room configuration
+    @return Lwt promise of configured server *)
+let start_server config room_config =
+  Printf.printf "🔌 Starting gRPC server on %s:%d\n%!" config.host config.port;
+
+  let service = create_service room_config in
+  let server = Grpc_lwt.Server.v () in
+  let server = Grpc_lwt.Server.add_service
+    ~name:"masc.v1.MASCService"
+    ~service:(Grpc_lwt.Server.Service.handle_request service)
+    server
+  in
+
+  Printf.printf "✅ gRPC service registered: /masc.v1.MASCService\n%!";
+  Printf.printf "   Core: GetStatus, Join, Leave\n%!";
+  Printf.printf "   Tasks: AddTask, ClaimTask, DoneTask, CancelTask\n%!";
+  Printf.printf "   Messaging: Broadcast, GetMessages, StreamMessages\n%!";
+  Printf.printf "   Voting: CreateVote, CastVote\n%!";
+  Printf.printf "   Planning: InitPlan, UpdatePlan, AddNote, GetPlan\n%!";
+
+  Lwt.return server
+
+(** Connection handler for H2 server.
+
+    @param service gRPC service instance
+    @return H2 connection handler *)
+let connection_handler server =
+  let request_handler _client_addr reqd =
+    let request = H2.Reqd.request reqd in
+    Printf.printf "📡 gRPC request: %s %s\n%!" (H2.Method.to_string request.meth) request.target;
+    Grpc_lwt.Server.handle_request server reqd
+  in
+  let error_handler _client_addr ?request:_ error respond =
+    let msg = match error with
+      | `Exn exn -> Printexc.to_string exn
+      | `Bad_request -> "Bad request"
+      | `Internal_server_error -> "Internal server error"
+    in
+    let headers = H2.Headers.of_list [
+      (":status", "500");
+      ("content-type", "application/grpc");
+    ] in
+    let response_body = respond headers in
+    H2.Body.Writer.write_string response_body msg;
+    H2.Body.Writer.close response_body
+  in
+  H2_lwt_unix.Server.create_connection_handler
+    ~request_handler
+    ~error_handler
+
+(** Validate TLS configuration.
+
+    @param config Server configuration
+    @return Error message if invalid, None if valid *)
+let validate_tls_config config =
+  if config.tls then begin
+    match config.cert_file, config.key_file with
+    | None, _ -> Some "TLS enabled but cert_file not provided"
+    | _, None -> Some "TLS enabled but key_file not provided"
+    | Some cert, Some key ->
+      if not (Sys.file_exists cert) then
+        Some (Printf.sprintf "Certificate file not found: %s" cert)
+      else if not (Sys.file_exists key) then
+        Some (Printf.sprintf "Key file not found: %s" key)
+      else
+        None
+  end else None
+
+(** Start gRPC server with TCP listener.
+
+    If TLS is enabled in config, validates certificate paths and warns
+    that TLS requires additional dependencies (tls-lwt).
+
+    @param config Server configuration
+    @param room_config Room configuration
+    @return Lwt promise that runs forever (accept loop) *)
+let start_server_with_listener config room_config =
+  let open Lwt.Syntax in
+
+  (* Validate TLS config if enabled *)
+  begin match validate_tls_config config with
+  | Some err ->
+    Printf.eprintf "❌ TLS configuration error: %s\n%!" err;
+    failwith err
+  | None -> ()
+  end;
+
+  (* TLS warning - requires tls-lwt dependency *)
+  if config.tls then begin
+    Printf.printf "⚠️  TLS enabled but not yet implemented (requires tls-lwt dependency)\n%!";
+    Printf.printf "   Falling back to plaintext connection\n%!";
+    Printf.printf "   To enable TLS, add 'tls-lwt' to dune dependencies\n%!"
+  end;
+
+  Printf.printf "🔌 Starting gRPC server on %s:%d%s\n%!"
+    config.host config.port (if config.tls then " (TLS requested)" else "");
+
+  let service = create_service room_config in
+  let server = Grpc_lwt.Server.v () in
+  let server = Grpc_lwt.Server.add_service
+    ~name:"masc.v1.MASCService"
+    ~service:(Grpc_lwt.Server.Service.handle_request service)
+    server
+  in
+  Printf.printf "✅ gRPC service created: /masc.v1.MASCService\n%!";
+  let handler = connection_handler server in
+
+  let listen_address = Unix.ADDR_INET (Unix.inet_addr_of_string config.host, config.port) in
+  let socket = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+  Lwt_unix.setsockopt socket Unix.SO_REUSEADDR true;
+
+  let* () = Lwt_unix.bind socket listen_address in
+  Lwt_unix.listen socket 128;
+
+  Printf.printf "✅ gRPC server listening on %s:%d\n%!" config.host config.port;
+
+  let rec accept_loop () =
+    let* (client_socket, client_addr) = Lwt_unix.accept socket in
+    Printf.printf "📡 gRPC client connected\n%!";
+    Lwt.async (fun () ->
+      Lwt.catch
+        (fun () -> handler client_addr client_socket)
+        (fun exn ->
+          Printf.eprintf "⚠️ gRPC connection error: %s\n%!" (Printexc.to_string exn);
+          Lwt.return_unit));
+    accept_loop ()
+  in
+
+  accept_loop ()
+
+(** {1 Client}
+
+    gRPC client for outbound inter-agent communication.
+    Uses H2 for HTTP/2 transport. *)
+module Client = struct
+  (** Client connection state. *)
+  type t = {
+    config: config;
+    mutable socket: Lwt_unix.file_descr option;
+    mutable connected: bool;
+  }
+
+  (** Connect to gRPC server.
+
+      @param config Server configuration
+      @return Connected client *)
+  let connect config =
+    let open Lwt.Syntax in
+    Printf.printf "🔌 gRPC client connecting to %s:%d\n%!" config.host config.port;
+
+    let socket = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+    let addr = Unix.ADDR_INET (Unix.inet_addr_of_string config.host, config.port) in
+
+    Lwt.catch
+      (fun () ->
+        let* () = Lwt_unix.connect socket addr in
+        Printf.printf "✅ gRPC client connected\n%!";
+        Lwt.return { config; socket = Some socket; connected = true })
+      (fun exn ->
+        Printf.eprintf "❌ gRPC client connection failed: %s\n%!" (Printexc.to_string exn);
+        Lwt.return { config; socket = None; connected = false })
+
+  (** Close client connection. *)
+  let close client =
+    let open Lwt.Syntax in
+    match client.socket with
+    | Some socket ->
+      client.connected <- false;
+      client.socket <- None;
+      let* () = Lwt_unix.close socket in
+      Printf.printf "🔌 gRPC client disconnected\n%!";
+      Lwt.return_unit
+    | None ->
+      Lwt.return_unit
+
+  (** Check if client is connected. *)
+  let is_connected client = client.connected
+
+  (** Call a unary RPC method.
+
+      {b Implementation Status}: Placeholder. Full H2/gRPC client requires:
+      - HTTP/2 connection establishment (H2_lwt_unix.Client)
+      - HPACK header compression
+      - gRPC message framing (length-prefixed)
+      - Proper content-type headers
+
+      For production use, consider:
+      - [grpc-lwt] client API when available
+      - HTTP/REST transport as simpler alternative
+
+      @param client Connected client
+      @param method_name RPC method name (e.g., "/masc.v1.MASCService/Join")
+      @param request Serialized protobuf request
+      @return Result with serialized response or error message *)
+  let call_unary client ~method_name ~request =
+    let _ = request in (* Suppress unused warning *)
+    if not client.connected then
+      Lwt.return (Error "Client not connected")
+    else match client.socket with
+    | None ->
+      Lwt.return (Error "Socket not available")
+    | Some _socket ->
+      Printf.printf "📡 gRPC call: %s (%d bytes)\n%!" method_name (String.length request);
+
+      (* gRPC requires HTTP/2 with specific framing:
+         1. Headers: :method=POST, :path=method_name, content-type=application/grpc
+         2. Data: length-prefixed protobuf (5 byte prefix: 1 byte compression + 4 byte length)
+         3. Trailers: grpc-status=0 for success *)
+
+      (* Placeholder: Return structured error with guidance *)
+      let msg = Printf.sprintf
+        "gRPC client not yet implemented. Use HTTP transport instead:\n\
+         curl -X POST http://%s:%d%s"
+        client.config.host client.config.port method_name
+      in
+      Lwt.return (Error msg)
+
+  (** Claim a task via gRPC.
+
+      @param client Connected client
+      @param agent_name Agent claiming the task
+      @param task_id Task to claim
+      @return Result with response or error *)
+  let claim_task client ~agent_name ~task_id =
+    let request = Pb.ClaimTaskRequest.make ~agent_name ~task_id () in
+    let encoded = encode_claim_task_request request in
+    call_unary client ~method_name:Pb.MASCService.ClaimTask.name ~request:encoded
+
+  (** Broadcast a message via gRPC.
+
+      @param client Connected client
+      @param agent_name Sender agent
+      @param message Message content
+      @return Result with response or error *)
+  let broadcast client ~agent_name ~message =
+    let request = Pb.BroadcastRequest.make ~agent_name ~message () in
+    let encoded = encode_broadcast_request request in
+    call_unary client ~method_name:Pb.MASCService.Broadcast.name ~request:encoded
+end

@@ -1,0 +1,26 @@
+(executable
+ (name level5_9_real_world)
+ (libraries masc_mcp alcotest str yojson unix)
+ (enabled_if false))
+
+; MASC Agent Example - requires llm_mcp.agent_core
+; Install: opam pin add llm_mcp git+ssh://git@github.com/jeong-sik/llm-mcp.git#main
+(executable
+ (name masc_agent_example)
+ (libraries masc_mcp llm_mcp.agent_core lwt lwt.unix yojson)
+ (preprocess (pps lwt_ppx))
+ (enabled_if false)
+ (optional))
+
+; Temporarily disabled - Webrtc module refactoring in progress
+; (executable
+;  (name turn_relay_example)
+;  (libraries masc_mcp eio eio_main eio_posix))
+
+; (executable
+;  (name turn_tls_example)
+;  (libraries masc_mcp eio eio_main eio_posix))
+
+; (executable
+;  (name turn_relay_data_example)
+;  (libraries masc_mcp eio eio_main eio_posix unix))

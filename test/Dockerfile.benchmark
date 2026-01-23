@@ -1,0 +1,98 @@
+# MASC UDP Benchmark - Linux Environment
+# Tests sendmmsg/recvmmsg and io_uring performance
+#
+# Build:
+#   docker build -f test/Dockerfile.benchmark -t masc-bench .
+#
+# Run:
+#   docker run --rm masc-bench
+
+FROM ocaml/opam:ubuntu-24.04-ocaml-5.2 AS builder
+
+# Install system dependencies
+USER root
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libev-dev \
+    libffi-dev \
+    libgmp-dev \
+    libssl-dev \
+    m4 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Switch to opam user
+USER opam
+WORKDIR /home/opam
+
+# Update opam and install dependencies
+RUN opam update && opam install -y \
+    dune \
+    eio \
+    eio_main \
+    eio_posix \
+    yojson \
+    cstruct \
+    mirage-crypto \
+    mirage-crypto-rng \
+    mirage-crypto-rng-eio \
+    cohttp \
+    lwt \
+    lwt_eio \
+    alcotest \
+    ocplib-endian \
+    ipaddr \
+    fmt \
+    logs
+
+# Copy project files
+COPY --chown=opam:opam . /home/opam/masc-mcp/
+
+WORKDIR /home/opam/masc-mcp
+
+# Build benchmarks
+RUN eval $(opam env) && dune build ./test/bench_sctp_batch.exe ./test/bench_sctp_transport.exe ./test/bench_burst_send.exe
+
+# Create run script
+RUN echo '#!/bin/bash' > /home/opam/run_benchmarks.sh && \
+    echo 'set -e' >> /home/opam/run_benchmarks.sh && \
+    echo 'cd /home/opam/masc-mcp' >> /home/opam/run_benchmarks.sh && \
+    echo 'eval $(opam env)' >> /home/opam/run_benchmarks.sh && \
+    echo '' >> /home/opam/run_benchmarks.sh && \
+    echo 'echo "===== MASC UDP Benchmarks on Linux ======"' >> /home/opam/run_benchmarks.sh && \
+    echo 'echo "Platform: $(uname -a)"' >> /home/opam/run_benchmarks.sh && \
+    echo 'echo ""' >> /home/opam/run_benchmarks.sh && \
+    echo '' >> /home/opam/run_benchmarks.sh && \
+    echo 'echo "=== Test 1: Per-Packet ACK (baseline) ===" ' >> /home/opam/run_benchmarks.sh && \
+    echo 'dune exec -- ./test/bench_sctp_transport.exe' >> /home/opam/run_benchmarks.sh && \
+    echo '' >> /home/opam/run_benchmarks.sh && \
+    echo 'echo "=== Test 2: Batch ACK (optimized) ===" ' >> /home/opam/run_benchmarks.sh && \
+    echo 'dune exec -- ./test/bench_sctp_batch.exe' >> /home/opam/run_benchmarks.sh && \
+    echo '' >> /home/opam/run_benchmarks.sh && \
+    echo 'echo "=== Test 3: Burst Send (ceiling) ===" ' >> /home/opam/run_benchmarks.sh && \
+    echo 'dune exec -- ./test/bench_burst_send.exe' >> /home/opam/run_benchmarks.sh && \
+    echo '' >> /home/opam/run_benchmarks.sh && \
+    echo 'echo "===== Benchmarks Complete ======"' >> /home/opam/run_benchmarks.sh && \
+    chmod +x /home/opam/run_benchmarks.sh
+
+# Runtime stage
+FROM ocaml/opam:ubuntu-24.04-ocaml-5.2
+
+USER root
+RUN apt-get update && apt-get install -y \
+    libev4 \
+    libffi8 \
+    libgmp10 \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+USER opam
+WORKDIR /home/opam
+
+# Copy opam installation
+COPY --from=builder /home/opam/.opam /home/opam/.opam
+
+# Copy project and run script
+COPY --from=builder /home/opam/masc-mcp /home/opam/masc-mcp
+COPY --from=builder /home/opam/run_benchmarks.sh /home/opam/run_benchmarks.sh
+
+CMD ["/home/opam/run_benchmarks.sh"]

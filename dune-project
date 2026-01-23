@@ -1,0 +1,63 @@
+(lang dune 3.13)
+
+(name masc_mcp)
+(version 2.2.3)
+
+(generate_opam_files true)
+
+(source
+ (github jeong-sik/masc-mcp))
+
+(authors "Jeongsik Yun")
+
+(maintainers "Jeongsik Yun")
+
+(license MIT)
+
+(documentation https://github.com/jeong-sik/masc-mcp)
+
+(package
+ (name masc_mcp)
+ (synopsis "Multi-Agent Streaming Coordination MCP Server in OCaml")
+ (description "MASC Protocol: File-based coordination for Claude, Gemini, and Codex agents")
+ (depends
+  (ocaml (>= 5.1))
+  (dune (>= 3.13))
+  ; External dependencies (opam pin)
+  (mcp_protocol (>= 0.1.0))
+  (ocaml-webrtc (>= 0.1.0))
+  (compact-protocol (>= 0.1.0))
+  ; Standard dependencies
+  (yojson (>= 2.0))
+  (graphql (>= 0.14.0))
+  (graphql_parser (>= 0.14.0))
+  (cmdliner (>= 1.1))
+  (cohttp (>= 5.0))
+  (cohttp-eio (>= 6.0))
+  (ppx_deriving_yojson (>= 3.6))
+  (ppx_deriving (>= 5.2))
+  (sqlite3 (>= 5.1))
+  (mirage-crypto (>= 1.0))
+  (mirage-crypto-rng (>= 1.0))
+  (ctypes (>= 0.20))
+  (ctypes-foreign (>= 0.20))
+  (integers (>= 0.7))
+  (zstd (>= 0.4))
+  (httpun-ws (>= 0.2))
+  (httpun-ws-eio (>= 0.2))
+  (bigstringaf (>= 0.10))
+  (caqti (>= 2.1))
+  (caqti-eio (>= 2.1))
+  (caqti-driver-postgresql (>= 2.1))
+  (eio (>= 1.0))
+  (eio_main (>= 1.0))
+  (cstruct (>= 6.0))
+  (digestif (>= 1.1))
+  (ocaml-protoc-plugin (>= 4.0))
+  (pbrt (>= 3.0))
+  (pbrt_services (>= 3.0))
+  (h2 (>= 0.10))
+  (h2-eio (>= 0.10))
+  (alcotest (and :with-test (>= 1.6)))
+  (mtime (>= 2.0))
+  (uuidm (>= 0.9))))

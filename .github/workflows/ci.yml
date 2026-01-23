@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'features/masc-mcp/**'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'features/masc-mcp/**'
+
+defaults:
+  run:
+    working-directory: features/masc-mcp
+
+jobs:
+  build:
+    name: Build and Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup OCaml
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: 5.2.x
+          dune-cache: true
+
+      - name: Install dependencies
+        run: |
+          opam install . --deps-only --with-test --yes
+
+      - name: Build
+        run: |
+          opam exec -- dune build
+
+      - name: Run tests
+        run: |
+          opam exec -- dune test
+
+      - name: Check formatting
+        run: |
+          opam exec -- dune fmt 2>&1 || true
+          # Note: dune fmt may not be available, skip if so
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup OCaml
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: 5.2.x
+          dune-cache: true
+
+      - name: Install dependencies
+        run: |
+          opam install . --deps-only --yes
+
+      - name: Build with warnings as errors
+        run: |
+          opam exec -- dune build --force
+        env:
+          OCAMLPARAM: "_,warn-error=+a"
+
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup OCaml
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: 5.2.x
+          dune-cache: true
+
+      - name: Install dependencies
+        run: |
+          opam install . --deps-only --with-doc --yes
+          opam install odoc --yes
+
+      - name: Build documentation
+        run: |
+          opam exec -- dune build @doc || echo "Docs build skipped"

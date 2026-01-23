@@ -1,0 +1,37 @@
+# OCaml build artifacts
+_build/
+*.install
+*.merlin
+.merlin
+_opam/
+
+# Editor
+.vscode/
+*.swp
+*~
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# MASC runtime data (not part of source)
+.masc/
+.worktrees/
+
+# Database files
+*.db
+
+# Test artifacts
+*.log
+
+
+# Downloaded release binary
+masc-mcp-macos-arm64
+masc-mcp-linux-x64
+# Track the local release artifact
+!masc-mcp-macos-arm64
+
+# Downloaded release binary
+figma-mcp-macos-arm64
+figma-mcp-linux-x64

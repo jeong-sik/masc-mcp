@@ -1,0 +1,4 @@
+(executable
+ (name test_grpc_client)
+ (libraries masc_mcp lwt lwt.unix)
+ (preprocess (pps lwt_ppx)))

@@ -1,0 +1,37 @@
+;; Eio-native server with PostgresNative backend support (OCaml 5.x Effects)
+(executable
+ (name main_eio)
+ (modules main_eio)
+ (public_name masc-mcp)
+ (package masc_mcp)
+ (libraries masc_mcp cmdliner eio eio_main httpun-eio gluten-eio caqti-eio))
+
+(executable
+ (name masc_cost)
+ (modules masc_cost)
+ (public_name masc-cost)
+ (package masc_mcp)
+ (libraries unix yojson))
+
+;; WebRTC selftest disabled (legacy DataChannel removed)
+;; (executable
+;;  (name selftest_webrtc)
+;;  (modules selftest_webrtc)
+;;  (libraries masc_mcp yojson))
+
+;; gRPC-Eio server with native gzip compression (OCaml 5.x Effects)
+;; Runs on port 9936, parallel to main server (8935/9935)
+;; NOTE: Disabled - module files missing
+;; (executable
+;;  (name masc_grpc_eio)
+;;  (modules masc_grpc_eio)
+;;  (public_name masc-grpc-eio)
+;;  (package masc_mcp)
+;;  (libraries masc_mcp grpc-core grpc-eio eio eio_main))
+
+;; Simple h2-eio test server for debugging
+;; NOTE: Disabled - module files missing
+;; (executable
+;;  (name test_h2_simple)
+;;  (modules test_h2_simple)
+;;  (libraries h2 h2-eio eio eio_main))

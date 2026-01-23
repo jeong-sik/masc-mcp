@@ -1,0 +1,123 @@
+; ============================================================
+; Test Environment Configuration
+; Force filesystem backend to avoid external DB connection timeouts
+; ============================================================
+(env
+ (_
+  (env-vars
+   (MASC_STORAGE_TYPE filesystem))))
+
+; ============================================================
+; Pure synchronous tests
+; ============================================================
+(tests
+ (names test_room test_types test_checkpoint test_auth test_http_negotiation
+        test_sse test_encryption test_backend test_cancellation test_graphql_api
+        test_subscriptions test_session test_progress test_mitosis test_spawn
+        test_validation test_response test_voice_stream test_sctp
+        test_datachannel_rfc test_dtls_crypto test_dashboard
+        test_multi_room test_worktree_detection)
+ (modules test_room test_types test_checkpoint test_auth test_http_negotiation
+          test_sse test_encryption test_backend test_cancellation test_graphql_api
+          test_subscriptions test_session test_progress test_mitosis test_spawn
+          test_validation test_response test_voice_stream test_sctp
+          test_datachannel_rfc test_dtls_crypto test_dashboard
+          test_multi_room test_worktree_detection)
+ (libraries masc_mcp mcp_protocol alcotest str yojson mirage-crypto
+            mirage-crypto-rng cohttp cstruct))
+
+; ============================================================
+; Eio module tests (Pure sync - Cache_eio, Metrics_store_eio, Hebbian_eio)
+; ============================================================
+(test
+ (name test_cache_eio)
+ (modules test_cache_eio)
+ (libraries masc_mcp alcotest str yojson))
+
+(test
+ (name test_metrics_store_eio)
+ (modules test_metrics_store_eio)
+ (libraries masc_mcp alcotest str yojson))
+
+(test
+ (name test_hebbian_eio)
+ (modules test_hebbian_eio)
+ (libraries masc_mcp alcotest str yojson))
+
+(test
+ (name test_planning_eio)
+ (modules test_planning_eio)
+ (libraries masc_mcp alcotest str yojson))
+
+; ============================================================
+; Eio-native working tests (Mcp_server_eio, Session_eio)
+; ============================================================
+(test
+ (name test_mcp_server_eio)
+ (modules test_mcp_server_eio)
+ (libraries masc_mcp alcotest eio eio_main yojson))
+
+; DataChannel Eio test (DCEP + SCTP integration)
+(test
+ (name test_datachannel_eio)
+ (modules test_datachannel_eio)
+ (libraries masc_mcp alcotest eio eio_main yojson))
+
+; TODO: These tests need to be created
+; - test_dtls_eio
+; - test_sctp_eio
+; - test_webrtc_stack_eio
+
+; ============================================================
+; Eio-native tests (OCaml 5.x concurrency)
+; ============================================================
+
+; Backend_eio test (Eio-native storage backend)
+(test
+ (name test_backend_eio)
+ (modules test_backend_eio)
+ (libraries masc_mcp alcotest eio eio_main fmt yojson))
+
+; Session locking test (Eio concurrency)
+(test
+ (name test_session_locking)
+ (modules test_session_locking)
+ (libraries masc_mcp alcotest eio eio_main yojson))
+
+; Room_eio test (Eio-native room operations)
+(test
+ (name test_room_eio)
+ (modules test_room_eio)
+ (libraries masc_mcp alcotest eio eio_main fmt yojson))
+
+; Http_server_eio test (Compact Protocol v4 compression)
+(test
+ (name test_http_server_eio)
+ (modules test_http_server_eio)
+ (libraries masc_mcp alcotest eio eio_main httpun zstd yojson))
+
+; Compression tests (Compact Protocol v4 - Backend_eio, DataChannel)
+(test
+ (name test_compression)
+ (modules test_compression)
+ (libraries masc_mcp alcotest zstd))
+
+; PostgreSQL Pub/Sub LISTEN/NOTIFY test
+(test
+ (name test_pubsub_postgres)
+ (modules test_pubsub_postgres)
+ (libraries masc_mcp alcotest))
+
+; ============================================================
+; Disabled: Lwt-based tests (require cohttp-lwt-unix, ppx_lwt)
+; These modules are not currently in masc_mcp library.
+; ============================================================
+; (test
+;  (name test_voice_bridge)
+;  (modules test_voice_bridge)
+;  (libraries masc_mcp alcotest lwt lwt.unix cohttp-lwt-unix yojson))
+;
+; (test
+;  (name test_webrtc_datachannel)
+;  (modules test_webrtc_datachannel)
+;  (libraries masc_mcp alcotest lwt lwt.unix))

@@ -4,9 +4,6 @@
     Legacy handlers have been removed.
 *)
 
-(* Compact Protocol v1.3 - used for agent-to-agent communication *)
-module Compact = Compact_protocol.Compact
-
 (** Global state for Mitosis cell lifecycle *)
 let current_cell = ref (Mitosis.create_stem_cell ~generation:0)
 let stem_pool = ref (Mitosis.init_pool ~config:Mitosis.default_config)

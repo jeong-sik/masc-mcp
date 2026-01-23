@@ -120,8 +120,7 @@
    cohttp-eio
    ;; UUID generation (for mind_eio, noosphere_eio)
    uuidm
-   ;; Compact Protocol v5: unified DSL + compression
-   compact-protocol
+   ;; Zstd compression
    zstd
    )
  (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

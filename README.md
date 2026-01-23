@@ -1,11 +1,11 @@
 # MASC MCP
 
-[![Version](https://img.shields.io/badge/version-2.2.1-blue.svg)](https://github.com/jeong-sik/masc-mcp)
+[![Version](https://img.shields.io/badge/version-2.2.2-blue.svg)](https://github.com/jeong-sik/masc-mcp)
 [![OCaml](https://img.shields.io/badge/OCaml-5.x-orange.svg)](https://ocaml.org/)
 [![MCP](https://img.shields.io/badge/MCP-2025--11--25-blue.svg)](https://spec.modelcontextprotocol.io/)
-[![Status](https://img.shields.io/badge/status-Production%20Ready-green.svg)]()
+[![Status](https://img.shields.io/badge/status-Preview-lightgrey.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-385%20passed-green.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-local-green.svg)]()
 
 **M**ulti-**A**gent **S**treaming **C**oordination - MCP Server
 
@@ -69,12 +69,12 @@ MASC provides **Serena-style mode switching** to reduce token usage by enabling 
 
 ### Available Modes
 
-| Mode | Tools | Token Reduction | Use Case |
+| Mode | Tools | Token Reduction (est.) | Use Case |
 |------|-------|-----------------|----------|
 | `full` | 58 | - | All features |
-| `standard` | 28 | **52%** | Default: core + comm + worktree + health |
-| `minimal` | 18 | **69%** | Solo work: core + health only |
-| `solo` | 17 | **71%** | Single-agent: core + worktree |
+| `standard` | 28 | varies | Default: core + comm + worktree + health |
+| `minimal` | 18 | varies | Solo work: core + health only |
+| `solo` | 17 | varies | Single-agent: core + worktree |
 
 ### Quick Usage
 
@@ -132,7 +132,7 @@ dune build
 
 # Test
 dune test
-# 291+ tests passed
+# run locally for current results
 
 # Skip network-dependent tests (STUN/UDP bind)
 MASC_SKIP_NET_TESTS=1 dune test

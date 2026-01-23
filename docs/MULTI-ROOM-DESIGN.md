@@ -28,7 +28,7 @@
 │   │   ├── tasks/
 │   │   ├── messages.json
 │   │   └── locks/
-│   ├── kidsnote-dev/    # 커스텀 방
+│   ├── my-project-dev/    # 커스텀 방
 │   │   ├── agents/
 │   │   ├── tasks/
 │   │   └── ...
@@ -97,8 +97,8 @@ type config = {
       "created_at": "2025-01-10T12:00:00Z"
     },
     {
-      "id": "kidsnote-dev",
-      "name": "Kidsnote Development",
+      "id": "my-project-dev",
+      "name": "My Project Development",
       "agent_count": 0,
       "task_count": 3
     }
@@ -118,9 +118,9 @@ type config = {
 **Returns**:
 ```json
 {
-  "id": "kidsnote-dev",
-  "name": "Kidsnote Development",
-  "message": "✅ Room 'kidsnote-dev' created"
+  "id": "my-project-dev",
+  "name": "My Project Development",
+  "message": "✅ Room 'my-project-dev' created"
 }
 ```
 
@@ -140,9 +140,9 @@ type config = {
 ```json
 {
   "previous_room": "default",
-  "current_room": "kidsnote-dev",
+  "current_room": "my-project-dev",
   "nickname": "claude-swift-fox",
-  "message": "✅ Entered room 'kidsnote-dev' as claude-swift-fox"
+  "message": "✅ Entered room 'my-project-dev' as claude-swift-fox"
 }
 ```
 
@@ -209,10 +209,10 @@ let room_path config room_id =
 │  📁 Rooms (3)                                       │
 │                                                     │
 │  ● default        [2 agents, 5 tasks] ← current    │
-│  ○ kidsnote-dev   [0 agents, 3 tasks]              │
+│  ○ my-project-dev   [0 agents, 3 tasks]              │
 │  ○ personal       [1 agent,  0 tasks]              │
 │                                                     │
-│  > masc_room_enter kidsnote-dev                    │
+│  > masc_room_enter my-project-dev                    │
 └─────────────────────────────────────────────────────┘
 ```
 

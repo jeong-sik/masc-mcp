@@ -2633,7 +2633,7 @@ of their context limits and gracefully hand over work to successors.|};
       ("properties", `Assoc [
         ("name", `Assoc [
           ("type", `String "string");
-          ("description", `String "Room display name (e.g., 'Kidsnote Dev', 'Personal Projects')");
+          ("description", `String "Room display name (e.g., 'My Project Dev', 'Personal Projects')");
         ]);
         ("description", `Assoc [
           ("type", `String "string");
@@ -2652,7 +2652,7 @@ of their context limits and gracefully hand over work to successors.|};
       ("properties", `Assoc [
         ("room_id", `Assoc [
           ("type", `String "string");
-          ("description", `String "Room ID to enter (e.g., 'kidsnote-dev', 'default')");
+          ("description", `String "Room ID to enter (e.g., 'my-project-dev', 'default')");
         ]);
         ("agent_type", `Assoc [
           ("type", `String "string");

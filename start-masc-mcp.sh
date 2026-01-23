@@ -14,7 +14,7 @@ fi
 
 # Room/namespace: derive from ME_ROOT directory name if not set
 # e.g., ME_ROOT=/Users/dancer/me → cluster "me"
-# e.g., ME_ROOT=/Users/dancer/workspace/kidsnote → cluster "kidsnote"
+# e.g., ME_ROOT=/Users/dancer/workspace/my-project → cluster "my-project"
 if [ -z "$MASC_CLUSTER_NAME" ] && [ -n "$ME_ROOT" ]; then
     export MASC_CLUSTER_NAME="$(basename "$ME_ROOT")"
 fi

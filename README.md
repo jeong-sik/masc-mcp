@@ -189,7 +189,7 @@ export MASC_REDIS_URL=redis://...
 
 When `MASC_CLUSTER_NAME` is not set, it defaults to `basename($ME_ROOT)`:
 - `ME_ROOT=/Users/alice/me` → cluster `"me"`
-- `ME_ROOT=/Users/bob/workspace/kidsnote` → cluster `"kidsnote"`
+- `ME_ROOT=/Users/bob/workspace/my-project` → cluster `"my-project"`
 
 ### Storage Backend Configuration
 
@@ -225,7 +225,7 @@ export MASC_REDIS_URL="redis://[user:password@]host:port"
 ```bash
 # ~/.zshenv
 export MASC_STORAGE_TYPE=redis
-export MASC_REDIS_URL="redis://default:xxx@trolley.proxy.rlwy.net:24277"
+export MASC_REDIS_URL="redis://default:xxx@your-redis.example.com:6379"
 
 # Restart server
 ./start-masc-mcp.sh --http --port 8935

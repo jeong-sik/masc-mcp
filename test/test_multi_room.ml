@@ -69,12 +69,12 @@ let test_room_create () =
   Fun.protect ~finally:(fun () -> cleanup_test_room test_dir) (fun () ->
     let _ = Room.init config ~agent_name:None in
     (* 새 방 생성 *)
-    let result = Room.room_create config ~name:"Kidsnote Dev" ~description:(Some "Development room") in
+    let result = Room.room_create config ~name:"My Project Dev" ~description:(Some "Development room") in
     match result with
     | `Assoc fields ->
         (match List.assoc_opt "id" fields with
         | Some (`String id) ->
-            check bool "id is slugified" true (id = "kidsnote-dev")
+            check bool "id is slugified" true (id = "my-project-dev")
         | _ -> fail "Expected id field");
         (match List.assoc_opt "error" fields with
         | Some _ -> fail "Unexpected error"

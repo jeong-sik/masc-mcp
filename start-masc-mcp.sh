@@ -13,8 +13,8 @@ fi
 # Storage backends are opt-in. Use MASC_STORAGE_TYPE + MASC_REDIS_URL/MASC_POSTGRES_URL explicitly.
 
 # Room/namespace: derive from ME_ROOT directory name if not set
-# e.g., ME_ROOT=/Users/dancer/me → cluster "me"
-# e.g., ME_ROOT=/Users/dancer/workspace/my-project → cluster "my-project"
+# e.g., ME_ROOT=/Users/alice/me → cluster "me"
+# e.g., ME_ROOT=/Users/alice/workspace/my-project → cluster "my-project"
 if [ -z "$MASC_CLUSTER_NAME" ] && [ -n "$ME_ROOT" ]; then
     export MASC_CLUSTER_NAME="$(basename "$ME_ROOT")"
 fi

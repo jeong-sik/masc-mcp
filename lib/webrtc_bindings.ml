@@ -105,7 +105,7 @@ type message_callback = int -> string -> int -> unit ptr -> unit
 (** {1 Library loading} *)
 
 let lib_path =
-  let home = Sys.getenv_opt "HOME" |> Option.value ~default:"/Users/dancer" in
+  let home = Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp" in
   home ^ "/local/lib/libdatachannel.dylib"
 
 let lib =

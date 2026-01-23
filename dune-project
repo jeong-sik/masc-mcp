@@ -8,9 +8,9 @@
 (source
  (github jeong-sik/masc-mcp))
 
-(authors "Jeongsik Yun")
+(authors "MASC Contributors")
 
-(maintainers "Jeongsik Yun")
+(maintainers "MASC Contributors")
 
 (license MIT)
 

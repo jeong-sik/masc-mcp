@@ -124,6 +124,10 @@ See [docs/MODE-SYSTEM.md](docs/MODE-SYSTEM.md) for detailed documentation.
 git clone https://github.com/jeong-sik/masc-mcp.git
 cd masc-mcp
 
+# Pin external dependencies (not on opam)
+opam pin add mcp_protocol https://github.com/jeong-sik/mcp-protocol-sdk.git -y
+opam pin add ocaml-webrtc https://github.com/jeong-sik/ocaml-webrtc.git -y
+
 # Install dependencies
 opam install . --deps-only
 

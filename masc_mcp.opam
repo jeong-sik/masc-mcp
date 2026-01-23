@@ -4,8 +4,8 @@ version: "2.2.2"
 synopsis: "Multi-Agent Streaming Coordination MCP Server in OCaml"
 description:
   "MASC Protocol: File-based coordination for Claude, Gemini, and Codex agents"
-maintainer: ["Jeongsik Yun"]
-authors: ["Jeongsik Yun"]
+maintainer: ["MASC Contributors"]
+authors: ["MASC Contributors"]
 license: "MIT"
 homepage: "https://github.com/jeong-sik/masc-mcp"
 doc: "https://github.com/jeong-sik/masc-mcp"

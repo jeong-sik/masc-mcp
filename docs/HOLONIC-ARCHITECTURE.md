@@ -1,7 +1,7 @@
 # MASC Holonic Architecture
 
 **Date**: 2026-01-09
-**Author**: 윤정식 (Seungji Yun)
+**Author**: MASC Contributors
 **Status**: Vision Document
 **Philosophy**: "From Minimal to Enterprise, From Single to Void"
 

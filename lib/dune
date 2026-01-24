@@ -8,6 +8,7 @@
    backend
    backend_eio
    cache_eio
+   env_config
    cancellation
    checkpoint_types
    compression_dict

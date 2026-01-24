@@ -23,11 +23,11 @@ type tempo_state = {
   reason: string;
 }
 
-(** Default configuration *)
+(** Default configuration - from Env_config *)
 let default_config = {
-  min_interval_s = 60.0;      (* 1 minute for urgent *)
-  max_interval_s = 600.0;     (* 10 minutes for idle *)
-  default_interval_s = 300.0; (* 5 minutes default *)
+  min_interval_s = Env_config.Tempo.min_interval_seconds;
+  max_interval_s = Env_config.Tempo.max_interval_seconds;
+  default_interval_s = Env_config.Tempo.default_interval_seconds;
   adaptive = true;
 }
 

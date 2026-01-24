@@ -411,7 +411,7 @@ module McpSessionStore = struct
   }
 
   let sessions : (string, mcp_session) Hashtbl.t = Hashtbl.create 64
-  let max_age = ref 3600.0  (* 1 hour default *)
+  let max_age = ref Env_config.Session.max_age_seconds
 
   (** Generate MCP session ID *)
   let generate_id () : string =

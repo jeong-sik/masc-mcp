@@ -1,7 +1,7 @@
 (** MASC Resilience - Single Source of Truth for Failure Handling *)
 
-(** Default zombie threshold in seconds (5 minutes) *)
-let default_zombie_threshold = 300.0
+(** Default zombie threshold in seconds - from Env_config *)
+let default_zombie_threshold = Env_config.Zombie.threshold_seconds
 
 (** Default inactivity warning threshold in seconds (2 minutes) *)
 let default_warning_threshold = 120.0

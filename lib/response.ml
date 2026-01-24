@@ -266,8 +266,8 @@ let handoff_verified ~similarity : t =
    Lock-Specific Responses
    ======================================== *)
 
-(** Default lock timeout in seconds (30 minutes) *)
-let default_lock_timeout_seconds = 1800.0
+(** Default lock timeout in seconds - from Env_config *)
+let default_lock_timeout_seconds = Env_config.Lock.timeout_seconds
 
 (** Lock acquired
     @param timeout_seconds Optional lock timeout, defaults to 30 minutes *)

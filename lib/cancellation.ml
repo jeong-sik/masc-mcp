@@ -163,7 +163,7 @@ let handle_cancellation_tool (arguments : Yojson.Safe.t) : (bool * string) =
     (true, Yojson.Safe.pretty_to_string json)
 
   | Some "cleanup" ->
-    let removed = TokenStore.cleanup ~max_age:3600.0 in
+    let removed = TokenStore.cleanup ~max_age:Env_config.Cancellation.token_max_age_seconds in
     (true, Printf.sprintf "Cleaned up %d old tokens" removed)
 
   | Some other -> (false, Printf.sprintf "Unknown action: %s" other)

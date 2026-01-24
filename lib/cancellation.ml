@@ -75,6 +75,46 @@ module TokenStore = struct
       List.iter (Hashtbl.remove tokens) old_tokens;
       List.length old_tokens
     )
+
+  (** {2 ID-based convenience functions for testing} *)
+
+  (** Create token with explicit ID (for testing/stress tests) *)
+  let create_with_id (id : string) : unit =
+    with_lock (fun () ->
+      if not (Hashtbl.mem tokens id) then begin
+        let token = {
+          id;
+          cancelled = false;
+          reason = None;
+          callbacks = [];
+          created_at = Unix.gettimeofday ();
+        } in
+        Hashtbl.add tokens id token
+      end
+    )
+
+  (** Check if token is cancelled by ID *)
+  let is_cancelled (id : string) : bool =
+    with_lock (fun () ->
+      match Hashtbl.find_opt tokens id with
+      | Some t -> t.cancelled
+      | None -> false
+    )
+
+  (** Cancel token by ID *)
+  let cancel (id : string) : unit =
+    with_lock (fun () ->
+      match Hashtbl.find_opt tokens id with
+      | Some t ->
+        if not t.cancelled then begin
+          t.cancelled <- true;
+          List.iter (fun cb ->
+            try cb () with exn ->
+              Log.Cancel.error "Callback failed: %s" (Printexc.to_string exn)
+          ) t.callbacks
+        end
+      | None -> ()
+    )
 end
 
 (** Check if token is cancelled *)

@@ -6,6 +6,8 @@ module Nickname = Nickname
 module Response = Response
 module Validation = Validation
 module Config = Config
+module Env_config = Env_config
+module Resilience = Resilience
 module Mode = Mode
 module Notify = Notify
 

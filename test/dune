@@ -109,6 +109,15 @@
  (libraries masc_mcp alcotest))
 
 ; ============================================================
+; Concurrency stress tests (20+ agents)
+; Phase 4: MCP Unify project
+; ============================================================
+(test
+ (name test_concurrency_stress)
+ (modules test_concurrency_stress)
+ (libraries masc_mcp alcotest eio eio_main yojson))
+
+; ============================================================
 ; Disabled: Lwt-based tests (require cohttp-lwt-unix, ppx_lwt)
 ; These modules are not currently in masc_mcp library.
 ; ============================================================

@@ -51,8 +51,8 @@ echo ""
 echo "─────────────────────────────────"
 
 # Lock operations
-measure "masc_lock" "masc_lock" "{\"file\":\"bench_test.txt\"}"
-measure "masc_unlock" "masc_unlock" "{\"file\":\"bench_test.txt\"}"
+measure "masc_lock" "masc_lock" "{\"agent_name\":\"bench\",\"file\":\"bench_test.txt\"}"
+measure "masc_unlock" "masc_unlock" "{\"agent_name\":\"bench\",\"file\":\"bench_test.txt\"}"
 
 echo ""
 echo "─────────────────────────────────"

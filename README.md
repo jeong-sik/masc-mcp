@@ -73,16 +73,22 @@ MASC provides **Serena-style mode switching** to reduce token usage by enabling 
 
 | Mode | Tools | Token Reduction | Use Case |
 |------|-------|-----------------|----------|
-| `full` | 58 | - | All features |
-| `standard` | 28 | **52%** | Default: core + comm + worktree + health |
-| `minimal` | 18 | **69%** | Solo work: core + health only |
-| `solo` | 17 | **71%** | Single-agent: core + worktree |
+| `full` | dynamic | - | All features |
+| `parallel` | dynamic | varies | Multi-agent heavy: comm + portal + discovery + voting + interrupt |
+| `standard` | dynamic | varies | Default: core + comm + worktree + health |
+| `minimal` | dynamic | varies | Solo work: core + health only |
+| `solo` | dynamic | varies | Single-agent: core + worktree |
+
+> Tool counts and token reduction are computed dynamically. Use `masc_get_config` to see the current enabled tool count.
 
 ### Quick Usage
 
 ```bash
 # Switch to minimal mode (fastest, least tokens)
 masc_switch_mode(mode: "minimal")
+
+# Switch to parallel mode (multi-agent heavy)
+masc_switch_mode(mode: "parallel")
 
 # Switch to full mode (all features)
 masc_switch_mode(mode: "full")
@@ -98,18 +104,18 @@ masc_get_config()
 
 | Category | Tools | Description |
 |----------|-------|-------------|
-| `core` | 12 | Task board, status, claim, done |
-| `comm` | 7 | Broadcast, messages, listen |
-| `portal` | 4 | Agent-to-agent direct communication |
-| `worktree` | 3 | Git worktree isolation |
-| `health` | 4 | Heartbeat, zombies, GC, agents |
-| `discovery` | 2 | Find agents by capability |
-| `voting` | 4 | Multi-agent consensus |
-| `interrupt` | 5 | Human-in-the-loop approvals |
-| `cost` | 2 | Token usage tracking |
-| `auth` | 7 | Token-based authentication |
-| `ratelimit` | 2 | Request throttling |
-| `encryption` | 4 | AES-256-GCM data protection |
+| `core` | dynamic | Task board, status, claim, done |
+| `comm` | dynamic | Broadcast, messages, lock/unlock, listen |
+| `portal` | dynamic | Agent-to-agent direct communication |
+| `worktree` | dynamic | Git worktree isolation |
+| `health` | dynamic | Heartbeat, zombies, GC, agents |
+| `discovery` | dynamic | Find agents by capability |
+| `voting` | dynamic | Multi-agent consensus |
+| `interrupt` | dynamic | Human-in-the-loop approvals |
+| `cost` | dynamic | Token usage tracking |
+| `auth` | dynamic | Token-based authentication |
+| `ratelimit` | dynamic | Request throttling |
+| `encryption` | dynamic | AES-256-GCM data protection |
 
 See [docs/MODE-SYSTEM.md](docs/MODE-SYSTEM.md) for detailed documentation.
 
@@ -488,9 +494,9 @@ masc_reject(task_id: "cleanup-job", reason: "Backup first")
 
 ---
 
-## MCP Tools (111)
+## MCP Tools (144)
 
-### Core (22)
+### Core
 | Tool | Description |
 |------|-------------|
 | `masc_init` | Initialize room |
@@ -502,7 +508,7 @@ masc_reject(task_id: "cleanup-job", reason: "Backup first")
 | `masc_portal_*` | Direct A2A communication |
 | `masc_worktree_*` | Git worktree management |
 
-### Checkpoint (5) - Human-in-the-loop
+### Checkpoint - Human-in-the-loop
 | Tool | Description |
 |------|-------------|
 | `masc_interrupt` | Pause for approval |
@@ -510,13 +516,13 @@ masc_reject(task_id: "cleanup-job", reason: "Backup first")
 | `masc_pending_interrupts` | List waiting |
 | `masc_branch` | Fork execution path |
 
-### Cost (2)
+### Cost
 | Tool | Description |
 |------|-------------|
 | `masc_cost_log` | Log token usage |
 | `masc_cost_report` | Generate report |
 
-### Auth (7) - Role-Based Access Control
+### Auth - Role-Based Access Control
 | Tool | Description |
 |------|-------------|
 | `masc_auth_enable` | Enable authentication (returns room secret) |
@@ -529,19 +535,19 @@ masc_reject(task_id: "cleanup-job", reason: "Backup first")
 
 **Roles**: `reader` (read-only) → `worker` (claim/lock/broadcast) → `admin` (full access)
 
-### Rate Limiting (2)
+### Rate Limiting
 | Tool | Description |
 |------|-------------|
 | `masc_rate_limit_status` | Check your rate limit status |
 | `masc_rate_limit_config` | View rate limit configuration |
 
-**Categories**: General (10/min), Broadcast (15/min), TaskOps (30/min), FileLock (20/min)
+**Categories**: General (10/min), Broadcast (15/min), TaskOps (30/min)
 
 **Role Multipliers**: Reader (0.5x), Worker (1.0x), Admin (2.0x)
 
 **Burst**: 5 extra requests per minute when over limit
 
-### Encryption (4) - Data Protection
+### Encryption - Data Protection
 | Tool | Description |
 |------|-------------|
 | `masc_encryption_status` | Check encryption status |

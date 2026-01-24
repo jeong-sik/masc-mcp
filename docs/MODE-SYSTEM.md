@@ -4,13 +4,13 @@
 
 ## Overview
 
-MASC MCP provides 58 tools across 12 categories. Most agents don't need all of them. The **Mode System** lets you enable only the categories you use, reducing token consumption by up to **71%**.
+MASC MCP provides 140+ tools across 12 categories. Most agents don't need all of them. The **Mode System** lets you enable only the categories you use, reducing token consumption by narrowing the enabled tool surface.
 
 ## Why Mode System?
 
 | Problem | Solution |
 |---------|----------|
-| Full tool list = ~49k tokens | Filter to ~15k tokens |
+| Full tool list is heavy | Filter to reduce token usage |
 | Single agent doesn't need voting | Use `solo` mode |
 | Quick task doesn't need encryption | Use `minimal` mode |
 | CI/CD automation | Use `standard` mode |
@@ -21,10 +21,11 @@ MASC MCP provides 58 tools across 12 categories. Most agents don't need all of t
 
 | Mode | Categories | Tools | Tokens (approx) |
 |------|------------|-------|-----------------|
-| **full** | All 12 | 58 | ~49k |
-| **standard** | core, comm, worktree, health | 28 | ~25k |
-| **minimal** | core, health | 18 | ~15k |
-| **solo** | core, worktree | 17 | ~14k |
+| **full** | All 12 | dynamic | varies |
+| **parallel** | core, comm, portal, worktree, health, discovery, voting, interrupt | dynamic | varies |
+| **standard** | core, comm, worktree, health | dynamic | varies |
+| **minimal** | core, health | dynamic | varies |
+| **solo** | core, worktree | dynamic | varies |
 
 ### Mode Selection Guide
 
@@ -37,7 +38,9 @@ MASC MCP provides 58 tools across 12 categories. Most agents don't need all of t
 │                        │                                    │
 │                        └───── Just tasks? ────── Yes ──► minimal
 │                                                             │
-│  Multiple Agents ──────┬───── Basic collab? ──── Yes ──► standard
+│  Multiple Agents ──────┬───── Heavy parallel? ─── Yes ──► parallel
+│                        │                                    │
+│                        ├───── Basic collab? ──── Yes ──► standard
 │                        │                                    │
 │                        └───── Full features? ─── Yes ──► full
 │                                                             │
@@ -56,12 +59,12 @@ masc_add_task, masc_claim, masc_done, masc_tasks, masc_archive_view,
 masc_claim_next, masc_update_priority
 ```
 
-### Communication (5 tools)
+### Communication (dynamic)
 
 Real-time messaging between agents.
 
 ```
-masc_broadcast, masc_messages, masc_listen, masc_who, masc_reset
+masc_broadcast, masc_messages, masc_lock, masc_unlock, masc_listen, masc_who, masc_reset
 ```
 
 ### Portal (4 tools)
@@ -182,13 +185,15 @@ masc_encryption_status, masc_encryption_enable, masc_encryption_disable, masc_ge
 ```json
 {
   "mode": "minimal",
-  "mode_description": "Core task management + health checks only (~15k tokens)",
+  "mode_description": "Core task management + health checks only",
   "enabled_categories": ["core", "health"],
   "disabled_categories": ["comm", "portal", "worktree", "discovery", "voting", "interrupt", "cost", "auth", "ratelimit", "encryption"],
-  "enabled_tool_count": 16,
+  "enabled_tool_count": 103,
   "available_modes": [...]
 }
 ```
+
+> Tool counts are computed at runtime and will change as tools evolve. Use `masc_get_config` for the current count.
 
 ## Configuration Persistence
 
@@ -214,8 +219,11 @@ masc_switch_mode(mode: "minimal")
 # Need worktree? Switch to solo
 masc_switch_mode(mode: "solo")
 
-# Need multi-agent? Switch to standard
+# Need multi-agent? Switch to standard or parallel
 masc_switch_mode(mode: "standard")
+
+# Heavy parallel work? Switch to parallel
+masc_switch_mode(mode: "parallel")
 ```
 
 ### 2. Use Custom for CI/CD

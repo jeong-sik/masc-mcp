@@ -5,8 +5,8 @@
 **Version**: 3.0.0 (Phase 13 Complete)
 **Last Updated**: 2026-01-09
 **Status**: Production Ready
-**Tests**: 291+ passed (337 test functions across 23 test files)
-**Modules**: 44 library modules (~24,000 lines of OCaml)
+**Tests**: 291+ (see latest run for exact count)
+**Modules**: 75 library modules (~39,000 lines of OCaml in `lib/`)
 
 ---
 
@@ -30,7 +30,7 @@ MASC-MCP는 MCP(Model Context Protocol) 2025-11-25 스펙을 완전 구현한 OC
 
 1. [What's New in v3.0](#whats-new-in-v30)
 2. [Architecture](#architecture)
-3. [MCP Tools Reference (111 tools)](#mcp-tools-reference)
+3. [MCP Tools Reference (144 tools)](#mcp-tools-reference)
 4. [MCP 2025-11-25 Compliance](#mcp-2025-11-25-compliance)
 5. [A2A Integration](#a2a-integration)
 6. [Feature Matrix](#feature-matrix)
@@ -57,10 +57,10 @@ MASC-MCP는 MCP(Model Context Protocol) 2025-11-25 스펙을 완전 구현한 OC
 
 | Metric | v2.1.0 (Phase 7) | v3.0.0 (Phase 13) | Change |
 |--------|------------------|-------------------|--------|
-| MCP Tools | 70+ | **111** | +58% |
-| Library Modules | 23 | **44** | +91% |
+| MCP Tools | 70+ | **144** | +105% |
+| Library Modules | 23 | **75** | +226% |
 | Tests | 234 | **291+** | +24% |
-| Lines of Code | ~12,000 | **~24,000** | +100% |
+| Lines of Code | ~12,000 | **~39,000** | +225% |
 
 ---
 
@@ -84,7 +84,7 @@ lib/
 │   ├── mcp_server.ml      # HTTP/SSE server (2,172 lines)
 │   ├── mcp_protocol.ml    # JSON-RPC 2.0
 │   ├── mcp_session.ml     # Legacy session
-│   ├── tools.ml           # 111 MCP tool definitions (2,188 lines)
+│   ├── tools.ml           # 144 MCP tool definitions (~2,793 lines)
 │   ├── sse.ml             # SSE with Event IDs
 │   └── log.ml             # Logging
 │
@@ -149,7 +149,7 @@ Client Request
    └──────┼──────┘
           ▼
 ┌─────────────────┐
-│   Tool Router   │ ← 111 MCP tools
+│   Tool Router   │ ← 144 MCP tools
 │    (tools.ml)   │
 └────────┬────────┘
          │
@@ -160,7 +160,7 @@ Client Request
    └──────┼──────┼──────┘
           ▼
 ┌─────────────────┐
-│    Backend      │ ← Storage (FS/Redis)
+│    Backend      │ ← Storage (FS/PostgreSQL)
 │   (backend.ml)  │
 └─────────────────┘
 ```
@@ -169,25 +169,28 @@ Client Request
 
 ## MCP Tools Reference
 
-### Overview: 111 Tools in 16 Categories
+### Overview: 144 Tools grouped by family
 
-| Category | Count | Tools |
-|----------|-------|-------|
-| Room Management | 9 | set_room, init, join, leave, status, pause, resume, pause_status, reset |
-| Agent Management | 5 | who, agents, heartbeat, cleanup_zombies, gc |
-| Task Operations | 7 | add_task, claim, claim_next, done, cancel_task, tasks, archive_view, update_priority |
-| Communication | 3 | broadcast, messages, listen |
-| Voting System | 4 | vote_create, vote_cast, vote_status, votes |
-| Portal (A2A) | 4 | portal_open, portal_send, portal_status, portal_close |
-| Worktree | 3 | worktree_create, worktree_remove, worktree_list |
-| Checkpoints | 4 | interrupt, approve, reject, branch, pending_interrupts |
-| Cost Tracking | 2 | cost_log, cost_report |
-| Auth & Security | 9 | auth_enable, auth_disable, auth_status, auth_create_token, auth_refresh, auth_revoke, auth_list, rate_limit_status, rate_limit_config |
-| Encryption | 4 | encryption_status, encryption_enable, encryption_disable, generate_key |
-| A2A Tools | 5 | a2a_discover, a2a_query_skill, a2a_delegate, a2a_subscribe, a2a_unsubscribe |
-| Planning | 11 | plan_init, plan_update, note_add, deliver, error_add, error_resolve, plan_get, plan_set_task, plan_get_task, plan_clear_task, agent_card |
-| **Cellular Agent** [NEW] | 22 | handover_*, run_*, cache_*, tempo_*, dashboard, mitosis_*, relay_* |
-| MCP Spec | 7 | session management, cancellation, subscriptions, progress, mode |
+| Family | Examples |
+|--------|----------|
+| Room & Cluster | set_room, room_create, room_enter, rooms_list, init, join, leave, status, pause/resume, reset |
+| Agent & Discovery | who, agents, heartbeat, agent_update, register_capabilities, find_by_capability, agent_fitness, select_agent |
+| Task Operations | add_task, batch_add_tasks, claim, claim_next, transition, done, release, cancel_task, tasks, archive_view, task_history |
+| Communication & Locks | broadcast, messages, listen, lock, unlock, progress |
+| Voting | vote_create, vote_cast, vote_status, votes |
+| Portal (A2A) | portal_open, portal_send, portal_status, portal_close |
+| Worktree | worktree_create, worktree_remove, worktree_list |
+| Checkpoints | interrupt, approve, reject, pending_interrupts, branch |
+| Planning & Delivery | plan_*, note_add, deliver, error_add, error_resolve |
+| Execution Memory (Runs) | run_init, run_plan, run_log, run_deliverable, run_get, run_list |
+| Cache | cache_set/get/list/delete/clear/stats |
+| Relay & Memento | relay_status, relay_checkpoint, relay_now, relay_smart_check, memento_mori, verify_handoff |
+| Mitosis | mitosis_check, mitosis_prepare, mitosis_divide, mitosis_record, mitosis_status, mitosis_pool, mitosis_all |
+| Tempo & Dashboard | tempo_get/set/adjust/reset, dashboard |
+| Swarm | swarm_init/join/leave/status/vote/propose/trails/deposit/evolve |
+| Security & Governance | auth_*, rate_limit_*, encryption_*, governance_set, audit_query/audit_stats |
+| A2A Tools | a2a_discover, a2a_query_skill, a2a_delegate, a2a_subscribe, a2a_unsubscribe |
+| MCP Spec Support | mcp_session, cancellation, subscription |
 
 ### Cellular Agent Tools Detail (New in v3.0)
 
@@ -199,6 +202,7 @@ Client Request
 | `masc_handover_claim` | Claim a handover |
 | `masc_handover_get` | Get DNA as markdown prompt |
 | `masc_handover_claim_and_spawn` | Claim + spawn successor in one step |
+| `masc_verify_handoff` | Verify handoff context integrity |
 
 #### Execution Memory (Run Tracking)
 | Tool | Description |
@@ -237,6 +241,21 @@ Client Request
 | `masc_mitosis_check` | Check if division needed |
 | `masc_mitosis_record` | Record division result |
 | `masc_mitosis_prepare` | Prepare for division |
+| `masc_mitosis_all` | Cluster-wide mitosis status |
+
+#### Relay & Memento
+| Tool | Description |
+|------|-------------|
+| `masc_relay_status` | Check context usage and relay readiness |
+| `masc_relay_checkpoint` | Save a relay checkpoint |
+| `masc_relay_now` | Trigger immediate relay to successor |
+| `masc_relay_smart_check` | Proactive relay check with task hints |
+| `masc_memento_mori` | Auto-manage lifecycle based on context pressure |
+
+#### Dashboard
+| Tool | Description |
+|------|-------------|
+| `masc_dashboard` | Terminal dashboard (agents/tasks/locks/messages) |
 
 #### Relay (Smart Checkpoint)
 | Tool | Description |
@@ -366,13 +385,13 @@ Endpoint: `GET /.well-known/agent-card.json`
 | **Cellular Agent Pattern** | DNA handover, mitosis | Agent continuity |
 | **Type Safety** | OCaml's type system | Fewer runtime errors |
 | **Production Ready** | 291+ tests | Battle-tested |
-| **111 Tools** | Comprehensive coverage | One-stop solution |
+| **144 Tools** | Comprehensive coverage | One-stop solution |
 
 ### Weaknesses
 
 | Weakness | Mitigation | Priority |
 |----------|------------|----------|
-| **room.ml complexity** (1,744 lines) | Split into submodules | P2 |
+| **room.ml complexity** (2,150 lines) | Split into submodules | P2 |
 | **OCaml ecosystem** | Smaller than Python/JS | Trade-off for performance |
 | **Learning curve** | Documentation, examples | Ongoing |
 

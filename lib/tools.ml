@@ -417,6 +417,44 @@ let all_schemas : tool_schema list = [
   };
 
   {
+    name = "masc_lock";
+    description = "Acquire a lock on a file/resource to prevent concurrent edits. Prefer worktrees when possible.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Your agent name");
+        ]);
+        ("file", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Relative file path or resource key to lock");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"; `String "file"]);
+    ];
+  };
+
+  {
+    name = "masc_unlock";
+    description = "Release a previously acquired file/resource lock.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Your agent name");
+        ]);
+        ("file", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Relative file path or resource key to unlock");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"; `String "file"]);
+    ];
+  };
+
+  {
     name = "masc_listen";
     description = "Listen for incoming messages (blocking). Returns after message arrives or timeout.";
     input_schema = `Assoc [
@@ -1346,14 +1384,14 @@ let all_schemas : tool_schema list = [
 
   {
     name = "masc_switch_mode";
-    description = "Switch MASC mode to reduce token usage. Available modes: 'minimal' (core+health, ~15k tokens), 'standard' (core+comm+worktree+health, ~25k tokens), 'full' (all features, ~49k tokens), 'solo' (single-agent: core+worktree). Use 'custom' with categories parameter for fine-grained control.";
+    description = "Switch MASC mode to reduce token usage. Available modes: 'minimal' (core+health), 'standard' (core+comm+worktree+health), 'parallel' (multi-agent heavy: comm+portal+discovery+voting+interrupt), 'full' (all features), 'solo' (single-agent: core+worktree). Use 'custom' with categories parameter for fine-grained control.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("mode", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "minimal"; `String "standard"; `String "full"; `String "solo"; `String "custom"]);
-          ("description", `String "Mode preset: minimal, standard, full, solo, or custom");
+          ("enum", `List [`String "minimal"; `String "standard"; `String "parallel"; `String "full"; `String "solo"; `String "custom"]);
+          ("description", `String "Mode preset: minimal, standard, parallel, full, solo, or custom");
         ]);
         ("categories", `Assoc [
           ("type", `String "array");

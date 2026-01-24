@@ -111,22 +111,13 @@ let get_config_summary room_path =
   let disabled = List.filter (fun c -> not (List.mem c config.enabled_categories)) all_categories in
   let disabled_names = List.map category_to_string disabled in
   let tool_count =
-    (* Rough estimate of tools per category *)
-    let count_for cat = match cat with
-      | Core -> 12
-      | Comm -> 7
-      | Portal -> 4
-      | Worktree -> 3
-      | Health -> 4
-      | Discovery -> 2
-      | Voting -> 4
-      | Interrupt -> 5
-      | Cost -> 2
-      | Auth -> 7
-      | RateLimit -> 2
-      | Encryption -> 4
+    let enabled =
+      List.filter
+        (fun (schema : Types.tool_schema) ->
+          Mode.is_tool_enabled config.enabled_categories schema.name)
+        Tools.all_schemas
     in
-    List.fold_left (fun acc c -> acc + count_for c) 0 config.enabled_categories
+    List.length enabled
   in
   `Assoc [
     ("mode", `String (mode_to_string config.mode));
@@ -137,6 +128,7 @@ let get_config_summary room_path =
     ("available_modes", `List [
       `Assoc [("name", `String "minimal"); ("description", `String (mode_description Minimal))];
       `Assoc [("name", `String "standard"); ("description", `String (mode_description Standard))];
+      `Assoc [("name", `String "parallel"); ("description", `String (mode_description Parallel))];
       `Assoc [("name", `String "full"); ("description", `String (mode_description Full))];
       `Assoc [("name", `String "solo"); ("description", `String (mode_description Solo))];
     ]);

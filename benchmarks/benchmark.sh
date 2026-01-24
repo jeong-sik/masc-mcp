@@ -106,10 +106,10 @@ bench_lock_contention() {
 
     for i in $(seq 1 $ITERATIONS); do
         # Lock
-        local lock_time=$(call_masc "masc_lock" "{\"file\":\"$test_file\"}")
+        local lock_time=$(call_masc "masc_lock" "{\"agent_name\":\"bench\",\"file\":\"$test_file\"}")
 
         # Unlock
-        local unlock_time=$(call_masc "masc_unlock" "{\"file\":\"$test_file\"}")
+        local unlock_time=$(call_masc "masc_unlock" "{\"agent_name\":\"bench\",\"file\":\"$test_file\"}")
 
         results+=("$lock_time,$unlock_time")
         log "  Iteration $i: lock=${lock_time}ms, unlock=${unlock_time}ms"

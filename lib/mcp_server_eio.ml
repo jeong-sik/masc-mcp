@@ -964,6 +964,79 @@ let execute_tool_eio ~sw ~clock state ~name ~arguments =
       let limit = get_int "limit" 10 in
       (true, Room.get_messages config ~since_seq ~limit)
 
+  | "masc_lock" ->
+      let file = get_string "file" "" in
+      let resource =
+        if file <> "" then file else get_string "resource" ""
+      in
+      let result =
+        let ( let* ) = Result.bind in
+        let lock_owner_of_value value =
+          try
+            let open Yojson.Safe.Util in
+            match Yojson.Safe.from_string value |> member "owner" with
+            | `String s -> Some s
+            | _ -> None
+          with _ -> None
+        in
+        let* resource = Room_utils.validate_file_path_r resource in
+        let ttl_seconds = config.lock_expiry_minutes * 60 in
+        match Room_utils.backend_acquire_lock config ~key:resource ~ttl_seconds ~owner:agent_name with
+        | Ok true ->
+            let now = Unix.gettimeofday () in
+            let payload = `Assoc [
+              ("resource", `String resource);
+              ("owner", `String agent_name);
+              ("acquired_at", `Float now);
+              ("expires_at", `Float (now +. float_of_int ttl_seconds));
+            ] in
+            Ok (Yojson.Safe.pretty_to_string payload)
+        | Ok false ->
+            let owner =
+              match Room_utils.backend_get config ~key:("locks:" ^ resource) with
+              | Ok (Some v) -> lock_owner_of_value v
+              | _ -> None
+            in
+            let by = Option.value owner ~default:"unknown" in
+            Error (Types.FileLocked { file = resource; by })
+        | Error msg ->
+            Error (Types.IoError (Backend.show_error msg))
+      in
+      result_to_response result
+
+  | "masc_unlock" ->
+      let file = get_string "file" "" in
+      let resource =
+        if file <> "" then file else get_string "resource" ""
+      in
+      let result =
+        let ( let* ) = Result.bind in
+        let lock_owner_of_value value =
+          try
+            let open Yojson.Safe.Util in
+            match Yojson.Safe.from_string value |> member "owner" with
+            | `String s -> Some s
+            | _ -> None
+          with _ -> None
+        in
+        let* resource = Room_utils.validate_file_path_r resource in
+        match Room_utils.backend_release_lock config ~key:resource ~owner:agent_name with
+        | Ok true ->
+            Ok (Printf.sprintf "🔓 Unlocked: %s" resource)
+        | Ok false ->
+            let owner =
+              match Room_utils.backend_get config ~key:("locks:" ^ resource) with
+              | Ok (Some v) -> lock_owner_of_value v
+              | _ -> None
+            in
+            (match owner with
+             | Some by -> Error (Types.FileLocked { file = resource; by })
+             | None -> Error (Types.FileNotLocked resource))
+        | Error msg ->
+            Error (Types.IoError (Backend.show_error msg))
+      in
+      result_to_response result
+
   | "masc_listen" ->
       let timeout = float_of_int (get_int "timeout" 300) in
       Log.Mcp.info "%s is now listening (timeout: %.0fs)..." agent_name timeout;
@@ -2295,7 +2368,7 @@ Expires: %s
               let _ = Config.switch_mode room_path mode in
               Ok (Yojson.Safe.pretty_to_string (Config.get_config_summary room_path))
           | None ->
-              Error "❌ Invalid mode. Valid: minimal, standard, full, solo, custom"
+              Error "❌ Invalid mode. Valid: minimal, standard, parallel, full, solo, custom"
       in
       (match result with
        | Ok msg -> (true, msg)

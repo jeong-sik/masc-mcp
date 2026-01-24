@@ -21,9 +21,10 @@ type category =
 
 (** Mode presets *)
 type mode =
-  | Minimal   (* core, health - ~15k tokens *)
-  | Standard  (* core, comm, worktree, health - ~25k tokens *)
-  | Full      (* all categories - ~49k tokens *)
+  | Minimal   (* core, health *)
+  | Standard  (* core, comm, worktree, health *)
+  | Parallel  (* heavy multi-agent: core+comm+portal+worktree+health+discovery+voting+interrupt *)
+  | Full      (* all categories *)
   | Solo      (* core, worktree - for single-agent work *)
   | Custom    (* user-defined categories *)
 
@@ -62,6 +63,7 @@ let category_of_string = function
 let mode_to_string = function
   | Minimal -> "minimal"
   | Standard -> "standard"
+  | Parallel -> "parallel"
   | Full -> "full"
   | Solo -> "solo"
   | Custom -> "custom"
@@ -70,6 +72,7 @@ let mode_to_string = function
 let mode_of_string = function
   | "minimal" -> Some Minimal
   | "standard" -> Some Standard
+  | "parallel" -> Some Parallel
   | "full" -> Some Full
   | "solo" -> Some Solo
   | "custom" -> Some Custom
@@ -85,6 +88,7 @@ let all_categories = [
 let categories_for_mode = function
   | Minimal -> [Core; Health]
   | Standard -> [Core; Comm; Worktree; Health]
+  | Parallel -> [Core; Comm; Portal; Worktree; Health; Discovery; Voting; Interrupt]
   | Full -> all_categories
   | Solo -> [Core; Worktree]
   | Custom -> [] (* Will be loaded from config *)
@@ -172,9 +176,10 @@ let is_tool_enabled enabled_categories tool_name =
 
 (** Mode descriptions for help text *)
 let mode_description = function
-  | Minimal -> "Core task management + health checks only (~15k tokens)"
-  | Standard -> "Core + communication + worktree + health (~25k tokens)"
-  | Full -> "All features enabled (~49k tokens)"
+  | Minimal -> "Core task management + health checks only"
+  | Standard -> "Core + communication + worktree + health"
+  | Parallel -> "Multi-agent parallel mode: comm + portal + discovery + voting + interrupt"
+  | Full -> "All features enabled"
   | Solo -> "Single-agent mode: core + worktree, no multi-agent features"
   | Custom -> "Custom category selection"
 

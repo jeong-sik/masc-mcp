@@ -53,6 +53,7 @@
    room_portal
    room_utils
    room_worktree
+   run_eio
    sctp
    sctp_eio
    sctp_transport

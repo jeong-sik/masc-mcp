@@ -11,6 +11,8 @@
 
 A native OCaml implementation for coordinating multiple AI agents (Claude, Gemini, Codex) working together on the same codebase.
 
+Note: This is a personal project.
+
 ## 5-Minute Quick Start
 
 ```bash

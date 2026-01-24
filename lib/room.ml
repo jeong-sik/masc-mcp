@@ -92,6 +92,41 @@ let read_archive_task_ids config =
       | None -> None
     ) tasks
 
+(** Append tasks to archive file (tasks-archive.json) *)
+let append_archive_tasks config (tasks : task list) =
+  if tasks = [] then ()
+  else begin
+    let open Yojson.Safe.Util in
+    let path = archive_path config in
+    let existing = read_json config path in
+    let existing_tasks =
+      match existing with
+      | `List items -> items
+      | `Assoc _ -> begin
+          match existing |> member "tasks" with
+          | `List items -> items
+          | _ -> []
+        end
+      | _ -> []
+    in
+    let new_tasks = List.map task_to_yojson tasks in
+    (* Deduplicate by task id, preserving first occurrence *)
+    let seen = Hashtbl.create 64 in
+    let dedup = List.filter (fun json ->
+      match json |> member "id" |> to_string_option with
+      | Some id ->
+          if Hashtbl.mem seen id then false
+          else (Hashtbl.add seen id (); true)
+      | None -> false
+    ) (existing_tasks @ new_tasks)
+    in
+    let archive_json = `Assoc [
+      ("tasks", `List dedup);
+      ("last_updated", `String (now_iso ()));
+    ] in
+    write_json config path archive_json
+  end
+
 (** Calculate next task id using backlog + archive to avoid reuse *)
 let next_task_number config backlog =
   let backlog_ids = List.filter_map (fun task -> task_id_to_int task.id) backlog.tasks in
@@ -1407,17 +1442,20 @@ let gc config ?(days=7) () =
 
   let backlog = read_backlog config in
   let stale_count = ref 0 in
+  let archived_tasks = ref [] in
   let kept_tasks = List.filter (fun task ->
     let is_done = match task.task_status with Done _ -> true | _ -> false in
     let is_old = task.created_at < cutoff_iso in
     if is_old && not is_done then begin
       incr stale_count;
+      archived_tasks := task :: !archived_tasks;
       false  (* Remove stale task *)
     end else
       true   (* Keep task *)
   ) backlog.tasks in
 
   if !stale_count > 0 then begin
+    append_archive_tasks config (List.rev !archived_tasks);
     let new_backlog = {
       tasks = kept_tasks;
       last_updated = now_iso ();

@@ -5,6 +5,7 @@
    a2a_tools
    agent_card
    auth
+   error
    backend
    backend_eio
    cache_eio

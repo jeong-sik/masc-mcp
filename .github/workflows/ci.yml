@@ -3,17 +3,8 @@ name: CI
 on:
   push:
     branches: [main, develop]
-    paths:
-      - 'features/masc-mcp/**'
-      - '.github/workflows/ci.yml'
   pull_request:
     branches: [main, develop]
-    paths:
-      - 'features/masc-mcp/**'
-
-defaults:
-  run:
-    working-directory: features/masc-mcp
 
 jobs:
   build:

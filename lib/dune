@@ -5,6 +5,7 @@
    a2a_tools
    agent_card
    auth
+   error
    backend
    backend_eio
    cache_eio
@@ -29,6 +30,8 @@
    level2_config
    level4_config
    log
+   prometheus
+   rate_limit
    masc_mcp
    masc_pb
    mcp_protocol

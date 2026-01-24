@@ -262,10 +262,27 @@ let health_handler _request reqd =
   let json = {|{"status":"ok","server":"masc-mcp","version":"2.2.3"}|} in
   Response.json json reqd
 
+(** Readiness probe - Kubernetes *)
+let ready_handler _request reqd =
+  Response.json {|{"status":"ready"}|} reqd
+
+(** Prometheus metrics endpoint *)
+let metrics_handler _request reqd =
+  let body = Prometheus.to_prometheus_text () in
+  let headers = Httpun.Headers.of_list [
+    ("content-type", "text/plain; version=0.0.4; charset=utf-8");
+    ("content-length", string_of_int (String.length body));
+    ("access-control-allow-origin", "*");
+  ] in
+  let response = Httpun.Response.create ~headers `OK in
+  Httpun.Reqd.respond_with_string reqd response body
+
 (** Default routes for MCP server *)
 let default_routes =
   Router.empty
   |> Router.get "/health" health_handler
+  |> Router.get "/ready" ready_handler
+  |> Router.get "/metrics" metrics_handler
   |> Router.get "/" (fun _req reqd ->
       Response.text "MASC MCP Server" reqd)
 

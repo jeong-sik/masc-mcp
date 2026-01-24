@@ -30,6 +30,7 @@
    level2_config
    level4_config
    log
+   prometheus
    masc_mcp
    masc_pb
    mcp_protocol

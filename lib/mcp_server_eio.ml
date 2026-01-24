@@ -287,6 +287,234 @@ let detect_mode first_line =
   else
     LineDelimited
 
+(* ============================================ *)
+(* Governance & Audit (Lightweight)            *)
+(* ============================================ *)
+
+type governance_config = {
+  level: string;
+  audit_enabled: bool;
+  anomaly_detection: bool;
+}
+
+let governance_defaults level =
+  let level_lc = String.lowercase_ascii level in
+  let audit_enabled =
+    match level_lc with
+    | "production" | "enterprise" | "paranoid" -> true
+    | _ -> false
+  in
+  let anomaly_detection =
+    match level_lc with
+    | "enterprise" | "paranoid" -> true
+    | _ -> false
+  in
+  { level = level_lc; audit_enabled; anomaly_detection }
+
+let governance_path (config : Room.config) =
+  Filename.concat (Room_utils.masc_dir config) "governance.json"
+
+let ensure_masc_dir (config : Room.config) =
+  let dir = Room_utils.masc_dir config in
+  if not (Sys.file_exists dir) then
+    Room_utils.mkdir_p dir
+
+let load_governance (config : Room.config) : governance_config =
+  let path = governance_path config in
+  if Room_utils.path_exists config path then
+    let json = Room_utils.read_json config path in
+    let open Yojson.Safe.Util in
+    let level = json |> member "level" |> to_string_option |> Option.value ~default:"development" in
+    let defaults = governance_defaults level in
+    let audit_enabled =
+      match json |> member "audit_enabled" with
+      | `Bool b -> b
+      | _ -> defaults.audit_enabled
+    in
+    let anomaly_detection =
+      match json |> member "anomaly_detection" with
+      | `Bool b -> b
+      | _ -> defaults.anomaly_detection
+    in
+    { level = String.lowercase_ascii level; audit_enabled; anomaly_detection }
+  else
+    governance_defaults "development"
+
+let save_governance (config : Room.config) (g : governance_config) =
+  ensure_masc_dir config;
+  let json = `Assoc [
+    ("level", `String g.level);
+    ("audit_enabled", `Bool g.audit_enabled);
+    ("anomaly_detection", `Bool g.anomaly_detection);
+    ("updated_at", `String (Types.now_iso ()));
+  ] in
+  Room_utils.write_json config (governance_path config) json
+
+type audit_event = {
+  timestamp: float;
+  agent: string;
+  event_type: string;
+  success: bool;
+  detail: string option;
+}
+
+let audit_log_path (config : Room.config) =
+  Filename.concat (Room_utils.masc_dir config) "audit.log"
+
+let audit_event_to_json (e : audit_event) : Yojson.Safe.t =
+  `Assoc [
+    ("timestamp", `Float e.timestamp);
+    ("agent", `String e.agent);
+    ("event_type", `String e.event_type);
+    ("success", `Bool e.success);
+    ("detail", match e.detail with Some d -> `String d | None -> `Null);
+  ]
+
+let append_audit_event (config : Room.config) (e : audit_event) =
+  let g = load_governance config in
+  if g.audit_enabled then begin
+    ensure_masc_dir config;
+    let path = audit_log_path config in
+    let line = Yojson.Safe.to_string (audit_event_to_json e) ^ "\n" in
+    Room_utils.with_file_lock config path (fun () ->
+      let oc = open_out_gen [Open_creat; Open_append; Open_wronly] 0o600 path in
+      output_string oc line;
+      close_out oc
+    )
+  end
+
+let read_audit_events (config : Room.config) ~since : audit_event list =
+  let path = audit_log_path config in
+  if not (Sys.file_exists path) then []
+  else
+    let content = In_channel.with_open_text path In_channel.input_all in
+    let lines = String.split_on_char '\n' content |> List.filter (fun s -> String.trim s <> "") in
+    List.filter_map (fun line ->
+      try
+        let json = Yojson.Safe.from_string line in
+        let open Yojson.Safe.Util in
+        let timestamp = json |> member "timestamp" |> to_float in
+        if timestamp < since then None
+        else
+          let agent = json |> member "agent" |> to_string in
+          let event_type = json |> member "event_type" |> to_string in
+          let success = json |> member "success" |> to_bool in
+          let detail = json |> member "detail" |> to_string_option in
+          Some { timestamp; agent; event_type; success; detail }
+      with _ -> None
+    ) lines
+
+(* ============================================ *)
+(* MCP Session (HTTP Session ID) helpers        *)
+(* ============================================ *)
+
+type mcp_session_record = {
+  id: string;
+  agent_name: string option;
+  created_at: float;
+  last_seen: float;
+}
+
+let mcp_sessions_path (config : Room.config) =
+  Filename.concat (Room_utils.masc_dir config) "mcp-sessions.json"
+
+let mcp_session_to_json (s : mcp_session_record) : Yojson.Safe.t =
+  `Assoc [
+    ("id", `String s.id);
+    ("agent_name", match s.agent_name with Some a -> `String a | None -> `Null);
+    ("created_at", `Float s.created_at);
+    ("last_seen", `Float s.last_seen);
+  ]
+
+let mcp_session_of_json (json : Yojson.Safe.t) : mcp_session_record option =
+  let open Yojson.Safe.Util in
+  try
+    let id = json |> member "id" |> to_string in
+    let agent_name = json |> member "agent_name" |> to_string_option in
+    let created_at = json |> member "created_at" |> to_float in
+    let last_seen = json |> member "last_seen" |> to_float in
+    Some { id; agent_name; created_at; last_seen }
+  with _ -> None
+
+let load_mcp_sessions (config : Room.config) : mcp_session_record list =
+  let path = mcp_sessions_path config in
+  if Room_utils.path_exists config path then
+    let json = Room_utils.read_json config path in
+    match json with
+    | `List items -> List.filter_map mcp_session_of_json items
+    | _ -> []
+  else
+    []
+
+let save_mcp_sessions (config : Room.config) (sessions : mcp_session_record list) =
+  ensure_masc_dir config;
+  let json = `List (List.map mcp_session_to_json sessions) in
+  Room_utils.write_json config (mcp_sessions_path config) json
+
+(* ============================================ *)
+(* Drift Guard: similarity helpers              *)
+(* ============================================ *)
+
+let tokenize (s : string) : string list =
+  let trimmed = String.trim s in
+  if trimmed = "" then []
+  else
+    let tokens = Str.split (Str.regexp "[ \t\r\n]+") trimmed in
+    let trim_punct token =
+      let is_punct = function
+        | '.' | ',' | ';' | ':' | '!' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '"' | '\'' | '`' | '-' | '_' | '/' | '\\' -> true
+        | _ -> false
+      in
+      let len = String.length token in
+      if len = 0 then token
+      else
+        let rec left i =
+          if i >= len then len
+          else if is_punct token.[i] then left (i + 1) else i
+        in
+        let rec right i =
+          if i < 0 then -1
+          else if is_punct token.[i] then right (i - 1) else i
+        in
+        let l = left 0 in
+        let r = right (len - 1) in
+        if r < l then "" else String.sub token l (r - l + 1)
+    in
+    tokens
+    |> List.map String.lowercase_ascii
+    |> List.map trim_punct
+    |> List.filter (fun t -> t <> "")
+
+let jaccard_similarity a b =
+  let set_a = Hashtbl.create 128 in
+  let set_b = Hashtbl.create 128 in
+  List.iter (fun t -> Hashtbl.replace set_a t ()) a;
+  List.iter (fun t -> Hashtbl.replace set_b t ()) b;
+  let intersection = Hashtbl.fold (fun k _ acc -> if Hashtbl.mem set_b k then acc + 1 else acc) set_a 0 in
+  let union = (Hashtbl.length set_a) + (Hashtbl.length set_b) - intersection in
+  if union = 0 then 1.0 else float_of_int intersection /. float_of_int union
+
+let cosine_similarity a b =
+  let freq tbl t =
+    let v = match Hashtbl.find_opt tbl t with Some n -> n | None -> 0 in
+    Hashtbl.replace tbl t (v + 1)
+  in
+  let fa = Hashtbl.create 128 in
+  let fb = Hashtbl.create 128 in
+  List.iter (freq fa) a;
+  List.iter (freq fb) b;
+  let dot = Hashtbl.fold (fun k va acc ->
+    match Hashtbl.find_opt fb k with
+    | Some vb -> acc +. (float_of_int (va * vb))
+    | None -> acc
+  ) fa 0.0 in
+  let norm tbl =
+    Hashtbl.fold (fun _ v acc -> acc +. (float_of_int (v * v))) tbl 0.0 |> sqrt
+  in
+  let na = norm fa in
+  let nb = norm fb in
+  if na = 0.0 || nb = 0.0 then 0.0 else dot /. (na *. nb)
+
 (** Execute tool - Eio native version.
 
     Direct-style implementation using Eio-native modules:
@@ -654,6 +882,42 @@ let execute_tool_eio ~sw ~clock state ~name ~arguments =
   | "masc_tasks" ->
       (true, Room.list_tasks config)
 
+  | "masc_archive_view" ->
+      let limit = get_int "limit" 20 in
+      let archive_path = Room_utils.archive_path config in
+      if not (Room_utils.path_exists config archive_path) then
+        (true, Yojson.Safe.pretty_to_string (`Assoc [("count", `Int 0); ("tasks", `List [])]))
+      else
+        let open Yojson.Safe.Util in
+        let json = Room_utils.read_json config archive_path in
+        let tasks =
+          match json with
+          | `List items -> items
+          | `Assoc _ ->
+              (match json |> member "tasks" with
+               | `List items -> items
+               | _ -> [])
+          | _ -> []
+        in
+        let total = List.length tasks in
+        let tasks =
+          if total <= limit then tasks
+          else
+            let rec drop n xs =
+              match xs with
+              | [] -> []
+              | _ when n <= 0 -> xs
+              | _ :: rest -> drop (n - 1) rest
+            in
+            drop (total - limit) tasks
+        in
+        let response = `Assoc [
+          ("count", `Int (List.length tasks));
+          ("total", `Int total);
+          ("tasks", `List tasks);
+        ] in
+        (true, Yojson.Safe.pretty_to_string response)
+
   | "masc_claim_next" ->
       (true, Room.claim_next config ~agent_name)
 
@@ -825,6 +1089,19 @@ Time: %s
             | Error e -> (false, Printf.sprintf "❌ Failed to claim handover: %s" e))
        | None -> (false, "❌ Filesystem not available"))
 
+  | "masc_handover_claim_and_spawn" ->
+      let handover_id = get_string "handover_id" "" in
+      let additional_instructions = get_string_opt "additional_instructions" in
+      let timeout_seconds = _get_int_opt "timeout_seconds" in
+      (match state.Mcp_server.fs, state.Mcp_server.proc_mgr with
+       | Some fs, Some pm ->
+           (match Handover_eio.claim_and_spawn ~sw ~fs ~proc_mgr:pm config
+                    ~handover_id ~agent_name ?additional_instructions ?timeout_seconds () with
+            | Ok result -> (true, Spawn_eio.result_to_human_string result)
+            | Error e -> (false, Printf.sprintf "❌ Failed to claim/spawn: %s" e))
+       | None, _ -> (false, "❌ Filesystem not available")
+       | _, None -> (false, "❌ Process manager not available in this environment"))
+
   | "masc_handover_get" ->
       let handover_id = get_string "handover_id" "" in
       (match state.Mcp_server.fs with
@@ -867,6 +1144,272 @@ Time: %s
   | "masc_find_by_capability" ->
       let capability = get_string "capability" "" in
       let json = Room.find_agents_by_capability config ~capability in
+      (true, Yojson.Safe.pretty_to_string json)
+
+  (* Metrics & Fitness tools *)
+  | "masc_get_metrics" ->
+      let target = get_string "agent_name" "" in
+      let days = get_int "days" 7 in
+      (match Metrics_store_eio.calculate_agent_metrics config ~agent_id:target ~days with
+       | Some metrics ->
+           (true, Yojson.Safe.pretty_to_string (Metrics_store_eio.agent_metrics_to_yojson metrics))
+       | None ->
+           (false, Printf.sprintf "❌ No metrics found for agent: %s" target))
+
+  | "masc_agent_fitness" ->
+      let agent_opt = get_string_opt "agent_name" in
+      let days = get_int "days" 7 in
+      let agents =
+        match agent_opt with
+        | Some a -> [a]
+        | None -> Metrics_store_eio.get_all_agents config
+      in
+      if agents = [] then
+        (true, Yojson.Safe.pretty_to_string (`Assoc [("count", `Int 0); ("agents", `List [])]))
+      else
+        let metrics_for agent_id =
+          match Metrics_store_eio.calculate_agent_metrics config ~agent_id ~days with
+          | Some m -> m
+          | None ->
+              let now = Unix.gettimeofday () in
+              { Metrics_store_eio.agent_id = agent_id;
+                period_start = now -. (float_of_int days *. 86400.0);
+                period_end = now;
+                total_tasks = 0;
+                completed_tasks = 0;
+                failed_tasks = 0;
+                avg_completion_time_s = 0.0;
+                task_completion_rate = 0.0;
+                error_rate = 0.0;
+                handoff_success_rate = 0.0;
+                unique_collaborators = [];
+              }
+        in
+        let metrics_list = List.map (fun a -> (a, metrics_for a)) agents in
+        let min_avg_time =
+          metrics_list
+          |> List.map (fun (_, m) -> m.Metrics_store_eio.avg_completion_time_s)
+          |> List.filter (fun t -> t > 0.0)
+          |> List.fold_left (fun acc t -> if acc = 0.0 || t < acc then t else acc) 0.0
+        in
+        let max_collabs =
+          metrics_list
+          |> List.map (fun (_, m) -> List.length m.Metrics_store_eio.unique_collaborators)
+          |> List.fold_left max 0
+        in
+        let score_for metrics =
+          let has_data = metrics.Metrics_store_eio.total_tasks > 0 in
+          let completion = metrics.Metrics_store_eio.task_completion_rate in
+          let reliability = if has_data then 1.0 -. metrics.Metrics_store_eio.error_rate else 0.0 in
+          let handoff = if has_data then metrics.Metrics_store_eio.handoff_success_rate else 0.0 in
+          let speed =
+            if has_data && metrics.Metrics_store_eio.avg_completion_time_s > 0.0 && min_avg_time > 0.0 then
+              min 1.0 (min_avg_time /. metrics.Metrics_store_eio.avg_completion_time_s)
+            else 0.0
+          in
+          let collab_count = List.length metrics.Metrics_store_eio.unique_collaborators in
+          let collaboration =
+            if max_collabs = 0 then 0.0
+            else float_of_int collab_count /. float_of_int max_collabs
+          in
+          let score =
+            (0.35 *. completion) +. (0.25 *. reliability) +. (0.15 *. speed)
+            +. (0.15 *. handoff) +. (0.10 *. collaboration)
+          in
+          (score, completion, reliability, speed, handoff, collaboration)
+        in
+        let agents_json =
+          List.map (fun (agent_id, metrics) ->
+            let (score, completion, reliability, speed, handoff, collaboration) = score_for metrics in
+            `Assoc [
+              ("agent_id", `String agent_id);
+              ("fitness", `Float score);
+              ("components", `Assoc [
+                ("completion", `Float completion);
+                ("reliability", `Float reliability);
+                ("speed", `Float speed);
+                ("handoff", `Float handoff);
+                ("collaboration", `Float collaboration);
+              ]);
+              ("metrics", Metrics_store_eio.agent_metrics_to_yojson metrics);
+            ]
+          ) metrics_list
+        in
+        let json = `Assoc [
+          ("count", `Int (List.length agents_json));
+          ("agents", `List agents_json);
+        ] in
+        (true, Yojson.Safe.pretty_to_string json)
+
+  | "masc_select_agent" ->
+      let available = match arguments |> Yojson.Safe.Util.member "available_agents" with
+        | `List items -> List.filter_map (function `String s -> Some s | _ -> None) items
+        | _ -> []
+      in
+      let strategy = get_string "strategy" "capability_first" in
+      let days = get_int "days" 7 in
+      if available = [] then
+        (false, "❌ available_agents required")
+      else
+        let metrics_for agent_id =
+          match Metrics_store_eio.calculate_agent_metrics config ~agent_id ~days with
+          | Some m -> m
+          | None ->
+              let now = Unix.gettimeofday () in
+              { Metrics_store_eio.agent_id = agent_id;
+                period_start = now -. (float_of_int days *. 86400.0);
+                period_end = now;
+                total_tasks = 0;
+                completed_tasks = 0;
+                failed_tasks = 0;
+                avg_completion_time_s = 0.0;
+                task_completion_rate = 0.0;
+                error_rate = 0.0;
+                handoff_success_rate = 0.0;
+                unique_collaborators = [];
+              }
+        in
+        let metrics_list = List.map (fun a -> (a, metrics_for a)) available in
+        let min_avg_time =
+          metrics_list
+          |> List.map (fun (_, m) -> m.Metrics_store_eio.avg_completion_time_s)
+          |> List.filter (fun t -> t > 0.0)
+          |> List.fold_left (fun acc t -> if acc = 0.0 || t < acc then t else acc) 0.0
+        in
+        let max_collabs =
+          metrics_list
+          |> List.map (fun (_, m) -> List.length m.Metrics_store_eio.unique_collaborators)
+          |> List.fold_left max 0
+        in
+        let score_for metrics =
+          let has_data = metrics.Metrics_store_eio.total_tasks > 0 in
+          let completion = metrics.Metrics_store_eio.task_completion_rate in
+          let reliability = if has_data then 1.0 -. metrics.Metrics_store_eio.error_rate else 0.0 in
+          let handoff = if has_data then metrics.Metrics_store_eio.handoff_success_rate else 0.0 in
+          let speed =
+            if has_data && metrics.Metrics_store_eio.avg_completion_time_s > 0.0 && min_avg_time > 0.0 then
+              min 1.0 (min_avg_time /. metrics.Metrics_store_eio.avg_completion_time_s)
+            else 0.0
+          in
+          let collab_count = List.length metrics.Metrics_store_eio.unique_collaborators in
+          let collaboration =
+            if max_collabs = 0 then 0.0
+            else float_of_int collab_count /. float_of_int max_collabs
+          in
+          let score =
+            (0.35 *. completion) +. (0.25 *. reliability) +. (0.15 *. speed)
+            +. (0.15 *. handoff) +. (0.10 *. collaboration)
+          in
+          (score, completion, reliability, speed, handoff, collaboration)
+        in
+        let scored =
+          List.map (fun (agent_id, metrics) ->
+            let (score, completion, reliability, speed, handoff, collaboration) = score_for metrics in
+            (agent_id, score,
+             `Assoc [
+               ("completion", `Float completion);
+               ("reliability", `Float reliability);
+               ("speed", `Float speed);
+               ("handoff", `Float handoff);
+               ("collaboration", `Float collaboration);
+             ])
+          ) metrics_list
+        in
+        let pick_random lst =
+          let idx = Random.int (List.length lst) in
+          List.nth lst idx
+        in
+        let selected =
+          match strategy with
+          | "random" -> pick_random scored
+          | "roulette_wheel" ->
+              let total = List.fold_left (fun acc (_, s, _) -> acc +. max 0.0 s) 0.0 scored in
+              if total <= 0.0 then pick_random scored
+              else
+                let target = Random.float total in
+                let rec pick acc = function
+                  | [] -> List.hd scored
+                  | (id, s, comp) :: rest ->
+                      let acc' = acc +. max 0.0 s in
+                      if acc' >= target then (id, s, comp) else pick acc' rest
+                in
+                pick 0.0 scored
+          | "elite_1" | "capability_first" | _ ->
+              List.fold_left (fun best candidate ->
+                match best with
+                | None -> Some candidate
+                | Some (_, best_score, _) ->
+                    let (_, score, _) = candidate in
+                    if score > best_score then Some candidate else best
+              ) None scored |> Option.get
+        in
+        let (agent_id, score, components) = selected in
+        let scores_json =
+          `List (List.map (fun (id, s, comp) ->
+            `Assoc [
+              ("agent_id", `String id);
+              ("fitness", `Float s);
+              ("components", comp);
+            ]) scored)
+        in
+        let json = `Assoc [
+          ("selected_agent", `String agent_id);
+          ("fitness", `Float score);
+          ("components", components);
+          ("strategy", `String strategy);
+          ("scores", scores_json);
+        ] in
+        (true, Yojson.Safe.pretty_to_string json)
+
+  (* Hebbian learning tools *)
+  | "masc_collaboration_graph" ->
+      let format = get_string "format" "text" in
+      let (synapses, agents) = Hebbian_eio.get_graph_data config in
+      if format = "json" then
+        let json = `Assoc [
+          ("agents", `List (List.map (fun a -> `String a) agents));
+          ("synapses", `List (List.map Hebbian_eio.synapse_to_json synapses));
+        ] in
+        (true, Yojson.Safe.pretty_to_string json)
+      else
+        let lines =
+          synapses
+          |> List.sort (fun a b -> compare b.Hebbian_eio.weight a.Hebbian_eio.weight)
+          |> List.map (fun s ->
+              Printf.sprintf "%s → %s (%.2f, success:%d, failure:%d)"
+                s.Hebbian_eio.from_agent s.Hebbian_eio.to_agent
+                s.Hebbian_eio.weight s.Hebbian_eio.success_count s.Hebbian_eio.failure_count)
+        in
+        if lines = [] then
+          (true, "No collaboration data yet.")
+        else
+          (true, String.concat "\n" lines)
+
+  | "masc_consolidate_learning" ->
+      let decay_after_days = get_int "decay_after_days" 7 in
+      let pruned = Hebbian_eio.consolidate config ~decay_after_days () in
+      (true, Printf.sprintf "✅ Consolidated. Pruned %d weak connections." pruned)
+
+  (* Drift guard *)
+  | "masc_verify_handoff" ->
+      let original = get_string "original" "" in
+      let received = get_string "received" "" in
+      let threshold = get_float "threshold" (Level2_config.Drift_guard.default_threshold ()) in
+      let tokens_a = tokenize original in
+      let tokens_b = tokenize received in
+      let jacc = jaccard_similarity tokens_a tokens_b in
+      let cos = cosine_similarity tokens_a tokens_b in
+      let weights = Level2_config.Drift_guard.weights () in
+      let combined = (weights.jaccard *. jacc)
+                     +. (weights.cosine *. cos) in
+      let passed = combined >= threshold in
+      let json = `Assoc [
+        ("similarity", `Float combined);
+        ("jaccard", `Float jacc);
+        ("cosine", `Float cos);
+        ("threshold", `Float threshold);
+        ("passed", `Bool passed);
+      ] in
       (true, Yojson.Safe.pretty_to_string json)
 
   (* A2A Agent Card - Discovery *)
@@ -1090,6 +1633,195 @@ Time: %s
       ] in
       (true, Yojson.Safe.pretty_to_string response)
 
+  (* Run tracking tools - Eio native *)
+  | "masc_run_init" ->
+      let task_id = get_string "task_id" "" in
+      let agent = get_string_opt "agent_name" in
+      (match Run_eio.init config ~task_id ~agent_name:agent with
+       | Ok run ->
+           (true, Yojson.Safe.pretty_to_string (Run_eio.run_record_to_json run))
+       | Error e ->
+           (false, Printf.sprintf "❌ Failed to init run: %s" e))
+
+  | "masc_run_plan" ->
+      let task_id = get_string "task_id" "" in
+      let plan = get_string "plan" "" in
+      (match Run_eio.update_plan config ~task_id ~content:plan with
+       | Ok run ->
+           (true, Yojson.Safe.pretty_to_string (Run_eio.run_record_to_json run))
+       | Error e ->
+           (false, Printf.sprintf "❌ Failed to update run plan: %s" e))
+
+  | "masc_run_log" ->
+      let task_id = get_string "task_id" "" in
+      let note = get_string "note" "" in
+      (match Run_eio.append_log config ~task_id ~note with
+       | Ok entry ->
+           (true, Yojson.Safe.pretty_to_string (Run_eio.log_entry_to_json entry))
+       | Error e ->
+           (false, Printf.sprintf "❌ Failed to append run log: %s" e))
+
+  | "masc_run_deliverable" ->
+      let task_id = get_string "task_id" "" in
+      let deliverable = get_string "deliverable" "" in
+      (match Run_eio.set_deliverable config ~task_id ~content:deliverable with
+       | Ok run ->
+           (true, Yojson.Safe.pretty_to_string (Run_eio.run_record_to_json run))
+       | Error e ->
+           (false, Printf.sprintf "❌ Failed to set run deliverable: %s" e))
+
+  | "masc_run_get" ->
+      let task_id = get_string "task_id" "" in
+      (match Run_eio.get config ~task_id with
+       | Ok json -> (true, Yojson.Safe.pretty_to_string json)
+       | Error e -> (false, Printf.sprintf "❌ Failed to get run: %s" e))
+
+  | "masc_run_list" ->
+      let json = Run_eio.list config in
+      (true, Yojson.Safe.pretty_to_string json)
+
+  (* Cache tools - Eio native *)
+  | "masc_cache_set" ->
+      let key = get_string "key" "" in
+      let value = get_string "value" "" in
+      let ttl_seconds = _get_int_opt "ttl_seconds" in
+      let tags = get_string_list "tags" in
+      (match Cache_eio.set config ~key ~value ?ttl_seconds ~tags () with
+       | Ok entry ->
+           (true, Yojson.Safe.pretty_to_string (Cache_eio.entry_to_json entry))
+       | Error e ->
+           (false, Printf.sprintf "❌ Cache set failed: %s" e))
+
+  | "masc_cache_get" ->
+      let key = get_string "key" "" in
+      (match Cache_eio.get config ~key with
+       | Ok (Some entry) ->
+           (true, Yojson.Safe.pretty_to_string (`Assoc [
+             ("hit", `Bool true);
+             ("entry", Cache_eio.entry_to_json entry);
+           ]))
+       | Ok None ->
+           (true, Yojson.Safe.pretty_to_string (`Assoc [
+             ("hit", `Bool false);
+             ("key", `String key);
+           ]))
+       | Error e ->
+           (false, Printf.sprintf "❌ Cache get failed: %s" e))
+
+  | "masc_cache_delete" ->
+      let key = get_string "key" "" in
+      (match Cache_eio.delete config ~key with
+       | Ok removed ->
+           let json = `Assoc [
+             ("removed", `Bool removed);
+             ("key", `String key);
+           ] in
+           (true, Yojson.Safe.pretty_to_string json)
+       | Error e ->
+           (false, Printf.sprintf "❌ Cache delete failed: %s" e))
+
+  | "masc_cache_list" ->
+      let tag = get_string_opt "tag" in
+      let entries = Cache_eio.list config ?tag () in
+      let json = `Assoc [
+        ("count", `Int (List.length entries));
+        ("entries", `List (List.map Cache_eio.entry_to_json entries));
+      ] in
+      (true, Yojson.Safe.pretty_to_string json)
+
+  | "masc_cache_clear" ->
+      (match Cache_eio.clear config with
+       | Ok count ->
+           (true, Printf.sprintf "Cleared %d cache entries" count)
+       | Error e ->
+           (false, Printf.sprintf "❌ Cache clear failed: %s" e))
+
+  | "masc_cache_stats" ->
+      (match Cache_eio.stats config with
+       | Ok (total, expired, size_bytes) ->
+           let json = `Assoc [
+             ("total_entries", `Int total);
+             ("expired_entries", `Int expired);
+             ("size_bytes", `Float size_bytes);
+             ("size_kb", `Float (size_bytes /. 1024.0));
+           ] in
+           (true, Yojson.Safe.pretty_to_string json)
+       | Error e ->
+           (false, Printf.sprintf "❌ Cache stats failed: %s" e))
+
+  (* MCP Session / Cancellation / Subscriptions / Progress *)
+  | "masc_mcp_session" ->
+      let action = get_string "action" "" in
+      let now = Unix.gettimeofday () in
+      let sessions = load_mcp_sessions config in
+      let save sessions = save_mcp_sessions config sessions in
+      let response =
+        match action with
+        | "create" ->
+            let agent_name = get_string_opt "agent_name" in
+            let id = Mcp_session.generate () in
+            let record = { id; agent_name; created_at = now; last_seen = now } in
+            save (record :: sessions);
+            Ok (`Assoc [
+              ("status", `String "created");
+              ("session", mcp_session_to_json record);
+            ])
+        | "get" ->
+            let session_id = get_string "session_id" "" in
+            (match List.find_opt (fun s -> s.id = session_id) sessions with
+             | None -> Error (Printf.sprintf "MCP session '%s' not found" session_id)
+             | Some s ->
+                 let updated = { s with last_seen = now } in
+                 let others = List.filter (fun x -> x.id <> session_id) sessions in
+                 save (updated :: others);
+                 Ok (`Assoc [
+                   ("status", `String "ok");
+                   ("session", mcp_session_to_json updated);
+                 ]))
+        | "list" ->
+            Ok (`Assoc [
+              ("count", `Int (List.length sessions));
+              ("sessions", `List (List.map mcp_session_to_json sessions));
+            ])
+        | "cleanup" ->
+            let cutoff = now -. (7.0 *. 86400.0) in
+            let remaining = List.filter (fun s -> s.last_seen >= cutoff) sessions in
+            let removed = List.length sessions - List.length remaining in
+            save remaining;
+            Ok (`Assoc [
+              ("status", `String "cleaned");
+              ("removed", `Int removed);
+              ("remaining", `Int (List.length remaining));
+            ])
+        | "remove" ->
+            let session_id = get_string "session_id" "" in
+            let remaining = List.filter (fun s -> s.id <> session_id) sessions in
+            if List.length remaining = List.length sessions then
+              Error (Printf.sprintf "MCP session '%s' not found" session_id)
+            else begin
+              save remaining;
+              Ok (`Assoc [
+                ("status", `String "removed");
+                ("session_id", `String session_id);
+              ])
+            end
+        | other ->
+            Error (Printf.sprintf "Unknown action: %s" other)
+      in
+      (match response with
+       | Ok json -> (true, Yojson.Safe.pretty_to_string json)
+       | Error e -> (false, e))
+
+  | "masc_cancellation" ->
+      Cancellation.handle_cancellation_tool arguments
+
+  | "masc_subscription" ->
+      Subscriptions.handle_subscription_tool arguments
+
+  | "masc_progress" ->
+      Progress.set_sse_callback (Mcp_server.sse_broadcast state);
+      Progress.handle_progress_tool arguments
+
   (* Voting/Consensus tools *)
   | "masc_vote_create" ->
       let proposer = get_string "proposer" agent_name in
@@ -1113,6 +1845,27 @@ Time: %s
       (true, Yojson.Safe.pretty_to_string json)
 
   (* Tempo Control *)
+  | "masc_tempo_get" ->
+      let state = Tempo.get_tempo config in
+      (true, Yojson.Safe.pretty_to_string (Tempo.state_to_json state))
+
+  | "masc_tempo_set" ->
+      let interval = get_float "interval_seconds" 0.0 in
+      let reason = get_string "reason" "manual" in
+      if interval <= 0.0 then
+        (false, "❌ interval_seconds must be > 0")
+      else
+        let state = Tempo.set_tempo config ~interval_s:interval ~reason in
+        (true, Yojson.Safe.pretty_to_string (Tempo.state_to_json state))
+
+  | "masc_tempo_adjust" ->
+      let state = Tempo.adjust_tempo config in
+      (true, Yojson.Safe.pretty_to_string (Tempo.state_to_json state))
+
+  | "masc_tempo_reset" ->
+      let state = Tempo.reset_tempo config in
+      (true, Yojson.Safe.pretty_to_string (Tempo.state_to_json state))
+
   | "masc_tempo" ->
       let action = get_string "action" "get" in
       (match action with
@@ -1332,12 +2085,169 @@ Expires: %s
       Buffer.add_string buf (Printf.sprintf "  • Admin: %.1fx\n" cfg.admin_multiplier);
       (true, Buffer.contents buf)
 
+  (* Audit & Governance tools *)
+  | "masc_audit_query" ->
+      let agent_filter = get_string_opt "agent" in
+      let event_type = get_string "event_type" "all" in
+      let limit = get_int "limit" 50 in
+      let since_hours = get_float "since_hours" 24.0 in
+      let since = Unix.gettimeofday () -. (since_hours *. 3600.0) in
+      let events = read_audit_events config ~since in
+      let filtered =
+        events
+        |> List.filter (fun e ->
+            match agent_filter with
+            | Some a -> e.agent = a
+            | None -> true)
+        |> List.filter (fun e ->
+            if event_type = "all" then true
+            else e.event_type = event_type)
+      in
+      let limited =
+        let rec take n xs =
+          match xs with
+          | [] -> []
+          | _ when n <= 0 -> []
+          | x :: rest -> x :: take (n - 1) rest
+        in
+        take limit filtered
+      in
+      let json = `Assoc [
+        ("count", `Int (List.length limited));
+        ("events", `List (List.map audit_event_to_json limited));
+      ] in
+      (true, Yojson.Safe.pretty_to_string json)
+
+  | "masc_audit_stats" ->
+      let agent_filter = get_string_opt "agent" in
+      let since = Unix.gettimeofday () -. (24.0 *. 3600.0) in
+      let events = read_audit_events config ~since in
+      let agents =
+        let from_events = List.map (fun e -> e.agent) events in
+        let from_metrics = Metrics_store_eio.get_all_agents config in
+        let combined = from_events @ from_metrics in
+        List.sort_uniq String.compare combined
+      in
+      let agents = match agent_filter with
+        | Some a -> [a]
+        | None -> agents
+      in
+      let stats_for agent_id =
+        let agent_events = List.filter (fun e -> e.agent = agent_id) events in
+        let count_type t =
+          List.fold_left (fun acc e -> if e.event_type = t then acc + 1 else acc) 0 agent_events
+        in
+        let auth_success = count_type "auth_success" in
+        let auth_failure = count_type "auth_failure" in
+        let anomaly = count_type "anomaly_detected" in
+        let violations = count_type "security_violation" in
+        let tool_calls = count_type "tool_call" in
+        let auth_total = auth_success + auth_failure in
+        let auth_rate =
+          if auth_total = 0 then `Null
+          else `Float (float_of_int auth_success /. float_of_int auth_total)
+        in
+        let task_rate =
+          match Metrics_store_eio.calculate_agent_metrics config ~agent_id ~days:7 with
+          | Some m -> `Float m.Metrics_store_eio.task_completion_rate
+          | None -> `Null
+        in
+        `Assoc [
+          ("agent_id", `String agent_id);
+          ("auth_success", `Int auth_success);
+          ("auth_failure", `Int auth_failure);
+          ("auth_success_rate", auth_rate);
+          ("anomaly_count", `Int anomaly);
+          ("security_violations", `Int violations);
+          ("tool_calls", `Int tool_calls);
+          ("task_completion_rate", task_rate);
+        ]
+      in
+      let json = `Assoc [
+        ("count", `Int (List.length agents));
+        ("agents", `List (List.map stats_for agents));
+      ] in
+      (true, Yojson.Safe.pretty_to_string json)
+
+  | "masc_governance_set" ->
+      let level = get_string "level" "production" in
+      let defaults = governance_defaults level in
+      let audit_enabled = get_bool "audit_enabled" defaults.audit_enabled in
+      let anomaly_detection = get_bool "anomaly_detection" defaults.anomaly_detection in
+      let g = {
+        level = String.lowercase_ascii level;
+        audit_enabled;
+        anomaly_detection;
+      } in
+      save_governance config g;
+      let json = `Assoc [
+        ("status", `String "ok");
+        ("governance", `Assoc [
+          ("level", `String g.level);
+          ("audit_enabled", `Bool g.audit_enabled);
+          ("anomaly_detection", `Bool g.anomaly_detection);
+        ]);
+      ] in
+      (true, Yojson.Safe.pretty_to_string json)
+
   (* Encryption tools *)
   | "masc_encryption_status" ->
       let status = Encryption.get_status state.Mcp_server.encryption_config in
       let msg = Printf.sprintf "🔐 Encryption Status\n%s"
         (Yojson.Safe.pretty_to_string status) in
       (true, msg)
+
+  | "masc_encryption_enable" ->
+      Encryption.initialize ();
+      let key_source = get_string "key_source" "env" in
+      let parse_hex_to_bytes hex =
+        if String.length hex <> 64 then
+          Error (Printf.sprintf "Invalid hex key length: %d (expected 64)" (String.length hex))
+        else
+          try
+            let bytes = Bytes.create 32 in
+            for i = 0 to 31 do
+              let hex_pair = String.sub hex (i * 2) 2 in
+              Bytes.set bytes i (Char.chr (int_of_string ("0x" ^ hex_pair)))
+            done;
+            Ok (Bytes.to_string bytes)
+          with _ -> Error "Failed to decode hex key"
+      in
+      let (key_source_variant, generated_key_opt) =
+        if key_source = "env" then
+          (`Env "MASC_ENCRYPTION_KEY", None)
+        else if String.length key_source > 5 && String.sub key_source 0 5 = "file:" then
+          let path = String.sub key_source 5 (String.length key_source - 5) in
+          (`File path, None)
+        else if key_source = "generate" then
+          match Encryption.generate_key_hex () with
+          | Error e -> (`Env "MASC_ENCRYPTION_KEY", Some (Error (Encryption.show_encryption_error e)))
+          | Ok hex ->
+              (match parse_hex_to_bytes hex with
+               | Ok bytes -> (`Direct bytes, Some (Ok hex))
+               | Error err -> (`Env "MASC_ENCRYPTION_KEY", Some (Error err)))
+        else
+          (`Env "MASC_ENCRYPTION_KEY", Some (Error "Invalid key_source"))
+      in
+      (match generated_key_opt with
+       | Some (Error e) -> (false, Printf.sprintf "❌ %s" e)
+       | _ ->
+           let new_config = { state.Mcp_server.encryption_config with
+             Encryption.enabled = true;
+             key_source = key_source_variant;
+           } in
+           (match Encryption.load_key new_config with
+            | Error e ->
+                (false, Printf.sprintf "❌ Failed: %s" (Encryption.show_encryption_error e))
+            | Ok _ ->
+                state.Mcp_server.encryption_config <- new_config;
+                let msg =
+                  match generated_key_opt with
+                  | Some (Ok hex) ->
+                      Printf.sprintf "🔐 Encryption enabled (generated key).\n\n🔑 Key (hex): %s\n\n⚠️ Store this securely!" hex
+                  | _ -> "🔐 Encryption enabled."
+                in
+                (true, msg)))
 
   | "masc_encryption_disable" ->
       state.Mcp_server.encryption_config <- { state.Mcp_server.encryption_config with Encryption.enabled = false };
@@ -1422,6 +2332,197 @@ Expires: %s
         else Dashboard.generate config
       in
       (true, output)
+
+  (* Relay tools - Infinite Context via Handoff *)
+  | "masc_relay_status" ->
+      let messages = get_int "messages" 0 in
+      let tool_calls = get_int "tool_calls" 0 in
+      let model = get_string "model" "claude" in
+      let metrics = Relay.estimate_context ~messages ~tool_calls ~model in
+      let should_relay = Relay.should_relay ~config:Relay.default_config ~metrics in
+      let json = `Assoc [
+        ("estimated_tokens", `Int metrics.Relay.estimated_tokens);
+        ("max_tokens", `Int metrics.Relay.max_tokens);
+        ("usage_ratio", `Float metrics.Relay.usage_ratio);
+        ("message_count", `Int metrics.Relay.message_count);
+        ("tool_call_count", `Int metrics.Relay.tool_call_count);
+        ("should_relay", `Bool should_relay);
+      ] in
+      (true, Yojson.Safe.pretty_to_string json)
+
+  | "masc_relay_checkpoint" ->
+      let summary = get_string "summary" "" in
+      let current_task = get_string_opt "current_task" in
+      let todos = get_string_list "todos" in
+      let pdca_state = get_string_opt "pdca_state" in
+      let relevant_files = get_string_list "relevant_files" in
+      let cell = !(Mcp_server.current_cell) in
+      let messages = get_int "messages" cell.Mitosis.task_count in
+      let tool_calls = get_int "tool_calls" cell.Mitosis.tool_call_count in
+      let metrics = Relay.estimate_context ~messages ~tool_calls ~model:"claude" in
+      let _ = Relay.save_checkpoint ~summary ~task:current_task ~todos ~pdca:pdca_state ~files:relevant_files ~metrics in
+      let json = `Assoc [
+        ("status", `String "checkpoint_saved");
+        ("usage_ratio", `Float metrics.Relay.usage_ratio);
+        ("estimated_tokens", `Int metrics.Relay.estimated_tokens);
+      ] in
+      (true, Yojson.Safe.pretty_to_string json)
+
+  | "masc_relay_now" ->
+      let summary = get_string "summary" "" in
+      let current_task = get_string_opt "current_task" in
+      let target_agent = get_string "target_agent" "claude" in
+      let generation = get_int "generation" 0 in
+      let payload : Relay.handoff_payload = {
+        summary;
+        current_task;
+        todos = [];
+        pdca_state = None;
+        relevant_files = [];
+        session_id = None;
+        relay_generation = generation;
+      } in
+      let prompt = Relay.build_handoff_prompt ~payload ~generation:(generation + 1) in
+      let result = Spawn.spawn ~agent_name:target_agent ~prompt ~timeout_seconds:600 () in
+      let output_preview =
+        if String.length result.Spawn.output > 500 then
+          String.sub result.Spawn.output 0 500
+        else result.Spawn.output
+      in
+      let json = `Assoc [
+        ("success", `Bool result.Spawn.success);
+        ("exit_code", `Int result.Spawn.exit_code);
+        ("elapsed_ms", `Int result.Spawn.elapsed_ms);
+        ("target_agent", `String target_agent);
+        ("generation", `Int (generation + 1));
+        ("output_preview", `String output_preview);
+      ] in
+      (true, Yojson.Safe.pretty_to_string json)
+
+  | "masc_relay_smart_check" ->
+      let messages = get_int "messages" 0 in
+      let tool_calls = get_int "tool_calls" 0 in
+      let hint_str = get_string "task_hint" "simple" in
+      let file_count = get_int "file_count" 1 in
+      let hint =
+        match hint_str with
+        | "large_file" -> Relay.Large_file_read "unknown"
+        | "multi_file" -> Relay.Multi_file_edit (max 1 file_count)
+        | "long_running" -> Relay.Long_running_task
+        | "exploration" -> Relay.Exploration_task
+        | _ -> Relay.Simple_task
+      in
+      let metrics = Relay.estimate_context ~messages ~tool_calls ~model:"claude" in
+      let decision = Relay.should_relay_smart ~config:Relay.default_config ~metrics ~task_hint:hint in
+      let decision_str = match decision with
+        | `Proactive -> "proactive"
+        | `Reactive -> "reactive"
+        | `No_relay -> "no_relay"
+      in
+      let json = `Assoc [
+        ("decision", `String decision_str);
+        ("usage_ratio", `Float metrics.Relay.usage_ratio);
+        ("estimated_tokens", `Int metrics.Relay.estimated_tokens);
+        ("max_tokens", `Int metrics.Relay.max_tokens);
+      ] in
+      (true, Yojson.Safe.pretty_to_string json)
+
+  (* Mitosis tools - Cell Division Pattern *)
+  | "masc_mitosis_status" ->
+      let cell = !(Mcp_server.current_cell) in
+      let pool = !(Mcp_server.stem_pool) in
+      let json = `Assoc [
+        ("cell", Mitosis.cell_to_json cell);
+        ("pool", Mitosis.pool_to_json pool);
+        ("config", Mitosis.config_to_json Mitosis.default_config);
+      ] in
+      (true, Yojson.Safe.pretty_to_string json)
+
+  | "masc_mitosis_all" ->
+      let statuses = Mitosis.get_all_statuses ~room_config:config in
+      let json =
+        `List (List.map (fun (node_id, status, ratio) ->
+          `Assoc [
+            ("node_id", `String node_id);
+            ("status", `String status);
+            ("estimated_ratio", `Float ratio);
+          ]) statuses)
+      in
+      (true, Yojson.Safe.pretty_to_string json)
+
+  | "masc_mitosis_pool" ->
+      let pool = !(Mcp_server.stem_pool) in
+      (true, Yojson.Safe.pretty_to_string (Mitosis.pool_to_json pool))
+
+  | "masc_mitosis_divide" ->
+      let summary = get_string "summary" "" in
+      let current_task = get_string "current_task" "" in
+      let full_context =
+        if current_task = "" then summary
+        else Printf.sprintf "Summary: %s\n\nCurrent Task: %s" summary current_task
+      in
+      let cell = !(Mcp_server.current_cell) in
+      let config_mitosis = Mitosis.default_config in
+      let spawn_fn ~prompt =
+        Spawn.spawn ~agent_name:"claude" ~prompt ~timeout_seconds:600 ()
+      in
+      let (spawn_result, new_cell, new_pool) =
+        Mitosis.execute_mitosis ~config:config_mitosis ~pool:!(Mcp_server.stem_pool)
+          ~parent:cell ~full_context ~spawn_fn
+      in
+      Mcp_server.current_cell := new_cell;
+      Mcp_server.stem_pool := new_pool;
+      Mitosis.write_status_with_backend ~room_config:config ~cell:new_cell ~config:config_mitosis;
+      let json = `Assoc [
+        ("success", `Bool spawn_result.Spawn.success);
+        ("previous_generation", `Int cell.Mitosis.generation);
+        ("new_generation", `Int new_cell.Mitosis.generation);
+        ("successor_output", `String (String.sub spawn_result.Spawn.output 0 (min 500 (String.length spawn_result.Spawn.output))));
+      ] in
+      (true, Yojson.Safe.pretty_to_string json)
+
+  | "masc_mitosis_check" ->
+      let context_ratio = get_float "context_ratio" 0.0 in
+      let cell = !(Mcp_server.current_cell) in
+      let config_mitosis = Mitosis.default_config in
+      let should_prepare = Mitosis.should_prepare ~config:config_mitosis ~cell ~context_ratio in
+      let should_handoff = Mitosis.should_handoff ~config:config_mitosis ~cell ~context_ratio in
+      let json = `Assoc [
+        ("should_prepare", `Bool should_prepare);
+        ("should_handoff", `Bool should_handoff);
+        ("context_ratio", `Float context_ratio);
+        ("threshold_prepare", `Float config_mitosis.Mitosis.prepare_threshold);
+        ("threshold_handoff", `Float config_mitosis.Mitosis.handoff_threshold);
+        ("phase", `String (Mitosis.phase_to_string cell.Mitosis.phase));
+      ] in
+      (true, Yojson.Safe.pretty_to_string json)
+
+  | "masc_mitosis_record" ->
+      let task_done = get_bool "task_done" false in
+      let tool_called = get_bool "tool_called" false in
+      let cell = !(Mcp_server.current_cell) in
+      let updated = Mitosis.record_activity ~cell ~task_done ~tool_called in
+      Mcp_server.current_cell := updated;
+      Mitosis.write_status_with_backend ~room_config:config ~cell:updated ~config:Mitosis.default_config;
+      let json = `Assoc [
+        ("task_count", `Int updated.Mitosis.task_count);
+        ("tool_call_count", `Int updated.Mitosis.tool_call_count);
+        ("last_activity", `Float updated.Mitosis.last_activity);
+      ] in
+      (true, Yojson.Safe.pretty_to_string json)
+
+  | "masc_mitosis_prepare" ->
+      let full_context = get_string "full_context" "" in
+      let cell = !(Mcp_server.current_cell) in
+      let prepared = Mitosis.prepare_for_division ~config:Mitosis.default_config ~cell ~full_context in
+      Mcp_server.current_cell := prepared;
+      Mitosis.write_status_with_backend ~room_config:config ~cell:prepared ~config:Mitosis.default_config;
+      let json = `Assoc [
+        ("status", `String "prepared");
+        ("phase", `String (Mitosis.phase_to_string prepared.Mitosis.phase));
+        ("dna_length", `Int (String.length (Option.value ~default:"" prepared.Mitosis.prepared_dna)));
+      ] in
+      (true, Yojson.Safe.pretty_to_string json)
 
   (* Memento Mori - Agent self-awareness of mortality *)
   | "masc_memento_mori" ->
@@ -1643,6 +2744,19 @@ let handle_call_tool_eio ~sw ~clock state id params =
   let (success, message) = execute_tool_eio ~sw ~clock state ~name ~arguments in
   let end_time = Eio.Time.now clock in
   let duration_ms = int_of_float ((end_time -. start_time) *. 1000.0) in
+
+  (* Audit log (tool_call) if enabled *)
+  let agent_name =
+    try arguments |> member "agent_name" |> to_string
+    with _ -> "unknown"
+  in
+  append_audit_event state.Mcp_server.room_config {
+    timestamp = Unix.gettimeofday ();
+    agent = agent_name;
+    event_type = "tool_call";
+    success;
+    detail = Some name;
+  };
 
   (* Track tool call in telemetry (controlled by MASC_TELEMETRY_ENABLED) *)
   let telemetry_enabled =

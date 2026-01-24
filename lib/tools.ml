@@ -2685,6 +2685,7 @@ of their context limits and gracefully hand over work to successors.|};
             `String "auth_failure";
             `String "anomaly_detected";
             `String "security_violation";
+            `String "tool_call";
             `String "all"
           ]);
           ("description", `String "Filter by event type (default: all)");

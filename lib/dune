@@ -31,6 +31,7 @@
    level4_config
    log
    prometheus
+   rate_limit
    masc_mcp
    masc_pb
    mcp_protocol

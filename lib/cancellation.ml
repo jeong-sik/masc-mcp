@@ -15,9 +15,20 @@ type token = {
   created_at: float;
 }
 
-(** Token store *)
+(** Token store - Thread-safe with Eio.Mutex protection *)
 module TokenStore = struct
   let tokens : (string, token) Hashtbl.t = Hashtbl.create 64
+  let lock : Eio.Mutex.t option ref = ref None
+
+  (** Initialize the token store with Eio mutex. Call once at server startup. *)
+  let init () : unit =
+    if !lock = None then lock := Some (Eio.Mutex.create ())
+
+  (** Run operation with mutex protection *)
+  let with_lock f =
+    match !lock with
+    | Some mutex -> Eio.Mutex.use_rw ~protect:true mutex (fun () -> f ())
+    | None -> f ()  (* Fallback for non-Eio contexts or before init *)
 
   (** Generate token ID *)
   let generate_id () : string =
@@ -30,36 +41,40 @@ module TokenStore = struct
 
   (** Create new cancellation token *)
   let create () : token =
-    let token = {
-      id = generate_id ();
-      cancelled = false;
-      reason = None;
-      callbacks = [];
-      created_at = Unix.gettimeofday ();
-    } in
-    Hashtbl.add tokens token.id token;
-    token
+    with_lock (fun () ->
+      let token = {
+        id = generate_id ();
+        cancelled = false;
+        reason = None;
+        callbacks = [];
+        created_at = Unix.gettimeofday ();
+      } in
+      Hashtbl.add tokens token.id token;
+      token
+    )
 
   (** Get token by ID *)
   let get (id : string) : token option =
-    Hashtbl.find_opt tokens id
+    with_lock (fun () -> Hashtbl.find_opt tokens id)
 
   (** Remove token *)
   let remove (id : string) : unit =
-    Hashtbl.remove tokens id
+    with_lock (fun () -> Hashtbl.remove tokens id)
 
   (** List all tokens *)
   let list_all () : token list =
-    Hashtbl.fold (fun _ t acc -> t :: acc) tokens []
+    with_lock (fun () -> Hashtbl.fold (fun _ t acc -> t :: acc) tokens [])
 
   (** Cleanup old tokens (older than max_age seconds) *)
   let cleanup ~(max_age : float) : int =
-    let now = Unix.gettimeofday () in
-    let old_tokens = Hashtbl.fold (fun id t acc ->
-      if now -. t.created_at > max_age then id :: acc else acc
-    ) tokens [] in
-    List.iter (Hashtbl.remove tokens) old_tokens;
-    List.length old_tokens
+    with_lock (fun () ->
+      let now = Unix.gettimeofday () in
+      let old_tokens = Hashtbl.fold (fun id t acc ->
+        if now -. t.created_at > max_age then id :: acc else acc
+      ) tokens [] in
+      List.iter (Hashtbl.remove tokens) old_tokens;
+      List.length old_tokens
+    )
 end
 
 (** Check if token is cancelled *)

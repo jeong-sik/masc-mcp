@@ -954,6 +954,9 @@ exception Shutdown
 
 let run_cmd port base_path =
   Eio_main.run @@ fun env ->
+  (* Initialize thread-safe token store for cancellation support *)
+  Masc_mcp.Cancellation.TokenStore.init ();
+
   (* Graceful shutdown setup *)
   let switch_ref = ref None in
   let shutdown_initiated = ref false in

@@ -47,10 +47,11 @@ let create ?(config = default_rate_limit) () = {
   lock = Eio.Mutex.create ();
 }
 
-(** Run a critical section with mutex protection. *)
+(** Run a critical section with mutex protection.
+    Uses Eio.Mutex.use_rw for safe lock management - automatically
+    releases lock even on exceptions, preventing deadlocks. *)
 let with_lock registry f =
-  Eio.Mutex.lock registry.lock;
-  Fun.protect ~finally:(fun () -> Eio.Mutex.unlock registry.lock) f
+  Eio.Mutex.use_rw ~protect:true registry.lock (fun () -> f ())
 
 (** Register a new session *)
 let register registry ~agent_name =

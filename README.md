@@ -13,6 +13,21 @@ A native OCaml implementation for coordinating multiple AI agents (Claude, Gemin
 
 Note: This is a personal project.
 
+## Quickstart (TL;DR)
+
+```bash
+./start-masc-mcp.sh --http --port 8935
+curl http://127.0.0.1:8935/health
+```
+
+```json
+{
+  "mcpServers": {
+    "masc": { "type": "http", "url": "http://127.0.0.1:8935/mcp" }
+  }
+}
+```
+
 ## 5-Minute Quick Start
 
 ```bash

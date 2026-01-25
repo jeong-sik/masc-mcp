@@ -3,9 +3,7 @@
 [![Version](https://img.shields.io/badge/version-2.2.1-blue.svg)](https://github.com/jeong-sik/masc-mcp)
 [![OCaml](https://img.shields.io/badge/OCaml-5.x-orange.svg)](https://ocaml.org/)
 [![MCP](https://img.shields.io/badge/MCP-2025--11--25-blue.svg)](https://spec.modelcontextprotocol.io/)
-[![Status](https://img.shields.io/badge/status-Production%20Ready-green.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-385%20passed-green.svg)]()
 
 **M**ulti-**A**gent **S**treaming **C**oordination - MCP Server
 
@@ -28,7 +26,7 @@ curl http://127.0.0.1:8935/health
 }
 ```
 
-## 5-Minute Quick Start
+## Quick Start
 
 ```bash
 # 1. Start server (Eio default; Lwt deprecated, auto-builds if needed)
@@ -148,7 +146,7 @@ claude  # or: codex, gemini
 
 ## Mode System (Token Optimization)
 
-MASC provides **Serena-style mode switching** to reduce token usage by enabling only the categories you need.
+MASC provides mode switching to reduce token usage by enabling only the categories you need.
 
 ### Available Modes
 

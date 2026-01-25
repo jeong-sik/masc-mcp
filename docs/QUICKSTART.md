@@ -146,7 +146,7 @@ const response = await masc_portal_status({ target: "gemini" })
 
 ---
 
-## 🏥 트러블슈팅
+## 트러블슈팅
 
 ### Redis Blocking 문제
 ```
@@ -174,7 +174,7 @@ export MASC_STORAGE_TYPE=postgres
 
 ---
 
-## 📊 모니터링
+## 모니터링
 
 ### 실시간 상태 확인
 ```bash
@@ -195,7 +195,7 @@ dune exec ./bin/masc_cost.exe
 
 ---
 
-## 🔗 관련 문서
+## 관련 문서
 
 - [MASC-V2-DESIGN.md](./MASC-V2-DESIGN.md) - 아키텍처 상세
 - [README.md](../README.md) - 설치 및 빌드

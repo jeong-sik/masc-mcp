@@ -133,11 +133,11 @@ MASC에서 가장 혼동하기 쉬운 개념이 **Cluster**와 **Room**입니다
 ### `masc_status` 출력 예시
 
 ```
-🏢 Cluster: me
-📍 Room: default
-📁 Path: /Users/dancer/me/.masc
+Cluster: me
+Room: default
+Path: /Users/dancer/me/.masc
 
-👥 Active Agents (2)
+Active Agents (2)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 • claude-rare-koala (working on task-027)
 • gemini-fierce-zebra (idle)
@@ -210,7 +210,7 @@ Match: claude (2/2 capabilities) > gemini (1/2) > codex (1/2)
 
 ### 4. PR Workflow (gh CLI 활용)
 
-**CASPER 핵심 조언**: "PR 시스템 재발명 금지. `gh` CLI가 이미 완벽함"
+**CASPER 핵심 조언**: "PR 시스템 재발명 금지. `gh` CLI가 이미 충분함"
 
 ```bash
 # Create PR
@@ -261,7 +261,7 @@ CASPER의 실용적 조언에 따라 최소 기능부터 시작:
 **Guardrails**:
 1. **Human-in-the-loop**: 최종 main 브랜치 머지는 인간 승인 필수
 2. **Audit Trail**: 모든 결정은 이벤트 로그에 불변 기록
-3. **Capability Honesty**: 에이전트는 능력을 과장 신고할 수 없음 (실적 기반 검증)
+3. **Capability Honesty (목표)**: 능력 과장 방지를 목표로 함 (실적 기반 검증 가정)
 4. **Escalation Path**: 합의 실패 시 인간에게 에스컬레이션
 
 ---
@@ -347,7 +347,6 @@ v1 → v2 마이그레이션:
 
 ### Analysis & Improvement
 
-- **[EXPERT-PANEL-REVIEW.md](./EXPERT-PANEL-REVIEW.md)** - 7인 전문가 페르소나 심층 리뷰 (2026-01-09)
   - 냉정한 비판자, YCombinator, Chomsky, Darwin, Musk, Neuroscientist, Haskell Master
   - 평균 점수: 6.4/10
   - 공통 지적: 학습/진화 메커니즘 부재, 메타포 과잉

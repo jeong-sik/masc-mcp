@@ -1,6 +1,9 @@
 # MASC Webhook Receiver 설계
 
-> "Webhook 들어오면 MASC Room 중 하나에 쏴준다"
+Status: design (not implemented/verified)
+Verification: none recorded (2026-01-25)
+
+Design goal: Webhook 이벤트를 MASC Room의 Task로 라우팅
 
 ## 1. 핵심 아이디어
 
@@ -252,7 +255,7 @@ let dispatch_to_room ~room_name task =
 (* 2. Room에 있는 agent들에게 알림 *)
 let notify_room ~room_name ~task =
   Broadcast.send ~room:room_name
-    (Printf.sprintf "📬 New task: %s (priority: %d)" task.title task.priority)
+    (Printf.sprintf "New task: %s (priority: %d)" task.title task.priority)
 ```
 
 ### 7.2 Agent의 Task 처리 흐름
@@ -262,7 +265,7 @@ let notify_room ~room_name ~task =
    → masc_join --room pr-review --capabilities "typescript,review"
 
 2. Webhook 도착 → Room에 Task 생성
-   → broadcast: "📬 New task: [PR] Review #42"
+   → broadcast: "New task: [PR] Review #42"
 
 3. Agent가 task 확인
    → masc_task_list --room pr-review --status pending

@@ -1,34 +1,8 @@
 # ThoughtRoom Architecture
 
-> **"생각의 방"** - 기억하고, 연결하고, 협업하는 AI 집단 의식
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        T H O U G H T R O O M                         │
-│                                                                     │
-│     ┌───────────────┐   ┌───────────────┐   ┌───────────────┐     │
-│     │   MELCHIOR    │   │   BALTHASAR   │   │    CASPER     │     │
-│     │   (GPT-5.2)   │   │ (Claude Opus) │   │  (Gemini 3)   │     │
-│     │   🔬 과학자    │   │   🪞 거울     │   │   🎯 전략가    │     │
-│     └───────┬───────┘   └───────┬───────┘   └───────┬───────┘     │
-│             │                   │                   │             │
-│             └───────────────────┼───────────────────┘             │
-│                                 │                                 │
-│                    ┌────────────┴────────────┐                    │
-│                    │     MASC Protocol       │                    │
-│                    │   (Coordination Layer)  │                    │
-│                    └────────────┬────────────┘                    │
-│                                 │                                 │
-│          ┌──────────────────────┼──────────────────────┐         │
-│          │                      │                      │         │
-│  ┌───────┴───────┐    ┌────────┴────────┐    ┌───────┴───────┐  │
-│  │   HippoRAG    │    │     Neo4j       │    │   PostgreSQL  │  │
-│  │ (Semantic 🧠) │◄──►│ (Knowledge 🕸️) │◄──►│  (Session 📝) │  │
-│  │ Qdrant Vector │    │  Graph DB       │    │   Log/Track   │  │
-│  └───────────────┘    └─────────────────┘    └───────────────┘  │
-│                                                                  │
-└──────────────────────────────────────────────────────────────────┘
-```
+Status: concept document (not validated). For implemented behavior, see `docs/SPEC.md`.
+Verification: none recorded (2026-01-25)
+Scope: design proposal; examples are illustrative.
 
 ## Version History
 
@@ -42,14 +16,14 @@
 
 ### 1.1 왜 ThoughtRoom인가?
 
-**단일 에이전트의 한계** (MAR 논문, 2024):
-- 자기 생성물 평가 시 **확증편향** 발생
-- "내가 만들었으니 좋은 거야" 무의식적 편향
-- Self-refine loops have diminishing returns
+**단일 에이전트의 한계** (문헌 기반 가설):
+- 자기 생성물 평가 시 확증편향 가능성
+- 자기 합리화 편향 가능성
+- Self-refine loops may have diminishing returns (hypothesis)
 
-**ThoughtRoom 해결책**:
+**ThoughtRoom 설계 원칙(가설)**:
 ```
-만든 놈 ≠ 검증하는 놈 ≠ 판단하는 놈
+만든 역할 ≠ 검증 역할 ≠ 판단 역할
 ```
 
 ### 1.2 핵심 원칙
@@ -65,7 +39,7 @@
 
 ## 2. Auto-Decomposition Pipeline
 
-> **"작업 분할의 어려움"을 AI가 해결한다**
+Motivation (hypothesis): 작업 분할의 어려움을 AI가 보조한다.
 
 ### 2.1 Pipeline 구조
 
@@ -77,7 +51,7 @@
 │  ┌─────────────┐      ┌─────────────┐      ┌─────────────┐    │
 │  │  DECOMPOSER │──────│  VALIDATOR  │──────│  EXECUTOR   │    │
 │  │  (Gemini)   │      │  (Claude)   │      │  (Codex)    │    │
-│  │  🎯 분해     │      │  🪞 검증    │      │  🔬 실행     │    │
+│  │  분해     │      │  검증    │      │  실행     │    │
 │  └─────────────┘      └─────────────┘      └─────────────┘    │
 │        │                    │                    │             │
 │        ▼                    ▼                    ▼             │
@@ -149,7 +123,7 @@ BALTHASAR (Claude Opus) validates decomposition:
 
 ## 3. Code Review Pipeline
 
-> **"만든 놈 ≠ 검증하는 놈"**
+Principle (hypothesis): creation and review roles are separated.
 
 ### 3.1 Pipeline 구조
 
@@ -374,9 +348,9 @@ ThoughtRoom:
    - Dependencies: config files first, then components
 
 2. BALTHASAR (Validator):
-   - ✓ No circular dependencies
-   - ✓ Config → Components → Tests order correct
-   - ⚠️ Batch 7 has cross-dependency, needs sequential
+   - OK: No circular dependencies
+   - OK: Config → Components → Tests order correct
+   - Note: Batch 7 has cross-dependency, needs sequential
 
 3. Parallel Execution:
    - MELCHIOR: Batches 1-5 (configs)
@@ -403,8 +377,8 @@ ThoughtRoom:
      └── Test Layer (unit + integration)
 
 2. BALTHASAR (Validator):
-   - ✓ Separation of concerns correct
-   - ⚠️ JWT refresh logic missing from task graph
+   - OK: Separation of concerns correct
+   - Note: JWT refresh logic missing from task graph
    - Added: Token refresh subtask
 
 3. Implementation:
@@ -419,13 +393,15 @@ ThoughtRoom:
 
 ---
 
-## 7. Implementation Roadmap
+## 7. Implementation Roadmap (Proposal)
 
-### Phase 1: Foundation (Current)
-- [x] MASC Protocol v2 (OCaml)
-- [x] Basic agent coordination
-- [x] Worktree isolation (primary isolation strategy)
-- [ ] **ThoughtRoom design document** ← We are here
+Note: 아래 항목은 계획 초안이며 완료 여부는 이 문서에서 검증하지 않음.
+
+### Phase 1: Foundation (Assumed Baseline; Verification Needed)
+- [ ] MASC Protocol v2 (OCaml)
+- [ ] Basic agent coordination
+- [ ] Worktree isolation (primary isolation strategy)
+- [ ] ThoughtRoom design document
 
 ### Phase 2: Auto-Decomposition
 - [ ] Decomposer Agent prompt engineering
@@ -453,10 +429,12 @@ ThoughtRoom:
 
 ---
 
-## 8. Success Metrics
+## 8. Target Metrics (Hypotheses)
 
-| Metric | Target | Measurement |
-|--------|--------|-------------|
+Targets below are hypotheses and require measurement.
+
+| Metric | Target (hypothesis) | Measurement |
+|--------|--------------------|-------------|
 | **Confirmation Bias Reduction** | 50% fewer self-approved issues | Pre/post review defect rate |
 | **Task Completion Speed** | 2x for parallelizable tasks | Time to completion |
 | **Code Quality** | 30% fewer production bugs | Bug count after deployment |
@@ -474,7 +452,3 @@ ThoughtRoom:
 - [MASC Protocol v2](./MASC-V2-DESIGN.md) - Foundation coordination layer
 
 ---
-
-*"혼자 생각하면 편향되고, 함께 생각하면 진화한다."*
-
-**ThoughtRoom: Where AI minds converge.**

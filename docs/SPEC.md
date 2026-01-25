@@ -261,34 +261,36 @@ Client Request
 
 ## MCP 2025-11-25 Compliance
 
+Status here is code-level (unverified). Use test logs for runtime verification.
+
 ### MUST Requirements (implemented)
 
 | Requirement | Status | Implementation |
 |-------------|--------|----------------|
-| JSON-RPC 2.0 Format | ✅ | `mcp_protocol.ml` |
-| Protocol Version Header | ✅ | `X-MCP-Protocol-Version: 2025-11-25` |
-| Standard Error Codes | ✅ | -32700, -32600, -32601, -32602, -32603 |
-| Origin Validation | ✅ | `validate_origin` with allowlist |
+| JSON-RPC 2.0 Format | yes | `mcp_protocol.ml` |
+| Protocol Version Header | yes | `X-MCP-Protocol-Version: 2025-11-25` |
+| Standard Error Codes | yes | -32700, -32600, -32601, -32602, -32603 |
+| Origin Validation | yes | `validate_origin` with allowlist |
 
 ### SHOULD Requirements (implemented)
 
 | Requirement | Status | Implementation |
 |-------------|--------|----------------|
-| SSE Support | ✅ | `sse.ml` with chunked encoding |
-| Streamable HTTP | ✅ | Transfer-Encoding: chunked |
-| Graceful Shutdown | ✅ | SIGTERM handler, pending task wait |
-| Tool Result Streaming | ✅ | Progress notifications |
+| SSE Support | yes | `sse.ml` with chunked encoding |
+| Streamable HTTP | yes | Transfer-Encoding: chunked |
+| Graceful Shutdown | yes | SIGTERM handler, pending task wait |
+| Tool Result Streaming | yes | Progress notifications |
 
 ### MAY Requirements (implemented)
 
 | Requirement | Status | Implementation |
 |-------------|--------|----------------|
-| Session ID | ✅ | `session.ml` - `X-MCP-Session-ID` header |
-| Event IDs (Resumability) | ✅ | SSE `id:` field, `Last-Event-ID` reconnect |
-| Cancellation Tokens | ✅ | `cancellation.ml` - LIFO callbacks |
-| Resource Subscriptions | ✅ | `subscriptions.ml` - 6 resource types |
-| Progress Notifications | ✅ | Real-time task progress streaming |
-| Logging Interface | ✅ | Server logs to client via SSE |
+| Session ID | yes | `session.ml` - `X-MCP-Session-ID` header |
+| Event IDs (Resumability) | yes | SSE `id:` field, `Last-Event-ID` reconnect |
+| Cancellation Tokens | yes | `cancellation.ml` - LIFO callbacks |
+| Resource Subscriptions | yes | `subscriptions.ml` - 6 resource types |
+| Progress Notifications | yes | Real-time task progress streaming |
+| Logging Interface | yes | Server logs to client via SSE |
 
 ---
 
@@ -356,8 +358,8 @@ Endpoint: `GET /.well-known/agent-card.json`
 | **Discovery** | Manual config | Agent Cards | Both |
 | **State Management** | Client-side | Task artifacts | Room-based |
 | **Authentication** | Per-server | Bearer/OAuth | Built-in |
-| **Cellular Agents** | ❌ | ❌ | ✅ |
-| **Shared Cache** | ❌ | ❌ | ✅ |
+| **Cellular Agents** | no | no | yes |
+| **Shared Cache** | no | no | yes |
 
 ---
 
@@ -407,12 +409,12 @@ masc_handover_create --source claude --reason context_limit
 
 ### Recent Completions (v3.0)
 
-- ✅ Phase 8: Cellular Agent Handover
-- ✅ Phase 9: Execution Memory
-- ✅ Phase 10: Token Usage Tracking
-- ✅ Phase 11: Internal Caching
-- ✅ Phase 12: Cluster Tempo Control
-- ✅ Phase 13: Visual Dashboard
+- Phase 8: Cellular Agent Handover
+- Phase 9: Execution Memory
+- Phase 10: Token Usage Tracking
+- Phase 11: Internal Caching
+- Phase 12: Cluster Tempo Control
+- Phase 13: Visual Dashboard
 
 ### Planned
 

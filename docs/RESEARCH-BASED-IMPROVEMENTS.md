@@ -1,14 +1,15 @@
 # MASC Research-Based Improvements
 
 **Date**: 2026-01-09
-**Based on**: Expert Panel Review + Academic Literature Survey
-**Status**: Proposal
+**Based on**: Literature survey (links below)
+**Status**: Proposal (not implemented/verified)
+**Verification**: none recorded (2026-01-25)
 
 ---
 
 ## Research Sources
 
-이 문서의 개선안은 다음 학술 연구에 기반합니다:
+이 문서의 개선안은 아래 문헌 목록을 참고해 정리한 제안입니다. 실제 구현/검증은 포함하지 않습니다.
 
 | ID | Title | Venue | Year |
 |----|-------|-------|------|
@@ -28,25 +29,25 @@
 
 ## Priority Matrix
 
-| Priority | Improvement | Research | Expert | Impact |
-|----------|-------------|----------|--------|--------|
-| 🔴 P0 | Error Propagation Guard | R1 | Cold Critic | Knowledge drift 방지 |
-| 🔴 P0 | Fitness Selection | R3, R4, R9 | Darwin | 최적 에이전트 선택 |
-| 🟠 P1 | Hebbian Learning | R5, R6 | Neuroscientist | 협업 패턴 최적화 |
-| 🟠 P1 | Effect System | R7, R8, R11 | Haskell Master | 타입 안전성 극대화 |
-| 🟡 P2 | Terminology Normalization | R2 | Chomsky | 코드 가독성 |
-| 🟡 P2 | Telemetry/Analytics | R2, R10 | YC | Data-driven 의사결정 |
-| 🟢 P3 | KV-Cache Transfer | R1 | Musk | Handoff 지연 최소화 |
+| Priority | Improvement | Research | Intended Impact (hypothesis) |
+|----------|-------------|----------|------------------------------|
+| P0 | Error Propagation Guard | R1 | Knowledge drift 완화 |
+| P0 | Fitness Selection | R3, R4, R9 | 에이전트 선택 품질 개선 |
+| P1 | Hebbian Learning | R5, R6 | 협업 패턴 개선 |
+| P1 | Effect System | R7, R8, R11 | 타입 안전성 개선 |
+| P2 | Terminology Normalization | R2 | 코드 가독성 개선 |
+| P2 | Telemetry/Analytics | R2, R10 | 운영 지표 기반 판단 보조 |
+| P3 | KV-Cache Transfer | R1 | Handoff 지연 감소(가설) |
 
 ---
 
-## 🔴 P0: Error Propagation Guard
+## P0: Error Propagation Guard
 
-### 문제 (R1)
+### 문제 (R1 요약)
 
-> "Knowledge drift leads to amplification and propagation of errors through agent chains. Unlike humans who naturally filter information, LLMs exhibit cognitive bias expansion."
+R1은 멀티 에이전트 체인에서 정보 드리프트(knowledge drift)가 누적될 수 있음을 논의한다. 이 문서는 이를 리스크로 보고 완화 장치를 제안한다.
 
-### 구현
+### 구현 예시 (미구현)
 
 ```ocaml
 (* lib/drift_guard.ml *)
@@ -88,7 +89,7 @@ let handle_drift = function
       | `Structural -> reformat_context d
 ```
 
-### 테스트 케이스
+### 테스트 케이스 예시 (미구현)
 
 ```ocaml
 let%test "drift detection" =
@@ -101,14 +102,13 @@ let%test "drift detection" =
 
 ---
 
-## 🔴 P0: Fitness Selection
+## P0: Fitness Selection
 
-### 문제 (R3, R4)
+### 문제 (R3, R4 요약)
 
-> "EvoAgent applies evolutionary operators (mutation, crossover, selection) to automatically extend specialized agents." - R3
-> "Fine-grained agent-based EC treats each individual in the population as an agent with fitness-driven selection." - R4
+R3/R4는 진화적 선택(선택/교차/돌연변이 등)을 통해 에이전트를 개선하는 접근을 다룬다. 이를 MASC의 에이전트 선택 로직에 적용하는 방안을 제안한다.
 
-### 구현
+### 구현 예시 (미구현)
 
 ```ocaml
 (* lib/fitness.ml *)
@@ -176,14 +176,13 @@ CREATE INDEX idx_agent_metrics_agent ON agent_metrics(agent_id, recorded_at);
 
 ---
 
-## 🟠 P1: Hebbian Learning
+## P1: Hebbian Learning
 
-### 문제 (R5, R6)
+### 문제 (R5, R6 요약)
 
-> "Dual learning rates, offline consolidation, and dynamic plasticity modulation." - R5
-> "Machine learning models, similar to human neuroplasticity, enhance performance through iterative learning." - R6
+R5/R6는 학습률 조정, 통합(consolidation) 같은 개념을 다룬다. 이 문서는 협업 성과를 가중치로 모델링하는 방식의 적용 가능성을 제안한다.
 
-### 구현
+### 구현 예시 (미구현)
 
 ```ocaml
 (* lib/hebbian.ml *)
@@ -259,13 +258,13 @@ let on_task_complete ~agents ~success =
 
 ---
 
-## 🟠 P1: Effect System (OCaml 5.3+)
+## P1: Effect System (OCaml 5.3+)
 
-### 문제 (R7, R8)
+### 문제 (R7, R8 요약)
 
-> "By extending OCaml's type system with algebraic effects, side effects become explicitly tracked in types." - R7
+R7/R8는 OCaml의 effect 시스템을 다룬다. 이 문서는 부수효과를 명시적으로 분리해 안정성을 높이는 방향을 제안한다.
 
-### 구현
+### 구현 예시 (미구현)
 
 ```ocaml
 (* lib/effects.ml - OCaml 5.3+ *)
@@ -342,11 +341,11 @@ let run_with_mock ~mock_fs computation =
 
 ---
 
-## 🟡 P2: Terminology Normalization
+## P2: Terminology Normalization
 
-### 문제 (R2)
+### 문제 (R2 요약)
 
-> "Orchestration platform serves as the core infrastructure that manages interactions and information flow among agents."
+R2는 오케스트레이션 계층이 에이전트 상호작용을 관리하는 역할을 강조한다. 용어 불일치가 커지면 협업 비용이 증가할 수 있어 정규화를 제안한다.
 
 ### 현재 불일치
 
@@ -357,7 +356,7 @@ let run_with_mock ~mock_fs computation =
 | 에이전트 생명주기 | Cell state, Lifecycle | **Lifecycle** |
 | 작업 단위 | Task, Job, Work | **Task** |
 
-### 마이그레이션 계획
+### 마이그레이션 계획 (예시, 미적용)
 
 ```bash
 # 1. 코드 내 용어 변경
@@ -374,13 +373,13 @@ type capsule = dna    (* Deprecated *)
 
 ---
 
-## 🟡 P2: Telemetry/Analytics
+## P2: Telemetry/Analytics
 
-### 문제 (R2, R10)
+### 문제 (R2, R10 요약)
 
-> "The orchestration platform facilitates coordination, communication, planning, and learning." - R2
+R2/R10는 오케스트레이션의 관측 가능성 필요성을 언급한다. 운영 지표를 수집할 수 있는 최소 이벤트 정의를 제안한다.
 
-### 구현
+### 구현 예시 (미구현)
 
 ```ocaml
 (* lib/telemetry.ml *)
@@ -450,18 +449,18 @@ masc_error_rate %.4f
 
 ---
 
-## 🟢 P3: KV-Cache Transfer
+## P3: KV-Cache Transfer
 
-### 문제 (R1)
+### 문제 (R1 요약)
 
-> "Cache-to-Cache (C2C) proposes direct semantic communication between LLMs using their internal KV-cache, bypassing inefficient text generation."
+R1은 LLM 내부 상태를 활용해 전달 비용을 줄일 수 있다는 가능성을 언급한다. 이를 KV-cache 직접 전달 가설로 정리한다.
 
 ### 연구 단계
 
-이 기능은 LLM 내부 구조에 접근이 필요하여 현재 구현 불가능합니다. 향후 API 지원 시 구현 예정.
+KV-cache 접근은 모델 내부 상태 노출이 필요하므로, 공개 API에서 지원되지 않는 경우 구현 난이도가 높을 것으로 예상된다. API 지원이 확인되면 재검토한다.
 
 ```ocaml
-(* lib/kv_cache.ml - Future implementation *)
+(* lib/kv_cache.ml - Future implementation (example) *)
 
 (** KV-cache snapshot for direct transfer *)
 type kv_cache = {
@@ -486,7 +485,7 @@ let inject_cache ~agent_id ~cache : bool Lwt.t =
 
 ---
 
-## Implementation Roadmap
+## Implementation Roadmap (Proposal)
 
 ### Phase 1 (Week 1-2): Foundation
 - [ ] Fitness module implementation
@@ -510,9 +509,9 @@ let inject_cache ~agent_id ~cache : bool Lwt.t =
 
 ---
 
-## References
+## References (Optional)
 
-All citations are stored in Neo4j Knowledge Graph:
+필요 시 Neo4j에 참고 문헌을 기록하는 예시:
 
 ```cypher
 MATCH (r:Research {id: "research_20260109_161421"})-[:CITES]->(c:Citation)

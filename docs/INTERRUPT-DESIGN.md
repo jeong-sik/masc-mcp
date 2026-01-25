@@ -1,14 +1,15 @@
 # MASC Interrupt Design (LangGraph 패턴)
 
-> Human-in-the-loop 워크플로우를 위한 Interrupt/Resume 시스템
+> Human-in-the-loop 워크플로우를 위한 Interrupt/Resume 시스템 (설계안)
 
-**Status**: Design Phase
+**Status**: Design (not implemented/verified)
 **Created**: 2026-01-04
 **Author**: BALTHASAR (Claude)
+**Verification**: none (2026-01-25)
 
 ## 개요
 
-LangGraph의 `interrupt()` 패턴을 MASC에 적용하여, 위험한 작업 전 사용자 승인을 받는 기능.
+LangGraph의 `interrupt()` 패턴을 MASC에 적용하려는 제안. 위험한 작업 전 사용자 승인을 받는 흐름을 목표로 함.
 
 **참고**: [LangGraph Human-in-the-Loop](https://langchain-ai.github.io/langgraphjs/concepts/human_in_the_loop/)
 
@@ -40,8 +41,8 @@ masc-checkpoint --task-id task-030 --approve
 masc-checkpoint --task-id task-030 --reject --reason "취소됨"
 ```
 
-**저장 백엔드 (auto)**:
-- 기본값은 **auto**: `NEO4J_URI`가 설정되어 있으면 Neo4j에 저장, 아니면 `.masc/state/checkpoints/`에 파일로 저장
+**저장 백엔드 (제안)**:
+- 기본값 `auto`: `NEO4J_URI`가 설정되어 있으면 Neo4j에 저장, 아니면 `.masc/state/checkpoints/`에 파일로 저장
 - 강제 전환: `MASC_CHECKPOINT_BACKEND=neo4j|filesystem`
 - 작업 디렉토리 지정: `--masc-dir .masc` (MCP 서버는 룸 경로에 맞춰 자동으로 주입)
 
@@ -137,7 +138,7 @@ let handle_interrupt ~task_id ~step ~message ~agent =
     ~status:(Interrupted { message; requested_at = Unix.time () }) in
   save_to_neo4j checkpoint;
   broadcast_to_masc ~agent
-    (Printf.sprintf "⏸️ Interrupt: %s (task: %s, step: %d)"
+    (Printf.sprintf "Interrupt: %s (task: %s, step: %d)"
       message task_id step);
   Ok { waiting_for_approval = true; checkpoint_id = checkpoint.id }
 ```

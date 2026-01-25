@@ -42,6 +42,8 @@
   (ctypes-foreign (>= 0.20))
   (integers (>= 0.7))
   (zstd (>= 0.4))
+  (httpun (>= 0.2))
+  (httpun-eio (>= 0.2))
   (httpun-ws (>= 0.2))
   (httpun-ws-eio (>= 0.2))
   (bigstringaf (>= 0.10))

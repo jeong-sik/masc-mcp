@@ -122,6 +122,7 @@ See [docs/MODE-SYSTEM.md](docs/MODE-SYSTEM.md) for detailed documentation.
 ## Quick Start
 
 Setup 가이드: `docs/SETUP.md`
+Install Checklist: `docs/INSTALL-CHECKLIST.md`
 
 ### Prerequisites
 

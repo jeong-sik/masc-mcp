@@ -66,3 +66,10 @@ dune exec -- ./test/bench_burst_send.exe
 |------|-----------|--------|------|-------|------|
 | 2026-01-25 | SCTP transport (1KB) | 4.20 MB/s | 0.00% | cwnd=64KB, duration=5s | `/Users/dancer/me/logs/masc-webrtc-bench-sctp-transport-20260125-212022.log` |
 | 2026-01-25 | SCTP batch (1KB) | 5.98 MB/s | 3.71% | cwnd=2MB, ACK batch=128 | `/Users/dancer/me/logs/masc-webrtc-bench-sctp-batch-20260125-212034.log` |
+
+## TODO (Pending)
+
+- ocaml-webrtc interop smoke
+  - TURN relay smoke: needs `TURN_SERVER`, `TURN_USERNAME`, `TURN_PASSWORD`, optional `TURN_TLS_CA`
+  - Browser interop: needs public IP, `WEBRTC_CERT_PEM`, `WEBRTC_KEY_PEM`, and browser peer
+  - Tracking doc: ocaml-webrtc `docs/INTEROP-STATUS-2026-01-25.md`

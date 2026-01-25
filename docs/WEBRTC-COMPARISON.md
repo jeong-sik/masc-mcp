@@ -1,12 +1,19 @@
-# WebRTC Implementation Comparison (Template)
+# WebRTC Implementation Comparison
 
 **Last Updated**: 2026-01-25  
 **Purpose**: Record comparable, reproducible benchmark results.
 
 ## Verification
 
-- No verified results recorded in this document yet.
+- No successful benchmark results recorded in this document yet.
 - When adding results, include: date, OS, hardware, commit hash, command, and raw logs.
+
+### Attempted Runs (Failed)
+
+| Date | Host | OS | Commit | Status | Notes | Logs |
+|------|------|----|--------|--------|-------|------|
+| 2026-01-17 | maladies.local | Darwin | unknown | failed | `grpc-eio` library not found during test build | `/Users/dancer/me/logs/webrtc-rfc-full-117-tests-20260117-150058.log` |
+| 2026-01-17 | maladies.local | Darwin | unknown | failed | `grpc-eio` library not found during test build | `/Users/dancer/me/logs/webrtc-rfc-full-117-tests-ocaml-webrtc-20260117-150300.log` |
 
 ## How to Run (MASC)
 

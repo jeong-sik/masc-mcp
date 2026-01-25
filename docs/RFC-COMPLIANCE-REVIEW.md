@@ -10,6 +10,12 @@
 
 이 문서는 코드 레벨 점검 결과를 정리한 것입니다. 실제 상호운용/실행 결과는 별도 로그가 필요합니다.
 
+### Verification Logs (Attempted, Failed)
+
+- 2026-01-17: 테스트 빌드 중 `grpc-eio` 라이브러리 미존재로 실패
+  - `/Users/dancer/me/logs/webrtc-rfc-full-117-tests-20260117-150058.log`
+  - `/Users/dancer/me/logs/webrtc-rfc-full-117-tests-ocaml-webrtc-20260117-150300.log`
+
 | RFC | Module | Code Status | Notes |
 |-----|--------|--------|-------|
 | RFC 5389 (STUN) | `stun.ml` | Implemented (unverified) | HMAC-SHA1, FINGERPRINT, XOR-MAPPED-ADDRESS |

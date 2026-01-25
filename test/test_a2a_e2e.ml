@@ -11,6 +11,9 @@
 open Alcotest
 open Masc_mcp
 
+(* Initialize crypto RNG for subscription ID generation *)
+let () = Encryption.initialize ()
+
 (** {1 Test Setup} *)
 
 (** Recursive directory cleanup *)
@@ -181,6 +184,84 @@ let test_concurrent_broadcasts () =
       done;
       check bool "messages were delivered" true !found
 
+(** {1 Enforcement Tests} *)
+
+(** Test 6: Auto-subscribe on register *)
+let test_auto_subscribe () =
+  with_eio_env @@ fun config ->
+  let agent = "claude" in
+
+  (* Register agent *)
+  (match Room_eio.register_agent config ~name:agent () with
+   | Ok _ -> ()
+   | Error e -> failf "Registration failed: %s" e);
+
+  (* Verify agent is subscribed to Messages *)
+  let subs = Subscriptions.SubscriptionStore.get_for_subscriber agent in
+  let has_messages_sub = List.exists (fun (s : Subscriptions.subscription) ->
+    s.resource = Subscriptions.Messages
+  ) subs in
+
+  check bool "auto-subscribed to Messages" true has_messages_sub
+
+(** Test 7: Event log persistence - join/leave/broadcast *)
+let test_event_logging () =
+  with_eio_env @@ fun config ->
+  let agent = "claude" in
+
+  (* Reset event counter for clean test *)
+  (* Note: In real impl, counter persists - this tests from current state *)
+
+  (* Register → should log AgentJoin *)
+  let _ = Room_eio.register_agent config ~name:agent () in
+
+  (* Broadcast → should log Broadcast *)
+  let _ = Room_eio.broadcast config ~from_agent:agent ~content:"test event" in
+
+  (* Remove → should log AgentLeave *)
+  let _ = Room_eio.remove_agent config ~name:agent in
+
+  (* Verify events were logged *)
+  let events = Room_eio.get_recent_events config ~limit:10 in
+
+  check bool "events were logged" true (List.length events >= 3);
+
+  (* Verify event types in order *)
+  let event_types = List.map (fun e ->
+    let open Yojson.Safe.Util in
+    e |> member "type" |> to_string
+  ) events in
+
+  check bool "has agent_join" true (List.mem "agent_join" event_types);
+  check bool "has broadcast" true (List.mem "broadcast" event_types);
+  check bool "has agent_leave" true (List.mem "agent_leave" event_types)
+
+(** Test 8: Event retrieval by sequence *)
+let test_event_retrieval () =
+  with_eio_env @@ fun config ->
+  let agent = "test-agent" in
+
+  (* Create some events *)
+  let _ = Room_eio.register_agent config ~name:agent () in
+  let _ = Room_eio.broadcast config ~from_agent:agent ~content:"msg1" in
+  let _ = Room_eio.broadcast config ~from_agent:agent ~content:"msg2" in
+
+  (* Get events *)
+  let events = Room_eio.get_recent_events config ~limit:5 in
+
+  (* Should have at least the events we created *)
+  check bool "has events" true (List.length events >= 3);
+
+  (* Events should have required fields *)
+  List.iter (fun e ->
+    let open Yojson.Safe.Util in
+    let _ = e |> member "seq" |> to_int in
+    let _ = e |> member "type" |> to_string in
+    let _ = e |> member "agent" |> to_string in
+    let _ = e |> member "timestamp" |> to_float in
+    ()
+  ) events
+
 (** {1 Test Suite} *)
 
 let () =
@@ -190,6 +271,11 @@ let () =
       test_case "message persistence" `Quick test_message_persistence;
       test_case "message ordering" `Quick test_message_ordering;
       test_case "mention extraction" `Quick test_mention_extraction;
+    ];
+    "enforcement", [
+      test_case "auto-subscribe on register" `Quick test_auto_subscribe;
+      test_case "event logging" `Quick test_event_logging;
+      test_case "event retrieval" `Quick test_event_retrieval;
     ];
     "stress", [
       test_case "concurrent broadcasts" `Slow test_concurrent_broadcasts;

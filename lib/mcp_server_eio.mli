@@ -58,10 +58,11 @@ val create_state_eio :
 
     @param clock Eio time clock for Session_eio timeout operations
     @param sw Eio.Switch for structured concurrency
+    @param mcp_session_id Optional HTTP MCP session ID for agent_name persistence
     @param state Server state
     @param request_str Raw JSON-RPC request string
     @return JSON response *)
-val handle_request : clock:_ Eio.Time.clock -> sw:Eio.Switch.t -> server_state -> string -> Yojson.Safe.t
+val handle_request : clock:_ Eio.Time.clock -> sw:Eio.Switch.t -> ?mcp_session_id:string -> server_state -> string -> Yojson.Safe.t
 
 (** {1 Stdio Transport - Eio Native} *)
 

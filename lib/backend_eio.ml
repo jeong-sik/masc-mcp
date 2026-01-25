@@ -447,6 +447,167 @@ module FileSystem = struct
          | _ -> Ok false)
     | Error e -> Error e
 
+  (** {2 Atomic Operations (Cross-Process Safe)} *)
+
+  (** Atomically increment a counter stored in a file.
+      Uses Unix.lockf with non-blocking retry for cross-process synchronization.
+      Returns the NEW value after increment.
+
+      This is safe for multiple processes accessing the same file.
+      Uses F_TLOCK (try lock) to avoid blocking Eio's event loop.
+  *)
+  let atomic_increment t key =
+    match key_to_path t key with
+    | Error e -> Error e
+    | Ok path ->
+        try
+          (* Ensure parent directory exists *)
+          (match Eio.Path.split path with
+           | Some (parent, _) ->
+               (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
+                with _ -> ())
+           | None -> ());
+
+          (* Get the actual filesystem path string *)
+          let path_str = Eio.Path.native_exn path in
+
+          (* Open file for read+write, create if needed *)
+          let fd = Unix.openfile path_str [Unix.O_RDWR; Unix.O_CREAT] 0o644 in
+          Fun.protect ~finally:(fun () -> Unix.close fd) @@ fun () ->
+
+          (* Acquire exclusive lock with non-blocking retry *)
+          let max_retries = 100 in
+          let rec try_lock retries =
+            if retries <= 0 then
+              raise (Failure "Failed to acquire lock after max retries")
+            else
+              try
+                Unix.lockf fd Unix.F_TLOCK 0;  (* Non-blocking try *)
+                true
+              with Unix.Unix_error (Unix.EAGAIN, _, _)
+                 | Unix.Unix_error (Unix.EACCES, _, _) ->
+                (* Lock held by another process, wait and retry *)
+                Unix.sleepf 0.001;  (* 1ms backoff *)
+                try_lock (retries - 1)
+          in
+          let _ = try_lock max_retries in
+          Fun.protect ~finally:(fun () -> Unix.lockf fd Unix.F_ULOCK 0) @@ fun () ->
+
+          (* Read current value *)
+          let _ = Unix.lseek fd 0 Unix.SEEK_SET in
+          let buf = Bytes.create 32 in
+          let n = Unix.read fd buf 0 32 in
+          let current =
+            if n = 0 then 0
+            else
+              try int_of_string (String.trim (Bytes.sub_string buf 0 n))
+              with _ -> 0
+          in
+
+          (* Increment and write back *)
+          let new_value = current + 1 in
+          let new_str = string_of_int new_value in
+          let _ = Unix.lseek fd 0 Unix.SEEK_SET in
+          let _ = Unix.ftruncate fd 0 in
+          let _ = Unix.write_substring fd new_str 0 (String.length new_str) in
+
+          Ok new_value
+        with exn ->
+          Error (IOError (Printf.sprintf "atomic_increment failed: %s" (Printexc.to_string exn)))
+
+  (** Atomically get the current counter value without incrementing *)
+  let atomic_get t key =
+    match key_to_path t key with
+    | Error e -> Error e
+    | Ok path ->
+        try
+          let path_str = Eio.Path.native_exn path in
+          if not (Sys.file_exists path_str) then Ok 0
+          else
+            let fd = Unix.openfile path_str [Unix.O_RDONLY] 0o644 in
+            Fun.protect ~finally:(fun () -> Unix.close fd) @@ fun () ->
+            (* Shared lock for reading *)
+            Unix.lockf fd Unix.F_RLOCK 0;
+            Fun.protect ~finally:(fun () -> Unix.lockf fd Unix.F_ULOCK 0) @@ fun () ->
+            let buf = Bytes.create 32 in
+            let n = Unix.read fd buf 0 32 in
+            if n = 0 then Ok 0
+            else Ok (try int_of_string (String.trim (Bytes.sub_string buf 0 n)) with _ -> 0)
+        with exn ->
+          Error (IOError (Printf.sprintf "atomic_get failed: %s" (Printexc.to_string exn)))
+
+  (** Atomically update a file with a transform function.
+      The transform receives [Some content] if file exists, [None] if not.
+      Returns [Ok new_content] on success.
+
+      This is safe for multiple processes accessing the same file.
+      Uses F_TLOCK (try lock) to avoid blocking Eio's event loop.
+  *)
+  let atomic_update t key ~f =
+    match key_to_path t key with
+    | Error e -> Error e
+    | Ok path ->
+        try
+          (* Ensure parent directory exists *)
+          (match Eio.Path.split path with
+           | Some (parent, _) ->
+               (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
+                with _ -> ())
+           | None -> ());
+
+          let path_str = Eio.Path.native_exn path in
+
+          (* Open file for read+write, create if needed *)
+          let fd = Unix.openfile path_str [Unix.O_RDWR; Unix.O_CREAT] 0o644 in
+          Fun.protect ~finally:(fun () -> Unix.close fd) @@ fun () ->
+
+          (* Acquire exclusive lock with non-blocking retry *)
+          let max_retries = 100 in
+          let rec try_lock retries =
+            if retries <= 0 then
+              raise (Failure "Failed to acquire lock after max retries")
+            else
+              try
+                Unix.lockf fd Unix.F_TLOCK 0;
+                true
+              with Unix.Unix_error (Unix.EAGAIN, _, _)
+                 | Unix.Unix_error (Unix.EACCES, _, _) ->
+                Unix.sleepf 0.001;
+                try_lock (retries - 1)
+          in
+          let _ = try_lock max_retries in
+          Fun.protect ~finally:(fun () -> Unix.lockf fd Unix.F_ULOCK 0) @@ fun () ->
+
+          (* Read current content *)
+          let _ = Unix.lseek fd 0 Unix.SEEK_SET in
+          let stat = Unix.fstat fd in
+          let size = stat.Unix.st_size in
+          let current =
+            if size = 0 then None
+            else begin
+              let buf = Bytes.create size in
+              let n = Unix.read fd buf 0 size in
+              if n = 0 then None
+              else
+                let raw = Bytes.sub_string buf 0 n in
+                (* Auto-decompress if ZSTD *)
+                Some (Compression.decompress_auto raw)
+            end
+          in
+
+          (* Apply transform function *)
+          let new_content = f current in
+
+          (* Compress and write back *)
+          let compressed = Compression.compress_with_header new_content in
+          let _ = Unix.lseek fd 0 Unix.SEEK_SET in
+          let _ = Unix.ftruncate fd 0 in
+          let _ = Unix.write_substring fd compressed 0 (String.length compressed) in
+
+          Ok new_content
+        with exn ->
+          Error (IOError (Printf.sprintf "atomic_update failed: %s" (Printexc.to_string exn)))
+
   (** {2 Health Check} *)
 
   let health_check t =

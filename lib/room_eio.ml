@@ -36,6 +36,7 @@ type room_state = {
   last_updated: float;
   active_agents: string list;
   message_seq: int;
+  event_seq: int;  (* Persisted event counter for audit log *)
   mode: string;
   paused: bool;
   paused_by: string option;
@@ -92,11 +93,97 @@ let tasks_key = "tasks"
 let messages_key = "messages"
 let locks_key = "locks"
 let state_key = "state"
+let events_key = "events"
 
 let agent_key name = Printf.sprintf "%s:%s" agents_key name
 let task_key id = Printf.sprintf "%s:%s" tasks_key id
 let message_key seq = Printf.sprintf "%s:%06d" messages_key seq
 let lock_key resource = Printf.sprintf "%s:%s" locks_key resource
+let event_key seq = Printf.sprintf "%s:%06d" events_key seq
+
+(** {1 Event Log - Persistent Audit Trail} *)
+
+(** Event types for audit logging *)
+type event_type =
+  | AgentJoin
+  | AgentLeave
+  | Broadcast
+  | TaskClaim
+  | TaskDone
+  | LockAcquire
+  | LockRelease
+
+let event_type_to_string = function
+  | AgentJoin -> "agent_join"
+  | AgentLeave -> "agent_leave"
+  | Broadcast -> "broadcast"
+  | TaskClaim -> "task_claim"
+  | TaskDone -> "task_done"
+  | LockAcquire -> "lock_acquire"
+  | LockRelease -> "lock_release"
+
+(** Event record *)
+type event = {
+  event_seq: int;
+  event_type: event_type;
+  agent: string;
+  payload: Yojson.Safe.t;
+  timestamp: float;
+}
+
+let event_to_json e =
+  `Assoc [
+    ("seq", `Int e.event_seq);
+    ("type", `String (event_type_to_string e.event_type));
+    ("agent", `String e.agent);
+    ("payload", e.payload);
+    ("timestamp", `Float e.timestamp);
+    ("timestamp_iso", `String (now_iso ()));
+  ]
+
+(** Key for atomic event sequence counter *)
+let event_seq_key = "counters:event_seq"
+
+(** Log an event to persistent storage
+    Uses file-based atomic_increment for cross-process safety. *)
+let log_event config ~event_type ~agent ~payload =
+  (* Atomic increment via file lock - safe for multiple processes *)
+  let seq = match Backend_eio.FileSystem.atomic_increment config.backend event_seq_key with
+    | Ok n -> n - 1  (* atomic_increment returns NEW value, events are 0-indexed *)
+    | Error _ -> int_of_float (Unix.gettimeofday () *. 1000.) mod 100000
+  in
+  let event = {
+    event_seq = seq;
+    event_type;
+    agent;
+    payload;
+    timestamp = Unix.gettimeofday ();
+  } in
+  let json_str = Yojson.Safe.to_string (event_to_json event) in
+  let _ = Backend_eio.FileSystem.set config.backend (event_key seq) json_str in
+  event
+
+(** Get event by sequence *)
+let get_event config ~seq =
+  match Backend_eio.FileSystem.get config.backend (event_key seq) with
+  | Ok json_str -> Some (Yojson.Safe.from_string json_str)
+  | Error _ -> None
+
+(** Get recent events
+    Uses atomic_get for cross-process safe counter read. *)
+let get_recent_events config ~limit =
+  let current_seq = match Backend_eio.FileSystem.atomic_get config.backend event_seq_key with
+    | Ok n -> n
+    | Error _ -> 0
+  in
+  let start_seq = max 0 (current_seq - limit) in
+  let rec collect acc seq =
+    if seq >= current_seq then List.rev acc
+    else match get_event config ~seq with
+      | Some ev -> collect (ev :: acc) (seq + 1)
+      | None -> collect acc (seq + 1)
+  in
+  collect [] start_seq
 
 (** {1 State Management} *)
 
@@ -106,6 +193,7 @@ let default_room_state () = {
   last_updated = Unix.gettimeofday ();
   active_agents = [];
   message_seq = 0;
+  event_seq = 0;
   mode = "collaborative";
   paused = false;
   paused_by = None;
@@ -120,6 +208,7 @@ let room_state_to_json state =
     ("last_updated", `Float state.last_updated);
     ("active_agents", `List (List.map (fun s -> `String s) state.active_agents));
     ("message_seq", `Int state.message_seq);
+    ("event_seq", `Int state.event_seq);
     ("mode", `String state.mode);
     ("paused", `Bool state.paused);
     ("paused_by", match state.paused_by with Some s -> `String s | None -> `Null);
@@ -136,6 +225,8 @@ let room_state_of_json json =
       last_updated = json |> member "last_updated" |> to_float;
       active_agents = json |> member "active_agents" |> to_list |> List.map to_string;
       message_seq = json |> member "message_seq" |> to_int;
+      (* Backward compat: default to 0 if event_seq missing from old state files *)
+      event_seq = (try json |> member "event_seq" |> to_int with _ -> 0);
       mode = json |> member "mode" |> to_string;
       paused = json |> member "paused" |> to_bool;
       paused_by = json |> member "paused_by" |> to_string_option;
@@ -168,6 +259,41 @@ let write_state config state =
   let json_str = Yojson.Safe.to_string (room_state_to_json state) in
   Backend_eio.FileSystem.set config.backend state_key json_str
 
+(** Atomically update room state with a transform function.
+    This is safe for multiple processes accessing the same state file.
+    The transform receives current state (or default if not exists) and returns new state.
+    Returns [Ok new_state] on success.
+*)
+let atomic_update_state config ~f =
+  let transform json_opt =
+    let current_state =
+      match json_opt with
+      | None -> default_room_state ()
+      | Some json_str ->
+          (try
+            let json = Yojson.Safe.from_string json_str in
+            match room_state_of_json json with
+            | Ok s -> s
+            | Error _ -> default_room_state ()
+          with _ -> default_room_state ())
+    in
+    let new_state = f current_state in
+    let new_state = { new_state with last_updated = Unix.gettimeofday () } in
+    Yojson.Safe.to_string (room_state_to_json new_state)
+  in
+  match Backend_eio.FileSystem.atomic_update config.backend state_key ~f:transform with
+  | Ok json_str ->
+      (try
+        let json = Yojson.Safe.from_string json_str in
+        room_state_of_json json
+      with e -> Error (Printexc.to_string e))
+  | Error e ->
+      Error (match e with
+        | Backend_eio.IOError msg -> msg
+        | Backend_eio.NotFound k -> "Not found: " ^ k
+        | Backend_eio.AlreadyExists k -> "Already exists: " ^ k
+        | Backend_eio.InvalidKey k -> "Invalid key: " ^ k)
+
 (** {1 Agent Operations} *)
 
 let agent_state_to_json agent =
@@ -190,7 +316,11 @@ let agent_state_of_json json =
   with e ->
     Error (Printexc.to_string e)
 
-(** Register agent or update heartbeat *)
+(** Register agent or update heartbeat
+
+    Automatically subscribes to Messages for A2A communication.
+    This ensures all agents can receive broadcasts immediately after joining.
+*)
 let register_agent config ~name ?(capabilities=[]) () =
   let agent = {
     name;
@@ -201,16 +331,30 @@ let register_agent config ~name ?(capabilities=[]) () =
   let json_str = Yojson.Safe.to_string (agent_state_to_json agent) in
   match Backend_eio.FileSystem.set config.backend (agent_key name) json_str with
   | Ok () ->
-      (* Update room state to include this agent *)
-      (match read_state config with
-       | Ok state ->
-           let active_agents =
-             if List.mem name state.active_agents then state.active_agents
-             else name :: state.active_agents
-           in
-           let _ = write_state config { state with active_agents } in
-           Ok agent
-       | Error e -> Error e)
+      (* Atomically update room state to include this agent *)
+      let _ = atomic_update_state config ~f:(fun state ->
+        let active_agents =
+          if List.mem name state.active_agents then state.active_agents
+          else name :: state.active_agents
+        in
+        { state with active_agents }
+      ) in
+
+      (* Auto-subscribe to Messages for A2A communication *)
+      let _ = Subscriptions.SubscriptionStore.subscribe
+        ~subscriber:name
+        ~resource:Subscriptions.Messages
+        () in
+
+      (* Log join event *)
+      let _ = log_event config
+        ~event_type:AgentJoin
+        ~agent:name
+        ~payload:(`Assoc [
+          ("capabilities", `List (List.map (fun c -> `String c) capabilities))
+        ]) in
+
+      Ok agent
   | Error e ->
       Error (match e with
         | Backend_eio.IOError msg -> msg
@@ -235,13 +379,19 @@ let get_agent config ~name =
 let remove_agent config ~name =
   match Backend_eio.FileSystem.delete config.backend (agent_key name) with
   | Ok () ->
-      (* Update room state to remove this agent *)
-      (match read_state config with
-       | Ok state ->
-           let active_agents = List.filter (fun n -> n <> name) state.active_agents in
-           let _ = write_state config { state with active_agents } in
-           Ok ()
-       | Error e -> Error e)
+      (* Atomically update room state to remove this agent *)
+      let _ = atomic_update_state config ~f:(fun state ->
+        let active_agents = List.filter (fun n -> n <> name) state.active_agents in
+        { state with active_agents }
+      ) in
+
+      (* Log leave event *)
+      let _ = log_event config
+        ~event_type:AgentLeave
+        ~agent:name
+        ~payload:`Null in
+
+      Ok ()
   | Error (Backend_eio.NotFound _) ->
       Ok ()  (* Already removed *)
   | Error e ->
@@ -374,28 +524,52 @@ let extract_mention content =
     Some (Str.matched_group 1 content)
   with Not_found -> None
 
-(** Broadcast message to room *)
+(** Key for atomic message sequence counter *)
+let message_seq_key = "counters:message_seq"
+
+(** Broadcast message to room
+
+    Uses file-based atomic_increment for cross-process safety.
+    Ensures unique seq even under concurrent broadcasts from multiple processes.
+*)
 let broadcast config ~from_agent ~content =
-  match read_state config with
-  | Error e -> Error e
-  | Ok state ->
-      let seq = state.message_seq + 1 in
-      let msg = {
-        seq;
-        from_agent;
-        content;
-        mention = extract_mention content;
-        timestamp = Unix.gettimeofday ();
-      } in
-      let json_str = Yojson.Safe.to_string (message_to_json msg) in
-      match Backend_eio.FileSystem.set config.backend (message_key seq) json_str with
-      | Ok () ->
-          let _ = write_state config { state with message_seq = seq } in
-          Ok msg
-      | Error e ->
-          Error (match e with
-            | Backend_eio.IOError msg -> msg
-            | _ -> "Failed to broadcast message")
+  (* Atomic increment via file lock - safe for multiple processes *)
+  let seq = match Backend_eio.FileSystem.atomic_increment config.backend message_seq_key with
+    | Ok n -> n
+    | Error _ ->
+        (* Fallback: use timestamp-based unique seq (less reliable but won't fail) *)
+        int_of_float (Unix.gettimeofday () *. 1000000.) mod 1000000
+  in
+  let msg = {
+    seq;
+    from_agent;
+    content;
+    mention = extract_mention content;
+    timestamp = Unix.gettimeofday ();
+  } in
+  let json_str = Yojson.Safe.to_string (message_to_json msg) in
+  match Backend_eio.FileSystem.set config.backend (message_key seq) json_str with
+  | Ok () ->
+      (* Atomically update state's message_seq for consistency *)
+      let _ = atomic_update_state config ~f:(fun state ->
+        { state with message_seq = seq }
+      ) in
+
+      (* Log broadcast event *)
+      let _ = log_event config
+        ~event_type:Broadcast
+        ~agent:from_agent
+        ~payload:(`Assoc [
+          ("message_seq", `Int seq);
+          ("mention", match msg.mention with Some m -> `String m | None -> `Null);
+          ("content_preview", `String (String.sub content 0 (min 100 (String.length content))));
+        ]) in
+
+      Ok msg
+  | Error e ->
+      Error (match e with
+        | Backend_eio.IOError msg -> msg
+        | _ -> "Failed to broadcast message")
 
 (** Get message by sequence number *)
 let get_message config ~seq =

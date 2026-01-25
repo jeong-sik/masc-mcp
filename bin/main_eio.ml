@@ -520,7 +520,7 @@ let handle_post_mcp request reqd =
         | Some c -> c
         | None -> failwith "Eio clock not initialized"
       in
-      let response_json = Mcp_eio.handle_request ~clock ~sw state body_str in
+      let response_json = Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:session_id state body_str in
       (match protocol_version_from_body body_str with
        | Some v -> remember_protocol_version session_id v
        | None -> ());
@@ -768,7 +768,7 @@ let handle_post_messages request reqd =
           | Some c -> c
           | None -> failwith "Eio clock not initialized"
         in
-        let response_json = Mcp_eio.handle_request ~clock ~sw state body_str in
+        let response_json = Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:session_id state body_str in
         (match response_json with
          | `Null -> ()
          | json -> Sse.send_to session_id json);
@@ -954,6 +954,9 @@ exception Shutdown
 
 let run_cmd port base_path =
   Eio_main.run @@ fun env ->
+  (* Initialize Mirage_crypto RNG - MUST be inside Eio_main.run for thread-local state *)
+  Mirage_crypto_rng_unix.use_default ();
+
   (* Initialize thread-safe token store for cancellation support *)
   Masc_mcp.Cancellation.TokenStore.init ();
 

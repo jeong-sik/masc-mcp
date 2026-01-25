@@ -126,6 +126,20 @@
  (modules test_a2a_e2e)
  (libraries masc_mcp alcotest eio eio_main yojson))
 
+; A2A Distributed Test (2-process sequential communication)
+; Run with: ./scripts/test_distributed.sh
+(executable
+ (name test_a2a_distributed)
+ (modules test_a2a_distributed)
+ (libraries masc_mcp eio eio_main yojson unix))
+
+; A2A Concurrent Distributed Test (TRUE parallel writes)
+; Run with: ./scripts/test_concurrent.sh
+(executable
+ (name test_concurrent_distributed)
+ (modules test_concurrent_distributed)
+ (libraries masc_mcp eio eio_main str yojson unix))
+
 ; ============================================================
 ; Disabled: Lwt-based tests (require cohttp-lwt-unix, ppx_lwt)
 ; These modules are not currently in masc_mcp library.
@@ -139,3 +153,7 @@
 ;  (name test_webrtc_datachannel)
 ;  (modules test_webrtc_datachannel)
 ;  (libraries masc_mcp alcotest lwt lwt.unix))
+(executable
+ (name test_atomic_simple)
+ (modules test_atomic_simple)
+ (libraries masc_mcp eio eio_main))

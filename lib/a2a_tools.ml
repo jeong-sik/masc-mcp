@@ -68,6 +68,81 @@ type subscription = {
 (* Global subscription store *)
 let subscriptions : (string, subscription) Hashtbl.t = Hashtbl.create 16
 
+(* Persistence file path - set by init *)
+let subscriptions_file = ref ""
+
+(** Convert event_type to string for JSON *)
+let event_type_to_string = function
+  | TaskUpdate -> "task_update"
+  | Broadcast -> "broadcast"
+  | Completion -> "completion"
+  | Error -> "error"
+
+(** Subscription to JSON *)
+let subscription_to_json (sub : subscription) : Yojson.Safe.t =
+  `Assoc [
+    ("id", `String sub.id);
+    ("agent_filter", match sub.agent_filter with
+      | None -> `Null
+      | Some a -> `String a);
+    ("event_types", `List (List.map (fun e -> `String (event_type_to_string e)) sub.event_types));
+    ("created_at", `String sub.created_at);
+  ]
+
+(** Subscription from JSON *)
+let subscription_of_json (json : Yojson.Safe.t) : subscription option =
+  try
+    let open Yojson.Safe.Util in
+    let id = json |> member "id" |> to_string in
+    let agent_filter = match json |> member "agent_filter" with
+      | `Null -> None
+      | `String s -> Some s
+      | _ -> None
+    in
+    let event_types = json |> member "event_types" |> to_list |> List.filter_map (function
+      | `String s -> (match event_type_of_string s with Ok e -> Some e | Error _ -> None)
+      | _ -> None)
+    in
+    let created_at = json |> member "created_at" |> to_string in
+    Some { id; agent_filter; event_types; created_at }
+  with _ -> None
+
+(** Save subscriptions to file *)
+let save_subscriptions () =
+  if !subscriptions_file = "" then ()
+  else
+    let subs = Hashtbl.fold (fun _k v acc -> subscription_to_json v :: acc) subscriptions [] in
+    let json = `Assoc [("subscriptions", `List subs)] in
+    let content = Yojson.Safe.pretty_to_string json in
+    try
+      let oc = open_out !subscriptions_file in
+      output_string oc content;
+      close_out oc
+    with _ -> ()
+
+(** Load subscriptions from file *)
+let load_subscriptions () =
+  if !subscriptions_file = "" || not (Sys.file_exists !subscriptions_file) then ()
+  else
+    try
+      let ic = open_in !subscriptions_file in
+      let content = In_channel.input_all ic in
+      close_in ic;
+      let json = Yojson.Safe.from_string content in
+      let open Yojson.Safe.Util in
+      let subs = json |> member "subscriptions" |> to_list in
+      List.iter (fun j ->
+        match subscription_of_json j with
+        | Some sub -> Hashtbl.replace subscriptions sub.id sub
+        | None -> ()
+      ) subs
+    with _ -> ()
+
+(** Initialize A2A tools with MASC directory *)
+let init ~masc_dir =
+  subscriptions_file := Filename.concat masc_dir "subscriptions.json";
+  load_subscriptions ()
+
 (** Event record for buffering *)
 type buffered_event = {
   event_type: event_type;
@@ -314,6 +389,7 @@ let subscribe ?(agent_filter : string option) ~(events : string list) ()
       created_at = now_iso8601 ();
     } in
     Hashtbl.add subscriptions sub_id sub;
+    save_subscriptions ();
     Ok (`Assoc [
       ("subscription_id", `String sub_id);
       ("agent_filter", match agent_filter with
@@ -334,6 +410,7 @@ let unsubscribe ~subscription_id : (Yojson.Safe.t, string) result =
     Hashtbl.remove subscriptions subscription_id;
     (* Also clean up buffered events *)
     Hashtbl.remove event_buffers subscription_id;
+    save_subscriptions ();
     Ok (`Assoc [
       ("unsubscribed", `Bool true);
       ("subscription_id", `String subscription_id);

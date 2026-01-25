@@ -37,6 +37,44 @@ let make_error = Mcp_server.make_error
 let is_valid_request_id = Mcp_server.is_valid_request_id
 let validate_initialize_params = Mcp_server.validate_initialize_params
 
+(** Heartbeat management module - periodic background broadcasts *)
+module Heartbeat = struct
+  type t = {
+    id: string;
+    agent_name: string;
+    interval: int;
+    message: string;
+    mutable active: bool;
+    created_at: float;
+  }
+
+  let heartbeats : (string, t) Hashtbl.t = Hashtbl.create 16
+  let heartbeat_counter = ref 0
+
+  let generate_id () =
+    incr heartbeat_counter;
+    Printf.sprintf "hb-%d-%d" (int_of_float (Unix.gettimeofday ())) !heartbeat_counter
+
+  let start ~agent_name ~interval ~message =
+    let id = generate_id () in
+    let hb = { id; agent_name; interval; message; active = true; created_at = Unix.gettimeofday () } in
+    Hashtbl.add heartbeats id hb;
+    id
+
+  let stop id =
+    match Hashtbl.find_opt heartbeats id with
+    | Some hb ->
+        hb.active <- false;
+        Hashtbl.remove heartbeats id;
+        true
+    | None -> false
+
+  let list () =
+    Hashtbl.fold (fun _ hb acc -> hb :: acc) heartbeats []
+
+  let get id = Hashtbl.find_opt heartbeats id
+end
+
 (** Unregister agent synchronously - adapter for Session.registry
 
     Directly removes from hashtable without extra mutex layer.
@@ -731,16 +769,32 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id state ~name ~arguments =
   | "masc_join" ->
       let caps = get_string_list "capabilities" in
       let result = Room.join config ~agent_name ~capabilities:caps () in
-      let _ = Session.register registry ~agent_name in
-      (* Save agent_name to MCP session file (HTTP persistence) *)
-      write_mcp_session_agent agent_name;
-      Printf.eprintf "[DEBUG] masc_join: saved agent_name=%s to MCP session\n%!" agent_name;
+      (* Extract nickname from join result (format: "  Nickname: xxx\n...") *)
+      let nickname =
+        try
+          let prefix = "  Nickname: " in
+          let start_idx =
+            let idx = ref 0 in
+            while !idx < String.length result - String.length prefix &&
+                  String.sub result !idx (String.length prefix) <> prefix do
+              incr idx
+            done;
+            !idx + String.length prefix
+          in
+          let end_idx = String.index_from result start_idx '\n' in
+          String.sub result start_idx (end_idx - start_idx)
+        with _ -> agent_name (* Fallback to original if parsing fails *)
+      in
+      let _ = Session.register registry ~agent_name:nickname in
+      (* Save nickname to MCP session file (HTTP persistence) *)
+      write_mcp_session_agent nickname;
+      Printf.eprintf "[DEBUG] masc_join: saved nickname=%s to MCP session (original=%s)\n%!" nickname agent_name;
       (* Also save to TERM_SESSION_ID file (terminal persistence) *)
       let term_session_id = try Sys.getenv "TERM_SESSION_ID" with Not_found -> "default" in
       let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
       (try
         let oc = open_out agent_file in
-        output_string oc agent_name;
+        output_string oc nickname;
         close_out oc
       with _ -> ());
       (true, result)
@@ -1045,6 +1099,16 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id state ~name ~arguments =
   | "masc_claim_next" ->
       (true, Room.claim_next config ~agent_name)
 
+  | "masc_ralph_loop" ->
+      let preset = get_string "preset" "drain" in
+      let max_iterations = get_int "max_iterations" 10 in
+      let target = match get_string "target" "" with "" -> None | t -> Some t in
+      (true, Room.ralph_loop config ~agent_name ~preset ~max_iterations ?target ())
+
+  | "masc_ralph_control" ->
+      let command = get_string "command" "STATUS" in
+      (true, Room.ralph_control config ~from_agent:agent_name ~command ~args:"")
+
   | "masc_update_priority" ->
       let task_id = get_string "task_id" "" in
       let priority = get_int "priority" 3 in
@@ -1088,6 +1152,13 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id state ~name ~arguments =
             ("message", `String message);
             ("mention", match mention with Some m -> `String m | None -> `Null);
           ]);
+        (* Auto-Responder: spawn mentioned agent if enabled *)
+        let _ = Auto_responder.maybe_respond
+          ~base_path:config.base_path
+          ~from_agent:agent_name
+          ~content:message
+          ~mention
+        in
         (true, result)
       end
 
@@ -1319,6 +1390,49 @@ Time: %s
   (* Heartbeat & Agent Health tools *)
   | "masc_heartbeat" ->
       (true, Room.heartbeat config ~agent_name)
+
+  | "masc_heartbeat_start" ->
+      let interval = get_int "interval" 30 in
+      let message = get_string "message" "🏓 heartbeat" in
+      (* Validate interval: min 5, max 300 *)
+      let interval = max 5 (min 300 interval) in
+      let hb_id = Heartbeat.start ~agent_name ~interval ~message in
+      (* Start background fiber for actual heartbeat *)
+      Eio.Fiber.fork ~sw (fun () ->
+        let rec loop () =
+          match Heartbeat.get hb_id with
+          | Some hb when hb.Heartbeat.active ->
+              (* Send heartbeat broadcast *)
+              let _ = Room.broadcast config ~from_agent:agent_name ~content:message in
+              Eio.Time.sleep clock (float_of_int interval);
+              loop ()
+          | _ -> () (* Heartbeat stopped or not found *)
+        in
+        loop ()
+      );
+      (true, Printf.sprintf "✅ Heartbeat started: %s (interval: %ds, message: %s)" hb_id interval message)
+
+  | "masc_heartbeat_stop" ->
+      let hb_id = get_string "heartbeat_id" "" in
+      if hb_id = "" then
+        (false, "❌ heartbeat_id required")
+      else if Heartbeat.stop hb_id then
+        (true, Printf.sprintf "✅ Heartbeat stopped: %s" hb_id)
+      else
+        (false, Printf.sprintf "❌ Heartbeat not found: %s" hb_id)
+
+  | "masc_heartbeat_list" ->
+      let hbs = Heartbeat.list () in
+      let fmt_hb hb =
+        let uptime = int_of_float (Unix.gettimeofday () -. hb.Heartbeat.created_at) in
+        Printf.sprintf "  • %s: agent=%s interval=%ds message=\"%s\" uptime=%ds"
+          hb.Heartbeat.id hb.agent_name hb.interval hb.message uptime
+      in
+      let list_str =
+        if List.length hbs = 0 then "No active heartbeats"
+        else "Active heartbeats:\n" ^ String.concat "\n" (List.map fmt_hb hbs)
+      in
+      (true, list_str)
 
   | "masc_cleanup_zombies" ->
       (true, Room.cleanup_zombies config)
@@ -3151,8 +3265,8 @@ let run_stdio ~sw ~env state =
         (* Empty body, skip *)
         loop ()
     | Some request_str ->
-        (* Handle request with Eio clock *)
-        let response = handle_request ~clock ~sw state request_str in
+        (* Handle request with Eio clock - use "stdio" as session ID for agent persistence *)
+        let response = handle_request ~clock ~sw ~mcp_session_id:"stdio" state request_str in
 
         (* Write response if not null *)
         (match response with

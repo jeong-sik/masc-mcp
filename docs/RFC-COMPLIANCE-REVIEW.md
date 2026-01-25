@@ -15,6 +15,7 @@
 - 2026-01-17: 테스트 빌드 중 `grpc-eio` 라이브러리 미존재로 실패
   - `/Users/dancer/me/logs/webrtc-rfc-full-117-tests-20260117-150058.log`
   - `/Users/dancer/me/logs/webrtc-rfc-full-117-tests-ocaml-webrtc-20260117-150300.log`
+  - 당시 worktree/설치본 기준이며, 현재 리포지토리는 `grpc-direct` 사용
 
 | RFC | Module | Code Status | Notes |
 |-----|--------|--------|-------|

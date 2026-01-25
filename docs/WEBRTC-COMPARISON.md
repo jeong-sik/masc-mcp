@@ -15,6 +15,8 @@
 | 2026-01-17 | maladies.local | Darwin | unknown | failed | `grpc-eio` library not found during test build | `/Users/dancer/me/logs/webrtc-rfc-full-117-tests-20260117-150058.log` |
 | 2026-01-17 | maladies.local | Darwin | unknown | failed | `grpc-eio` library not found during test build | `/Users/dancer/me/logs/webrtc-rfc-full-117-tests-ocaml-webrtc-20260117-150300.log` |
 
+Note: 위 로그는 당시 worktree/설치본이 `grpc-eio` 의존이었던 상태에서 발생한 실패 기록입니다. 현재 리포지토리는 `grpc-direct`를 사용합니다.
+
 ## How to Run (MASC)
 
 ```bash

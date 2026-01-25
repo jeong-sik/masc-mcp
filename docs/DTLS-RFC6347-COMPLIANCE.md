@@ -17,6 +17,11 @@
   - `/Users/dancer/me/logs/webrtc-rfc-full-117-tests-ocaml-webrtc-20260117-150300.log`
   - 당시 worktree/설치본 기준이며, 현재 리포지토리는 `grpc-direct` 사용
 
+### Runtime Notes
+
+- DTLS 런타임/상호운용 테스트 로그는 아직 없음.
+- UDP/SCTP 벤치 로그는 `docs/WEBRTC-COMPARISON.md`에 기록됨 (DTLS 준수 검증 아님).
+
 ## File Structure
 
 | File | Lines | Purpose |

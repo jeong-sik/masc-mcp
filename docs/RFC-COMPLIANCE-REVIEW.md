@@ -17,6 +17,17 @@
   - `/Users/dancer/me/logs/webrtc-rfc-full-117-tests-ocaml-webrtc-20260117-150300.log`
   - 당시 worktree/설치본 기준이며, 현재 리포지토리는 `grpc-direct` 사용
 
+### Runtime Benchmarks (Not RFC Compliance Tests)
+
+아래 로그는 UDP/SCTP 성능 측정이며 RFC 준수 검증을 대체하지 않습니다.
+
+- `/Users/dancer/me/logs/masc-webrtc-bench-udp-fair-20260125-211841.log`
+- `/Users/dancer/me/logs/masc-webrtc-bench-udp-oneway-20260125-211952.log`
+- `/Users/dancer/me/logs/masc-webrtc-bench-udp-throughput-20260125-212011.log`
+- `/Users/dancer/me/logs/masc-webrtc-bench-sctp-transport-20260125-212022.log`
+- `/Users/dancer/me/logs/masc-webrtc-bench-sctp-batch-20260125-212034.log`
+- `/Users/dancer/me/logs/masc-webrtc-bench-burst-send-20260125-212048.log`
+
 | RFC | Module | Code Status | Notes |
 |-----|--------|--------|-------|
 | RFC 5389 (STUN) | `stun.ml` | Implemented (unverified) | HMAC-SHA1, FINGERPRINT, XOR-MAPPED-ADDRESS |

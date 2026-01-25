@@ -910,6 +910,10 @@ let run_server ~sw ~env ~port ~base_path =
 
   let resolved_base = state.room_config.base_path in
   let masc_dir = Filename.concat resolved_base ".masc" in
+
+  (* Initialize A2A subscription persistence *)
+  Masc_mcp.A2a_tools.init ~masc_dir;
+
   Printf.printf "🚀 MASC MCP Server listening on http://%s:%d\n%!" config.host config.port;
   Printf.printf "   Base path: %s\n%!" resolved_base;
   if resolved_base <> base_path then

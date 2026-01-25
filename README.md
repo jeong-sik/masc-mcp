@@ -136,8 +136,9 @@ See [docs/MODE-SYSTEM.md](docs/MODE-SYSTEM.md) for detailed documentation.
 
 ## Quick Start
 
-Setup 가이드: `docs/SETUP.md`
-Install Checklist: `docs/INSTALL-CHECKLIST.md`
+- `docs/SETUP.md` - 설치/실행/연동
+- `docs/INSTALL-CHECKLIST.md` - 설치 후 확인
+- `docs/MCP-TEMPLATE.md` - ~/.mcp.json 템플릿
 
 ### Prerequisites
 

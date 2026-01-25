@@ -525,12 +525,40 @@ let cosine_similarity a b =
 
     All legacy bridges have been removed.
 *)
-let execute_tool_eio ~sw ~clock state ~name ~arguments =
+let execute_tool_eio ~sw ~clock ?mcp_session_id state ~name ~arguments =
   (* clock parameter used for Session_eio.wait_for_message *)
+  (* mcp_session_id: HTTP MCP session ID for agent_name persistence across tool calls *)
   let open Yojson.Safe.Util in
 
   let config = state.Mcp_server.room_config in
   let registry = state.Mcp_server.session_registry in  (* TODO: Use session_registry_eio when migrated *)
+
+  (* Helper: Read agent_name from MCP session file *)
+  let read_mcp_session_agent () =
+    match mcp_session_id with
+    | None -> None
+    | Some sid ->
+        let file = Printf.sprintf "/tmp/.masc_agent_mcp_%s" sid in
+        try
+          let ic = open_in file in
+          let name = input_line ic in
+          close_in ic;
+          if name = "" then None else Some name
+        with _ -> None
+  in
+
+  (* Helper: Write agent_name to MCP session file *)
+  let write_mcp_session_agent agent_name =
+    match mcp_session_id with
+    | None -> ()
+    | Some sid ->
+        let file = Printf.sprintf "/tmp/.masc_agent_mcp_%s" sid in
+        try
+          let oc = open_out file in
+          output_string oc agent_name;
+          close_out oc
+        with _ -> ()
+  in
 
   (* Helper to get string with default *)
   let get_string key default =
@@ -564,16 +592,39 @@ let execute_tool_eio ~sw ~clock state ~name ~arguments =
     with _ -> None
   in
 
-  (* Auto-generate agent_name if not provided or empty *)
+  (* Resolve agent_name with MCP session persistence:
+     1. Use explicit agent_name from arguments if provided
+     2. Otherwise, try to read from MCP session file (HTTP session persistence)
+     3. Otherwise, try TERM_SESSION_ID file (terminal session persistence)
+     4. Finally, generate new UUID if all else fails *)
   let raw_agent_name = get_string "agent_name" "" in
   let agent_name =
-    if raw_agent_name = "" || raw_agent_name = "unknown" then begin
-      (* Generate: agent-{short_uuid} *)
-      let uuid = Uuidm.v4_gen (Random.State.make_self_init ()) () in
-      let short = String.sub (Uuidm.to_string uuid) 0 8 in
-      Printf.sprintf "agent-%s" short
-    end else
+    if raw_agent_name <> "" && raw_agent_name <> "unknown" then
       raw_agent_name
+    else
+      match read_mcp_session_agent () with
+      | Some name ->
+          Printf.eprintf "[DEBUG] agent_name from MCP session: %s\n%!" name;
+          name
+      | None ->
+          (* Fallback: try TERM_SESSION_ID file *)
+          let term_session_id = try Sys.getenv "TERM_SESSION_ID" with Not_found -> "" in
+          let term_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
+          (try
+            let ic = open_in term_file in
+            let name = input_line ic in
+            close_in ic;
+            if name <> "" then begin
+              Printf.eprintf "[DEBUG] agent_name from TERM session: %s\n%!" name;
+              name
+            end else raise Not_found
+          with _ ->
+            (* Generate new UUID only as last resort *)
+            let uuid = Uuidm.v4_gen (Random.State.make_self_init ()) () in
+            let short = String.sub (Uuidm.to_string uuid) 0 8 in
+            let generated = Printf.sprintf "agent-%s" short in
+            Printf.eprintf "[DEBUG] agent_name generated: %s\n%!" generated;
+            generated)
   in
 
   (* Log tool call *)
@@ -681,11 +732,26 @@ let execute_tool_eio ~sw ~clock state ~name ~arguments =
       let caps = get_string_list "capabilities" in
       let result = Room.join config ~agent_name ~capabilities:caps () in
       let _ = Session.register registry ~agent_name in
+      (* Save agent_name to MCP session file (HTTP persistence) *)
+      write_mcp_session_agent agent_name;
+      Printf.eprintf "[DEBUG] masc_join: saved agent_name=%s to MCP session\n%!" agent_name;
+      (* Also save to TERM_SESSION_ID file (terminal persistence) *)
+      let term_session_id = try Sys.getenv "TERM_SESSION_ID" with Not_found -> "default" in
+      let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
+      (try
+        let oc = open_out agent_file in
+        output_string oc agent_name;
+        close_out oc
+      with _ -> ());
       (true, result)
 
   | "masc_leave" ->
       let result = Room.leave config ~agent_name in
       unregister_sync registry ~agent_name;
+      (* Clean up self-echo filter file *)
+      let session_id = try Sys.getenv "TERM_SESSION_ID" with Not_found -> "default" in
+      let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" session_id in
+      (try Sys.remove agent_file with _ -> ());
       (true, result)
 
   | "masc_status" ->
@@ -760,6 +826,19 @@ let execute_tool_eio ~sw ~clock state ~name ~arguments =
       let result =
         Room.transition_task_r config ~agent_name ~task_id ~action ?expected_version ~notes ~reason ()
       in
+      (* Notify A2A subscribers on successful transition *)
+      (match result with
+       | Ok _ ->
+           A2a_tools.notify_event
+             ~event_type:A2a_tools.TaskUpdate
+             ~agent:agent_name
+             ~data:(`Assoc [
+               ("task_id", `String task_id);
+               ("action", `String action);
+               ("notes", `String notes);
+             ])
+       | Error _ -> ());
+      (* Record metrics *)
       (match result, action_lc with
        | Ok _, "done" ->
            let metric : Metrics_store_eio.task_metric = {
@@ -819,6 +898,18 @@ let execute_tool_eio ~sw ~clock state ~name ~arguments =
         | None -> (default_time, [])
       in
       let result = Room.complete_task_r config ~agent_name ~task_id ~notes in
+      (* Notify A2A subscribers on successful completion *)
+      (match result with
+       | Ok _ ->
+           A2a_tools.notify_event
+             ~event_type:A2a_tools.TaskUpdate
+             ~agent:agent_name
+             ~data:(`Assoc [
+               ("task_id", `String task_id);
+               ("action", `String "done");
+               ("notes", `String notes);
+             ])
+       | Error _ -> ());
       (* Record metrics on successful completion - Eio native (pure sync) *)
       (match result with
        | Ok _ ->
@@ -2865,14 +2956,14 @@ Expires: %s
 (** {1 Eio-Native JSON-RPC Handlers} *)
 
 (** Eio-native handler for tools/call - uses execute_tool_eio directly *)
-let handle_call_tool_eio ~sw ~clock state id params =
+let handle_call_tool_eio ~sw ~clock ?mcp_session_id state id params =
   let open Yojson.Safe.Util in
   let name = params |> member "name" |> to_string in
   let arguments = params |> member "arguments" in
 
   (* Measure execution time for telemetry *)
   let start_time = Eio.Time.now clock in
-  let (success, message) = execute_tool_eio ~sw ~clock state ~name ~arguments in
+  let (success, message) = execute_tool_eio ~sw ~clock ?mcp_session_id state ~name ~arguments in
   let end_time = Eio.Time.now clock in
   let duration_ms = int_of_float ((end_time -. start_time) *. 1000.0) in
 
@@ -2977,8 +3068,9 @@ let handle_list_prompts_eio id =
 
     Direct-style async using OCaml 5.x Effect Handlers.
     Uses execute_tool_eio for tool calls.
+    mcp_session_id: HTTP MCP session ID for agent_name persistence
 *)
-let handle_request ~clock ~sw state request_str =
+let handle_request ~clock ~sw ?mcp_session_id state request_str =
   try
     let json =
       try Ok (Yojson.Safe.from_string request_str)
@@ -3017,9 +3109,10 @@ let handle_request ~clock ~sw state request_str =
                     (match req.params with
                     | Some params ->
                         let name = Yojson.Safe.Util.(params |> member "name" |> to_string) in
-                        Printf.eprintf "[MCP] tools/call: %s (id=%s)\n%!" name
-                          (match id with `Int i -> string_of_int i | `String s -> s | _ -> "?");
-                        let result = handle_call_tool_eio ~sw ~clock state id params in
+                        Printf.eprintf "[MCP] tools/call: %s (id=%s, session=%s)\n%!" name
+                          (match id with `Int i -> string_of_int i | `String s -> s | _ -> "?")
+                          (match mcp_session_id with Some s -> s | None -> "none");
+                        let result = handle_call_tool_eio ~sw ~clock ?mcp_session_id state id params in
                         Printf.eprintf "[MCP] tools/call done: %s\n%!" name;
                         result
                     | None -> make_error ~id (-32602) "Missing params")

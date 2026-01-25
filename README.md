@@ -121,6 +121,8 @@ See [docs/MODE-SYSTEM.md](docs/MODE-SYSTEM.md) for detailed documentation.
 
 ## Quick Start
 
+Setup 가이드: `docs/SETUP.md`
+
 ### Prerequisites
 
 - OCaml 5.x with opam

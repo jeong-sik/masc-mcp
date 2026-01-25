@@ -21,6 +21,11 @@ jobs:
           ocaml-compiler: 5.2.x
           dune-cache: true
 
+      - name: Pin external dependencies
+        run: |
+          opam pin add mcp_protocol https://github.com/jeong-sik/mcp-protocol-sdk.git#main -n -y
+          opam pin add ocaml-webrtc https://github.com/jeong-sik/ocaml-webrtc.git#main -n -y
+
       - name: Install dependencies
         run: |
           opam install . --deps-only --with-test --yes
@@ -52,6 +57,11 @@ jobs:
           ocaml-compiler: 5.2.x
           dune-cache: true
 
+      - name: Pin external dependencies
+        run: |
+          opam pin add mcp_protocol https://github.com/jeong-sik/mcp-protocol-sdk.git#main -n -y
+          opam pin add ocaml-webrtc https://github.com/jeong-sik/ocaml-webrtc.git#main -n -y
+
       - name: Install dependencies
         run: |
           opam install . --deps-only --yes
@@ -76,6 +86,11 @@ jobs:
         with:
           ocaml-compiler: 5.2.x
           dune-cache: true
+
+      - name: Pin external dependencies
+        run: |
+          opam pin add mcp_protocol https://github.com/jeong-sik/mcp-protocol-sdk.git#main -n -y
+          opam pin add ocaml-webrtc https://github.com/jeong-sik/ocaml-webrtc.git#main -n -y
 
       - name: Install dependencies
         run: |

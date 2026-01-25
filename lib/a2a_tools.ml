@@ -68,20 +68,42 @@ type subscription = {
 (* Global subscription store *)
 let subscriptions : (string, subscription) Hashtbl.t = Hashtbl.create 16
 
-(** Generate UUID *)
+(** Event record for buffering *)
+type buffered_event = {
+  event_type: event_type;
+  agent: string;
+  data: Yojson.Safe.t;
+  timestamp: float;
+} [@@deriving show]
+
+(* Event buffer per subscription - key: subscription_id, value: event list *)
+let event_buffers : (string, buffered_event list) Hashtbl.t = Hashtbl.create 16
+
+(* Max events per subscription to prevent memory bloat *)
+let max_buffered_events = 100
+
+(** Generate UUID using stdlib Random + timestamp (no Mirage_crypto dependency)
+    For A2A subscriptions, cryptographic randomness is not required.
+*)
 let generate_uuid () =
-  let bytes = Mirage_crypto_rng.generate 16 in
-  let buf = Buffer.create 32 in
-  for i = 0 to String.length bytes - 1 do
-    Buffer.add_string buf (Printf.sprintf "%02x" (Char.code (String.get bytes i)))
+  (* Initialize Random once with high-resolution timestamp *)
+  let () =
+    let now = Unix.gettimeofday () in
+    let seed = int_of_float (now *. 1_000_000.) land 0x3FFFFFFF in
+    Random.init seed
+  in
+  let hex_char () =
+    let n = Random.int 16 in
+    if n < 10 then Char.chr (n + 48) else Char.chr (n + 87)
+  in
+  let buf = Buffer.create 36 in
+  for i = 0 to 35 do
+    if i = 8 || i = 13 || i = 18 || i = 23 then
+      Buffer.add_char buf '-'
+    else
+      Buffer.add_char buf (hex_char ())
   done;
-  let hex = Buffer.contents buf in
-  Printf.sprintf "%s-%s-%s-%s-%s"
-    (String.sub hex 0 8)
-    (String.sub hex 8 4)
-    (String.sub hex 12 4)
-    (String.sub hex 16 4)
-    (String.sub hex 20 12)
+  Buffer.contents buf
 
 (** Get current ISO8601 timestamp *)
 let now_iso8601 () : string =
@@ -310,6 +332,8 @@ let subscribe ?(agent_filter : string option) ~(events : string list) ()
 let unsubscribe ~subscription_id : (Yojson.Safe.t, string) result =
   if Hashtbl.mem subscriptions subscription_id then begin
     Hashtbl.remove subscriptions subscription_id;
+    (* Also clean up buffered events *)
+    Hashtbl.remove event_buffers subscription_id;
     Ok (`Assoc [
       ("unsubscribed", `Bool true);
       ("subscription_id", `String subscription_id);
@@ -327,6 +351,11 @@ let list_subscriptions () : Yojson.Safe.t =
         | Some a -> `String a);
       ("events", `List (List.map (fun e -> `String (show_event_type e)) v.event_types));
       ("created_at", `String v.created_at);
+      ("buffered_count", `Int (
+        match Hashtbl.find_opt event_buffers v.id with
+        | None -> 0
+        | Some events -> List.length events
+      ));
     ] in
     sub_json :: acc
   ) subscriptions [] in
@@ -335,8 +364,63 @@ let list_subscriptions () : Yojson.Safe.t =
     ("subscriptions", `List subs);
   ]
 
-(** Notify subscribers of an event (internal use) *)
+(** Poll buffered events for a subscription
+
+    Retrieves all buffered events and clears the buffer.
+    Use this for background subscription workflow:
+    1. subscribe (returns immediately)
+    2. do work (claim, broadcast, etc.)
+    3. poll_events periodically to check for updates
+
+    @param subscription_id Subscription ID
+    @param clear Whether to clear buffer after reading (default: true)
+    @return List of buffered events
+*)
+let poll_events ~subscription_id ?(clear = true) ()
+    : (Yojson.Safe.t, string) result =
+  if not (Hashtbl.mem subscriptions subscription_id) then
+    Error (Printf.sprintf "Subscription '%s' not found" subscription_id)
+  else
+    let events = match Hashtbl.find_opt event_buffers subscription_id with
+      | None -> []
+      | Some events -> events
+    in
+    (* Optionally clear buffer *)
+    if clear then Hashtbl.replace event_buffers subscription_id [];
+    (* Convert to JSON *)
+    let events_json = List.map (fun e ->
+      `Assoc [
+        ("type", `String (show_event_type e.event_type));
+        ("agent", `String e.agent);
+        ("data", e.data);
+        ("timestamp", `Float e.timestamp);
+      ]
+    ) events in
+    Ok (`Assoc [
+      ("subscription_id", `String subscription_id);
+      ("event_count", `Int (List.length events));
+      ("events", `List events_json);
+      ("cleared", `Bool clear);
+    ])
+
+(** Buffer an event for a subscription (with max limit enforcement) *)
+let buffer_event sub_id event =
+  let current = match Hashtbl.find_opt event_buffers sub_id with
+    | None -> []
+    | Some events -> events
+  in
+  (* Keep only last (max - 1) events + new one *)
+  let trimmed =
+    if List.length current >= max_buffered_events then
+      List.tl (List.rev current) |> List.rev
+    else current
+  in
+  Hashtbl.replace event_buffers sub_id (trimmed @ [event])
+
+(** Notify subscribers of an event (internal use)
+    Now also buffers events for polling in addition to SSE broadcast *)
 let notify_event ~(event_type : event_type) ~(agent : string) ~(data : Yojson.Safe.t) : unit =
+  let timestamp = Unix.gettimeofday () in
   Hashtbl.iter (fun _id sub ->
     (* Check agent filter *)
     let agent_match = match sub.agent_filter with
@@ -346,16 +430,25 @@ let notify_event ~(event_type : event_type) ~(agent : string) ~(data : Yojson.Sa
     (* Check event type *)
     let event_match = List.mem event_type sub.event_types in
     if agent_match && event_match then begin
-      (* Push event to SSE stream *)
-      let event_json = `Assoc [
+      (* Buffer event for polling *)
+      let event = { event_type; agent; data; timestamp } in
+      buffer_event sub.id event;
+
+      (* Push event as MCP JSON-RPC Notification (no id = notification) *)
+      let event_params = `Assoc [
         ("type", `String (show_event_type event_type));
         ("agent", `String agent);
         ("data", data);
-        ("timestamp", `Float (Unix.gettimeofday ()));
+        ("timestamp", `Float timestamp);
         ("subscription_id", `String sub.id);
       ] in
-      Sse.broadcast event_json;
-      Log.debug ~ctx:"a2a" "Event %s from %s pushed to SSE (sub: %s)"
+      let mcp_notification = `Assoc [
+        ("jsonrpc", `String "2.0");
+        ("method", `String "masc/event");
+        ("params", event_params);
+      ] in
+      Sse.broadcast mcp_notification;
+      Log.debug ~ctx:"a2a" "Event %s from %s buffered+SSE (sub: %s)"
         (show_event_type event_type) agent sub.id
     end
   ) subscriptions

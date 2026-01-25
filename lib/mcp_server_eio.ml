@@ -564,7 +564,17 @@ let execute_tool_eio ~sw ~clock state ~name ~arguments =
     with _ -> None
   in
 
-  let agent_name = get_string "agent_name" "unknown" in
+  (* Auto-generate agent_name if not provided or empty *)
+  let raw_agent_name = get_string "agent_name" "" in
+  let agent_name =
+    if raw_agent_name = "" || raw_agent_name = "unknown" then begin
+      (* Generate: agent-{short_uuid} *)
+      let uuid = Uuidm.v4_gen (Random.State.make_self_init ()) () in
+      let short = String.sub (Uuidm.to_string uuid) 0 8 in
+      Printf.sprintf "agent-%s" short
+    end else
+      raw_agent_name
+  in
 
   (* Log tool call *)
   Log.Mcp.debug "[%s] %s" agent_name name;
@@ -618,8 +628,12 @@ let execute_tool_eio ~sw ~clock state ~name ~arguments =
   let join_required = List.mem name requires_join in
   let is_joined = Room.is_agent_joined config ~agent_name in
 
+  (* Debug: log join check *)
+  Printf.eprintf "[DEBUG] tool=%s agent_name=%s join_required=%b is_joined=%b\n%!"
+    name agent_name join_required is_joined;
+
   if join_required && not is_joined then
-    (false, Printf.sprintf "❌ Join required: Call masc_join first before using %s.\n\n💡 Workflow: masc_join → masc_status → %s\n📚 See: @~/me/instructions/masc-workflow.md" name name)
+    (false, Printf.sprintf "❌ Join required: Call masc_join first before using %s.\n\n💡 Workflow: masc_join → masc_status → %s\n📚 See: @~/me/instructions/masc-workflow.md\n[DEBUG] agent_name=%s is_joined=%b" name name agent_name is_joined)
   else
 
   (* Safe exec for checkpoint commands *)
@@ -975,6 +989,14 @@ let execute_tool_eio ~sw ~clock state ~name ~arguments =
         (match mention with
          | Some target -> Notify.notify_mention ~from_agent:agent_name ~target_agent:target ~message ()
          | None -> ());
+        (* Notify A2A subscribers for polling *)
+        A2a_tools.notify_event
+          ~event_type:A2a_tools.Broadcast
+          ~agent:agent_name
+          ~data:(`Assoc [
+            ("message", `String message);
+            ("mention", match mention with Some m -> `String m | None -> `Null);
+          ]);
         (true, result)
       end
 
@@ -1565,15 +1587,32 @@ Time: %s
         | `List items -> List.filter_map (function `String s -> Some s | _ -> None) items
         | _ -> []
       in
-      (match A2a_tools.subscribe ?agent_filter ~events () with
-       | Ok json -> (true, Yojson.Safe.pretty_to_string json)
-       | Error e -> (false, Printf.sprintf "❌ Subscribe failed: %s" e))
+      Printf.eprintf "[MCP] subscribe: agent_filter=%s, events=%d\n%!"
+        (Option.value ~default:"*" agent_filter) (List.length events);
+      (try
+        match A2a_tools.subscribe ?agent_filter ~events () with
+        | Ok json ->
+            Printf.eprintf "[MCP] subscribe: OK\n%!";
+            (true, Yojson.Safe.pretty_to_string json)
+        | Error e ->
+            Printf.eprintf "[MCP] subscribe: Error=%s\n%!" e;
+            (false, Printf.sprintf "❌ Subscribe failed: %s" e)
+      with exn ->
+        Printf.eprintf "[MCP] subscribe: Exception=%s\n%!" (Printexc.to_string exn);
+        (false, Printf.sprintf "❌ Subscribe exception: %s" (Printexc.to_string exn)))
 
   | "masc_a2a_unsubscribe" ->
       let subscription_id = get_string "subscription_id" "" in
       (match A2a_tools.unsubscribe ~subscription_id with
        | Ok json -> (true, Yojson.Safe.pretty_to_string json)
        | Error e -> (false, Printf.sprintf "❌ Unsubscribe failed: %s" e))
+
+  | "masc_poll_events" ->
+      let subscription_id = get_string "subscription_id" "" in
+      let clear = get_bool "clear" true in
+      (match A2a_tools.poll_events ~subscription_id ~clear () with
+       | Ok json -> (true, Yojson.Safe.pretty_to_string json)
+       | Error e -> (false, Printf.sprintf "❌ Poll events failed: %s" e))
 
   (* Planning tools - Eio native (pure sync) *)
   | "masc_plan_init" ->
@@ -2976,7 +3015,13 @@ let handle_request ~clock ~sw state request_str =
                 | "tools/list" -> handle_list_tools_eio state id
                 | "tools/call" ->
                     (match req.params with
-                    | Some params -> handle_call_tool_eio ~sw ~clock state id params
+                    | Some params ->
+                        let name = Yojson.Safe.Util.(params |> member "name" |> to_string) in
+                        Printf.eprintf "[MCP] tools/call: %s (id=%s)\n%!" name
+                          (match id with `Int i -> string_of_int i | `String s -> s | _ -> "?");
+                        let result = handle_call_tool_eio ~sw ~clock state id params in
+                        Printf.eprintf "[MCP] tools/call done: %s\n%!" name;
+                        result
                     | None -> make_error ~id (-32602) "Missing params")
                 | method_ -> make_error ~id (-32601) ("Method not found: " ^ method_))
   with exn ->

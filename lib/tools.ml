@@ -1818,6 +1818,26 @@ of their context limits and gracefully hand over work to successors.|};
     ];
   };
 
+  {
+    name = "masc_poll_events";
+    description = "Poll buffered events for a subscription. Use this for background subscription workflow: subscribe → do work → poll_events periodically. Returns and clears buffered events.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("subscription_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Subscription ID to poll events from");
+        ]);
+        ("clear", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Clear buffer after reading (default: true)");
+          ("default", `Bool true);
+        ]);
+      ]);
+      ("required", `List [`String "subscription_id"]);
+    ];
+  };
+
   (* ============================================ *)
   (* Tempo Control (Pace Management)             *)
   (* ============================================ *)

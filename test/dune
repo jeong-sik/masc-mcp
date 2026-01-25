@@ -118,6 +118,15 @@
  (libraries masc_mcp alcotest eio eio_main yojson))
 
 ; ============================================================
+; A2A (Agent-to-Agent) E2E Tests
+; Validates TLA+ specification in docs/MASC_A2A.tla
+; ============================================================
+(test
+ (name test_a2a_e2e)
+ (modules test_a2a_e2e)
+ (libraries masc_mcp alcotest eio eio_main yojson))
+
+; ============================================================
 ; Disabled: Lwt-based tests (require cohttp-lwt-unix, ppx_lwt)
 ; These modules are not currently in masc_mcp library.
 ; ============================================================

@@ -1226,6 +1226,16 @@ let get_agents_raw config =
         | Error _ -> None
       )
 
+(** Check if an agent has joined the room *)
+let is_agent_joined config ~agent_name =
+  ensure_initialized config;
+  let agents_path = agents_dir config in
+  if not (Sys.file_exists agents_path) then false
+  else
+    let filename = safe_filename agent_name ^ ".json" in
+    let path = Filename.concat agents_path filename in
+    Sys.file_exists path
+
 (** Check if filename is valid (no special characters) *)
 let is_valid_filename name =
   String.for_all (fun c ->

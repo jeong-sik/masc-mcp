@@ -603,6 +603,25 @@ let execute_tool_eio ~sw ~clock state ~name ~arguments =
     | Error e -> (false, Types.masc_error_to_string e)
   in
 
+  (* Tools that require agent to be joined first *)
+  let requires_join = [
+    "masc_claim"; "masc_claim_next"; "masc_done"; "masc_transition";
+    "masc_broadcast"; "masc_add_task"; "masc_batch_add_tasks";
+    "masc_worktree_create"; "masc_worktree_remove";
+    "masc_lock"; "masc_unlock"; "masc_release"; "masc_cancel_task";
+    "masc_vote_create"; "masc_vote_cast"; "masc_interrupt"; "masc_approve"; "masc_reject";
+    "masc_portal_open"; "masc_portal_send"; "masc_portal_close";
+    "masc_deliver"; "masc_note_add"; "masc_error_add"; "masc_error_resolve";
+  ] in
+
+  (* Check if agent must join first *)
+  let join_required = List.mem name requires_join in
+  let is_joined = Room.is_agent_joined config ~agent_name in
+
+  if join_required && not is_joined then
+    (false, Printf.sprintf "❌ Join required: Call masc_join first before using %s.\n\n💡 Workflow: masc_join → masc_status → %s\n📚 See: @~/me/instructions/masc-workflow.md" name name)
+  else
+
   (* Safe exec for checkpoint commands *)
   let safe_exec args =
     try

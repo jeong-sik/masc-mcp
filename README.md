@@ -80,6 +80,72 @@ MASC provides all of this through the [Model Context Protocol](https://modelcont
 | **Encryption** | AES-256-GCM protection for sensitive data |
 | **Mode System** | Toggle feature categories to reduce token usage |
 
+## Agent Workflow Pipeline
+
+Proper agent initialization requires **three phases**: join, subscribe, work.
+
+```mermaid
+sequenceDiagram
+    participant A as Agent (Claude/Codex/Gemini)
+    participant M as MASC Server
+    participant SSE as SSE Stream (separate terminal)
+
+    Note over A,SSE: 🚀 Phase 1: Initialization
+    A->>M: masc_join(agent_name)
+    M-->>A: ✅ Joined room
+
+    Note over A,SSE: 📡 Phase 2: Event Subscription (parallel process)
+    SSE->>M: curl -N /sse?room=X
+    M-->>SSE: Stream connected (heartbeat every 30s)
+
+    Note over A,SSE: 🔨 Phase 3: Work Loop
+    A->>M: masc_claim(task_id)
+    M-->>SSE: task_update event
+    A->>M: masc_broadcast("Working on X")
+    M-->>SSE: broadcast event
+    A->>M: masc_done(task_id)
+    M-->>SSE: task_update event
+
+    Note over A,SSE: 👋 Phase 4: Cleanup
+    A->>M: masc_leave()
+    M-->>SSE: agent_left event
+```
+
+### SSE Event Types
+
+| Event | Description | Trigger |
+|-------|-------------|---------|
+| `agent_joined` | Agent entered room | `masc_join` |
+| `agent_left` | Agent exited room | `masc_leave` |
+| `broadcast` | Message to all agents | `masc_broadcast` |
+| `task_update` | Task state change | `masc_claim`, `masc_done`, `masc_cancel_task` |
+| `heartbeat` | Keep-alive ping | Every 30 seconds |
+
+### Monitoring Setup (Recommended)
+
+```bash
+# Terminal 1: SSE event monitor (human oversight)
+curl -N "http://127.0.0.1:8931/sse?room=kidsnote"
+
+# Terminal 2: Agent work (Claude Code, Codex, etc.)
+claude  # or: codex, gemini
+
+# Inside agent session:
+# 1. masc_join(agent_name: "claude-xxx")
+# 2. masc_status()  # verify room state
+# 3. masc_claim(task_id: "task-001")
+# 4. ... do work ...
+# 5. masc_done(task_id: "task-001")
+# 6. masc_leave()  # auto-called by hooks on session end
+```
+
+### Why Separate SSE Terminal?
+
+- **Human oversight**: See all agent activity in real-time
+- **Debug multi-agent issues**: Track who claimed what, when
+- **Non-blocking**: Agent tool calls return immediately; events stream separately
+- **Cross-session visibility**: One terminal monitors ALL agents in the room
+
 ## Mode System (Token Optimization)
 
 MASC provides **Serena-style mode switching** to reduce token usage by enabling only the categories you need.

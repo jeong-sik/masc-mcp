@@ -55,7 +55,11 @@ let all_schemas : tool_schema list = [
 
   {
     name = "masc_leave";
-    description = "Leave the MASC room.";
+    description = "Leave the MASC room and mark yourself as offline. \
+Call when: (1) session ends, (2) switching rooms, (3) work complete. \
+Side effects: releases all your locks, sets presence to offline. \
+Other agents will see you've left via SSE. \
+Example: masc_leave({agent_name: 'claude-xyz'})";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -112,7 +116,11 @@ let all_schemas : tool_schema list = [
 
   {
     name = "masc_add_task";
-    description = "Add a new task to the quest board.";
+    description = "Add a new task to the backlog for agents to claim. \
+Tasks have status flow: todo → claimed → done/cancelled. \
+Priority 1=urgent, 5=low (default 3). \
+Returns task-XXX ID for tracking. \
+Example: masc_add_task({title: 'Fix login bug', priority: 1, description: 'Users cannot login with SSO'})";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -136,7 +144,10 @@ let all_schemas : tool_schema list = [
 
   {
     name = "masc_batch_add_tasks";
-    description = "Add multiple tasks to the quest board at once.";
+    description = "Add multiple tasks in one call (more efficient than repeated masc_add_task). \
+Use when: loading sprint backlog, importing from JIRA, creating related tasks. \
+Each task gets unique ID (task-XXX). Atomic: all succeed or all fail. \
+Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: 'Task B'}]})";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -313,7 +324,11 @@ let all_schemas : tool_schema list = [
   };
   {
     name = "masc_tasks";
-    description = "List all tasks on the quest board.";
+    description = "List all tasks in backlog with their status and assignee. \
+Shows: todo (available), claimed (in progress), done, cancelled. \
+Use before masc_claim to find available tasks. \
+Output includes task ID, title, priority, assignee, timestamps. \
+Tip: Look for status='todo' tasks to claim.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -398,7 +413,11 @@ let all_schemas : tool_schema list = [
 
   {
     name = "masc_messages";
-    description = "Get recent messages from the room.";
+    description = "Get recent broadcast messages from all agents. \
+Use to: catch up after joining, check if someone @mentioned you, see room activity. \
+Returns chronological list with sender, timestamp, content. \
+Default: last 20 messages. Use limit param for more/less. \
+Tip: Search for '@your-name' in results to find mentions.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -418,7 +437,10 @@ let all_schemas : tool_schema list = [
 
   {
     name = "masc_lock";
-    description = "Acquire a lock on a file/resource to prevent concurrent edits. Prefer worktrees when possible.";
+    description = "Acquire exclusive lock on a file before editing. Prevents other agents from modifying same file. \
+IMPORTANT: Always unlock after editing! Locks auto-release on masc_leave. \
+Prefer git worktrees for larger changes (masc_worktree_create). \
+Example: masc_lock({agent_name: 'claude', file: 'src/utils.ts'}) → edit → masc_unlock";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -437,7 +459,10 @@ let all_schemas : tool_schema list = [
 
   {
     name = "masc_unlock";
-    description = "Release a previously acquired file/resource lock.";
+    description = "Release a file lock after editing is complete. \
+ALWAYS call after masc_lock to allow other agents to edit. \
+Fails silently if you don't hold the lock. \
+Example: masc_unlock({agent_name: 'claude', file: 'src/utils.ts'})";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -476,7 +501,11 @@ let all_schemas : tool_schema list = [
 
   {
     name = "masc_who";
-    description = "List currently connected agents.";
+    description = "List all agents currently in the room with their capabilities. \
+Shows: agent name, join time, capabilities (e.g., ['typescript', 'testing']). \
+Use to: find who can help, check if specific agent is online, see team composition. \
+Agents appear after masc_join, disappear after masc_leave. \
+Tip: Use capabilities to find the right agent for @mentions.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -485,7 +514,10 @@ let all_schemas : tool_schema list = [
 
   {
     name = "masc_reset";
-    description = "Reset MASC room completely. Deletes entire .masc/ folder.";
+    description = "⚠️ DESTRUCTIVE: Reset MASC room completely. Deletes ALL data in .masc/ folder. \
+Removes: tasks, messages, agents, locks, cache, telemetry. Cannot be undone. \
+Use only for: fresh start, corrupted state recovery, testing. \
+Requires confirm=true to execute. Example: masc_reset({confirm: true})";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -549,7 +581,10 @@ let all_schemas : tool_schema list = [
 
   {
     name = "masc_portal_close";
-    description = "Close an open portal connection.";
+    description = "Close your portal connection to external services. \
+Use when: finished with external API, cleaning up before leave. \
+Portals are tunnels to external MCP servers (e.g., GitHub, Slack). \
+Auto-closes on masc_leave. Check masc_portal_status for active portals.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -680,7 +715,9 @@ let all_schemas : tool_schema list = [
 
   {
     name = "masc_heartbeat_stop";
-    description = "Stop a running heartbeat by ID.";
+    description = "Stop a periodic heartbeat started by masc_heartbeat_start. \
+Use when: long task complete, no longer need keep-alive, cleaning up. \
+Get heartbeat_id from masc_heartbeat_start response or masc_heartbeat_list.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -695,7 +732,9 @@ let all_schemas : tool_schema list = [
 
   {
     name = "masc_heartbeat_list";
-    description = "List all active heartbeats.";
+    description = "List all active heartbeats in the room. \
+Shows: heartbeat_id, agent, interval, last_beat time. \
+Use to: find orphaned heartbeats, debug presence issues, cleanup before leave.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -864,7 +903,11 @@ let all_schemas : tool_schema list = [
 
   {
     name = "masc_deliver";
-    description = "Set the deliverable (final output/result) for a task.";
+    description = "Attach final output/result to a task for handoff or review. \
+Use for: code diffs, PR URLs, analysis reports, generated files. \
+Deliverables persist with task and are visible to other agents. \
+Call before masc_transition(action='done'). \
+Example: masc_deliver({task_id: 'task-001', content: 'PR: github.com/org/repo/pull/123'})";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -963,7 +1006,10 @@ let all_schemas : tool_schema list = [
 
   {
     name = "masc_plan_get_task";
-    description = "Get the current task_id for the session (if set).";
+    description = "Get the task_id you're currently working on (session-scoped). \
+Returns null if no task is set. Useful for: resuming work after context switch, \
+verifying current assignment, debugging session state. \
+Set via masc_plan_set_task. Auto-cleared on masc_leave.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -973,7 +1019,10 @@ let all_schemas : tool_schema list = [
 
   {
     name = "masc_plan_clear_task";
-    description = "Clear the current task for the session.";
+    description = "Clear your current task assignment without completing it. \
+Use when: switching to different task, abandoning work, resetting session. \
+Does NOT change task status (use masc_transition for that). \
+Auto-called on masc_leave.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -1054,7 +1103,10 @@ let all_schemas : tool_schema list = [
 
   {
     name = "masc_votes";
-    description = "List all votes (active and resolved).";
+    description = "List all votes in the room (active and resolved). \
+Votes are used for: multi-agent decisions, consensus building, approvals. \
+Shows: vote_id, question, options, current tally, status. \
+Use masc_vote_cast to participate, masc_vote_create to start new vote.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -1849,7 +1901,11 @@ of their context limits and gracefully hand over work to successors.|};
 
   {
     name = "masc_a2a_unsubscribe";
-    description = "Unsubscribe from agent events.";
+    description = "Stop receiving events from a background subscription. \
+Call when: (1) done monitoring, (2) switching to different events, (3) cleanup before leave. \
+Frees server resources - always unsubscribe when done. \
+Get subscription_id from masc_a2a_subscribe response. \
+Example: masc_a2a_unsubscribe({subscription_id: 'sub-abc123'})";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -2204,7 +2260,10 @@ of their context limits and gracefully hand over work to successors.|};
 
   {
     name = "masc_run_plan";
-    description = "Set or update the execution plan for a task run.";
+    description = "Set or update the execution plan for a task run. \
+Use at start of work to document your approach. Supports markdown. \
+Plan is versioned - updates create new revision. Other agents can view via masc_run_get. \
+Example: masc_run_plan({task_id: 'task-001', plan: '## Steps\\n1. Analyze code\\n2. Write tests\\n3. Refactor'})";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -2223,7 +2282,10 @@ of their context limits and gracefully hand over work to successors.|};
 
   {
     name = "masc_run_log";
-    description = "Add a timestamped note to the execution log.";
+    description = "Add a timestamped note to task's execution log. \
+Use for: progress updates, blockers found, decisions made, key findings. \
+Auto-timestamps with ISO8601. Creates audit trail for handoffs. \
+Example: masc_run_log({task_id: 'task-001', note: 'Found 3 failing tests in auth module'})";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -2261,7 +2323,10 @@ of their context limits and gracefully hand over work to successors.|};
 
   {
     name = "masc_run_get";
-    description = "Get execution memory for a task as formatted markdown.";
+    description = "Get full execution history for a task as markdown. \
+Returns: plan, logs (timestamped), and deliverable if completed. \
+Use when: resuming work, reviewing progress, preparing handoff. \
+Example: masc_run_get({task_id: 'task-001'}) → '## Plan\\n...\\n## Logs\\n- 10:00 Started...'";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -2276,7 +2341,10 @@ of their context limits and gracefully hand over work to successors.|};
 
   {
     name = "masc_run_list";
-    description = "List all execution runs with their status.";
+    description = "List all task runs with status (active/completed). \
+Shows: task_id, has_plan, log_count, has_deliverable. \
+Use to find: abandoned work, completed runs for review, active executions. \
+Example response: [{task_id: 'task-001', status: 'active', logs: 5}]";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -2329,7 +2397,9 @@ of their context limits and gracefully hand over work to successors.|};
 
   {
     name = "masc_cache_delete";
-    description = "Delete a cache entry by key.";
+    description = "Delete a specific cache entry. \
+Use when: invalidating stale data, clearing specific key, freeing memory. \
+No error if key doesn't exist. Use masc_cache_list to find keys.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -2344,7 +2414,10 @@ of their context limits and gracefully hand over work to successors.|};
 
   {
     name = "masc_cache_list";
-    description = "List all cache entries, optionally filtered by tag.";
+    description = "List cache entries with keys, TTL remaining, and tags. \
+Filter by tag to find related entries. Shows creation time and expiry. \
+Use before: cache cleanup, debugging stale data, finding specific entries. \
+Example: masc_cache_list({tag: 'api'}) → [{key: 'user_123', ttl: 3600, tags: ['api']}]";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -2358,7 +2431,9 @@ of their context limits and gracefully hand over work to successors.|};
 
   {
     name = "masc_cache_clear";
-    description = "Clear all cache entries. Use with caution.";
+    description = "Delete ALL cache entries. DESTRUCTIVE - cannot be undone. \
+Use only when: resetting room state, debugging cache issues, fresh start. \
+Consider masc_cache_delete for targeted cleanup instead.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -2367,7 +2442,9 @@ of their context limits and gracefully hand over work to successors.|};
 
   {
     name = "masc_cache_stats";
-    description = "Get cache statistics (entry count, size, age).";
+    description = "Get cache usage statistics. \
+Shows: total entries, memory size, oldest/newest entry age, hit/miss ratio. \
+Use to: monitor cache health, decide when to clear, debug performance.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -2415,7 +2492,11 @@ of their context limits and gracefully hand over work to successors.|};
 
   {
     name = "masc_tempo_reset";
-    description = "Reset tempo to default (300s / 5 minutes).";
+    description = "Reset room tempo to default 300s (5 minutes). \
+Tempo controls SSE heartbeat interval and agent timeout detection. \
+Use after: intensive work phase complete, debugging tempo issues. \
+Lower tempo = faster detection but more overhead. Default balances both. \
+Example: masc_tempo_reset() → {tempo: 300, message: 'Reset to default'}";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -2609,7 +2690,11 @@ of their context limits and gracefully hand over work to successors.|};
 
   {
     name = "masc_swarm_leave";
-    description = "Remove an agent from the swarm.";
+    description = "Remove yourself from the swarm collective. \
+Differs from masc_leave: swarm is a coordination layer on top of room. \
+Agent stays in room but exits swarm consensus/voting. \
+Use when: switching to solo mode, swarm task complete, reducing overhead. \
+Example: masc_swarm_leave({agent_name: 'claude-xyz'})";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

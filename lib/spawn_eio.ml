@@ -119,6 +119,39 @@ let parse_ollama_output output =
   with _ ->
     (None, None, None)
 
+(** Parse Codex JSONL output for token tracking
+    Last line format: {"type":"turn.completed","usage":{"input_tokens":N,"output_tokens":M}} *)
+let parse_codex_output output =
+  try
+    (* Find the last line with turn.completed *)
+    let lines = String.split_on_char '\n' output in
+    let turn_completed = List.find_opt (fun line ->
+      String.length line > 0 &&
+      try
+        let json = Yojson.Safe.from_string line in
+        let open Yojson.Safe.Util in
+        json |> member "type" |> to_string = "turn.completed"
+      with _ -> false
+    ) (List.rev lines) in
+    match turn_completed with
+    | Some line ->
+        let json = Yojson.Safe.from_string line in
+        let open Yojson.Safe.Util in
+        let usage = json |> member "usage" in
+        let input_tokens = usage |> member "input_tokens" |> to_int_option in
+        let output_tokens = usage |> member "output_tokens" |> to_int_option in
+        let cached = usage |> member "cached_input_tokens" |> to_int_option in
+        (* OpenAI pricing estimate: $15/1M input, $60/1M output *)
+        let cost = match input_tokens, output_tokens with
+          | Some inp, Some out ->
+              Some (float_of_int inp *. 0.015 /. 1000.0 +. float_of_int out *. 0.06 /. 1000.0)
+          | _ -> None
+        in
+        (input_tokens, output_tokens, cached, cost)
+    | None -> (None, None, None, None)
+  with _ ->
+    (None, None, None, None)
+
 let default_configs = [
   ("claude", {
     agent_name = "claude";
@@ -136,7 +169,7 @@ let default_configs = [
   });
   ("codex", {
     agent_name = "codex";
-    command = "codex exec";
+    command = "codex exec --json";
     timeout_seconds = 300;
     working_dir = None;
     mcp_tools = masc_mcp_tools;
@@ -215,6 +248,9 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir () =
         | "ollama" ->
             let (inp, out, cost) = parse_ollama_output raw_output in
             (raw_output, inp, out, None, None, cost)
+        | "codex" ->
+            let (inp, out, cached, cost) = parse_codex_output raw_output in
+            (raw_output, inp, out, cached, None, cost)
         | _ ->
             (raw_output, None, None, None, None, None)
       in 

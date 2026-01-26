@@ -17,6 +17,7 @@
    compression_dict
    config
    dashboard
+   web_dashboard
    datachannel
    datachannel_eio
    dtls

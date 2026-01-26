@@ -29,6 +29,7 @@ module Mcp_session = Mcp_session
 module Http_server_eio = Http_server_eio
 module Graphql_api = Graphql_api
 module Sse = Sse
+module Web_dashboard = Web_dashboard
 module Progress = Progress
 module Cancellation = Cancellation
 module Subscriptions = Subscriptions

@@ -806,6 +806,8 @@ let handle_delete_mcp request reqd =
 let make_routes () =
   Http.Router.empty
   |> Http.Router.get "/health" health_handler
+  |> Http.Router.get "/dashboard" (fun _req reqd ->
+       Http.Response.html (Masc_mcp.Web_dashboard.html ()) reqd)
   |> Http.Router.get "/" (fun _req reqd -> Http.Response.text "MASC MCP Server" reqd)
   |> Http.Router.get "/static/css/middleware.css"
        (serve_playground_asset "static/css/middleware.css")

@@ -2945,7 +2945,7 @@ Example: masc_swarm_leave({agent_name: 'claude-xyz'})";
      - preset="drain" → simple task claiming without chain execution *)
   {
     name = "masc_walph_loop";
-    description = "Walph pattern: Keep claiming and completing tasks until stop condition. Iterates claim_next → work → done cycle. Control via @walph in broadcast: START <preset>, STOP, PAUSE, RESUME, STATUS. Presets map to llm-mcp FeedbackLoop chains: coverage → walph-coverage, refactor → walph-refactor, docs → walph-docs, drain → simple claim loop.";
+    description = "Walph pattern: Keep claiming and completing tasks until stop condition. Iterates claim_next → work → done cycle. Control via @walph in broadcast: START <preset>, STOP, PAUSE, RESUME, STATUS. Presets map to llm-mcp FeedbackLoop chains: coverage → walph-coverage, refactor → walph-refactor, docs → walph-docs, review → pr-review-pipeline, drain → simple claim loop.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -2959,9 +2959,10 @@ Example: masc_swarm_leave({agent_name: 'claude-xyz'})";
             `String "coverage";
             `String "refactor";
             `String "docs";
+            `String "review";
             `String "drain"
           ]);
-          ("description", `String "Loop preset: coverage (80%+ test coverage), refactor (0 lint errors), docs (90%+ doc coverage), drain (empty backlog)");
+          ("description", `String "Loop preset: coverage (80%+ test coverage), refactor (0 lint errors), docs (90%+ doc coverage), review (PR self-review), drain (empty backlog)");
           ("default", `String "drain");
         ]);
         ("max_iterations", `Assoc [

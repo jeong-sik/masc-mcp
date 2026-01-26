@@ -182,6 +182,40 @@ let test_eio_multi_agent_walph () =
   check bool "codex not paused" false state_codex.paused;
   check bool "gemini not paused" false state_gemini.paused
 
+(** Test: Preset mapping includes review *)
+let test_eio_preset_mapping () =
+  with_test_config "preset" @@ fun _env _fs _config ->
+  (* Test all presets map correctly *)
+  let open Masc_mcp.Room_walph_eio in
+  check (option string) "coverage maps" (Some "walph-coverage") (get_chain_id_for_preset "coverage");
+  check (option string) "refactor maps" (Some "walph-refactor") (get_chain_id_for_preset "refactor");
+  check (option string) "docs maps" (Some "walph-docs") (get_chain_id_for_preset "docs");
+  check (option string) "review maps" (Some "pr-review-pipeline") (get_chain_id_for_preset "review");
+  check (option string) "figma maps" (Some "walph-figma") (get_chain_id_for_preset "figma");
+  check (option string) "drain maps" None (get_chain_id_for_preset "drain");
+  check (option string) "unknown maps" None (get_chain_id_for_preset "unknown")
+
+(** Test: Multi-agent with review preset *)
+let test_eio_multi_agent_with_review () =
+  with_test_config "multi_review" @@ fun _env _fs config ->
+  let state_claude = Masc_mcp.Room_walph_eio.get_walph_state config ~agent_name:"claude-reviewer" in
+  let state_codex = Masc_mcp.Room_walph_eio.get_walph_state config ~agent_name:"codex-reviewer" in
+
+  (* Both agents run review preset simultaneously *)
+  Eio.Mutex.use_rw ~protect:true state_claude.mutex (fun () ->
+    state_claude.running <- true;
+    state_claude.current_preset <- "review"
+  );
+  Eio.Mutex.use_rw ~protect:true state_codex.mutex (fun () ->
+    state_codex.running <- true;
+    state_codex.current_preset <- "review"
+  );
+
+  check bool "claude-reviewer running" true state_claude.running;
+  check bool "codex-reviewer running" true state_codex.running;
+  check string "claude preset" "review" state_claude.current_preset;
+  check string "codex preset" "review" state_codex.current_preset
+
 (** Test: list_walph_states returns all active agents *)
 let test_eio_list_walph_states () =
   with_test_config "list_states" @@ fun _env _fs config ->
@@ -211,6 +245,8 @@ let eio_tests = [
   "room isolation in Eio", `Quick, test_eio_room_isolation;
   "cleanup function", `Quick, test_eio_cleanup;
   "multi-agent Walph", `Quick, test_eio_multi_agent_walph;
+  "preset mapping (incl. review)", `Quick, test_eio_preset_mapping;
+  "multi-agent with review preset", `Quick, test_eio_multi_agent_with_review;
   "list walph states", `Quick, test_eio_list_walph_states;
 ]
 

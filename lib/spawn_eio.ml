@@ -89,7 +89,7 @@ let parse_claude_json output =
     (Some output, None, None, None, None, None)
 
 (** Parse Gemini output for token tracking
-    Format: {"usageMetadata": {"promptTokenCount": N, "candidatesTokenCount": M}} *)
+    Format: {"usageMetadata": {"promptTokenCount": N, "candidatesTokenCount": M, "cachedContentTokenCount": C}} *)
 let parse_gemini_output output =
   try
     let json = Yojson.Safe.from_string output in
@@ -97,14 +97,22 @@ let parse_gemini_output output =
     let usage = json |> member "usageMetadata" in
     let input_tokens = usage |> member "promptTokenCount" |> to_int_option in
     let output_tokens = usage |> member "candidatesTokenCount" |> to_int_option in
-    (* Gemini doesn't report cost directly, estimate at $0.00025 per 1K tokens *)
-    let cost = match input_tokens, output_tokens with
-      | Some inp, Some out -> Some (float_of_int (inp + out) *. 0.00025 /. 1000.0)
+    let cached_tokens = usage |> member "cachedContentTokenCount" |> to_int_option in
+    (* Gemini 2.5: cached tokens are 90% cheaper *)
+    let cost = match input_tokens, output_tokens, cached_tokens with
+      | Some inp, Some out, Some cached ->
+          let uncached = inp - cached in
+          (* $0.15/1M uncached input, $0.015/1M cached, $0.60/1M output for 2.5 Flash *)
+          Some (float_of_int uncached *. 0.00015 /. 1000.0 +.
+                float_of_int cached *. 0.000015 /. 1000.0 +.
+                float_of_int out *. 0.0006 /. 1000.0)
+      | Some inp, Some out, None ->
+          Some (float_of_int inp *. 0.00015 /. 1000.0 +. float_of_int out *. 0.0006 /. 1000.0)
       | _ -> None
     in
-    (input_tokens, output_tokens, cost)
+    (input_tokens, output_tokens, cached_tokens, cost)
   with _ ->
-    (None, None, None)
+    (None, None, None, None)
 
 (** Parse Ollama output for token tracking
     Format: {"prompt_eval_count": N, "eval_count": M} *)
@@ -243,8 +251,8 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir () =
             let (result_opt, inp, out, cache_c, cache_r, cost) = parse_claude_json raw_output in
             (Option.value result_opt ~default:raw_output, inp, out, cache_c, cache_r, cost)
         | "gemini" ->
-            let (inp, out, cost) = parse_gemini_output raw_output in
-            (raw_output, inp, out, None, None, cost)
+            let (inp, out, cached, cost) = parse_gemini_output raw_output in
+            (raw_output, inp, out, cached, None, cost)
         | "ollama" ->
             let (inp, out, cost) = parse_ollama_output raw_output in
             (raw_output, inp, out, None, None, cost)

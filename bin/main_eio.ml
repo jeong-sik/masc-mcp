@@ -13,8 +13,11 @@ module Http = Masc_mcp.Http_server_eio
 module Mcp_session = Masc_mcp.Mcp_session
 module Mcp_server = Masc_mcp.Mcp_server
 module Mcp_eio = Masc_mcp.Mcp_server_eio
+module Room = Masc_mcp.Room
 module Room_utils = Masc_mcp.Room_utils
 module Graphql_api = Masc_mcp.Graphql_api
+module Types = Masc_mcp.Types
+module Tempo = Masc_mcp.Tempo
 module Http_negotiation = Masc_mcp.Mcp_protocol.Http_negotiation
 module Progress = Masc_mcp.Progress
 module Sse = Masc_mcp.Sse
@@ -832,6 +835,67 @@ let make_routes () =
            ~legacy_messages_endpoint:(legacy_messages_endpoint_url request)
            request reqd)
   |> Http.Router.get "/sse/simple" sse_simple_handler
+  (* REST API for dashboard - direct Room access *)
+  |> Http.Router.get "/api/v1/status" (fun _req reqd ->
+       match !server_state with
+       | Some state ->
+           let config = state.Mcp_server.room_config in
+           let room_state = Masc_mcp.Room.read_state config in
+           let tempo = Masc_mcp.Tempo.get_tempo config in
+           let json = `Assoc [
+             ("cluster", `String (Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME")));
+             ("project", `String room_state.project);
+             ("tempo_interval_s", `Float tempo.current_interval_s);
+             ("paused", `Bool room_state.paused);
+           ] in
+           Http.Response.json (Yojson.Safe.to_string json) reqd
+       | _ -> Http.Response.json {|{"error":"not initialized"}|} reqd)
+  |> Http.Router.get "/api/v1/tasks" (fun _req reqd ->
+       match !server_state with
+       | Some state ->
+           let config = state.Mcp_server.room_config in
+           let tasks = Masc_mcp.Room.get_tasks_raw config in
+           let tasks_json = List.map (fun (t : Masc_mcp.Types.task) ->
+             `Assoc [
+               ("id", `String t.id);
+               ("title", `String t.title);
+               ("status", `String (Masc_mcp.Types.string_of_task_status t.task_status));
+               ("priority", `Int t.priority);
+               ("assignee", match t.task_status with
+                 | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ } -> `String assignee
+                 | _ -> `Null);
+             ]
+           ) tasks in
+           Http.Response.json (Yojson.Safe.to_string (`Assoc [("tasks", `List tasks_json)])) reqd
+       | _ -> Http.Response.json {|{"error":"not initialized"}|} reqd)
+  |> Http.Router.get "/api/v1/agents" (fun _req reqd ->
+       match !server_state with
+       | Some state ->
+           let config = state.Mcp_server.room_config in
+           let agents = Masc_mcp.Room.get_agents_raw config in
+           let agents_json = List.map (fun (a : Masc_mcp.Types.agent) ->
+             `Assoc [
+               ("name", `String a.name);
+               ("status", `String (Masc_mcp.Types.string_of_agent_status a.status));
+               ("current_task", match a.current_task with Some t -> `String t | None -> `Null);
+             ]
+           ) agents in
+           Http.Response.json (Yojson.Safe.to_string (`Assoc [("agents", `List agents_json)])) reqd
+       | _ -> Http.Response.json {|{"error":"not initialized"}|} reqd)
+  |> Http.Router.get "/api/v1/messages" (fun _req reqd ->
+       match !server_state with
+       | Some state ->
+           let config = state.Mcp_server.room_config in
+           let msgs = Masc_mcp.Room.get_messages_raw config ~since_seq:0 ~limit:20 in
+           let msgs_json = List.map (fun (m : Masc_mcp.Types.message) ->
+             `Assoc [
+               ("from", `String m.from_agent);
+               ("content", `String m.content);
+               ("timestamp", `String m.timestamp);
+             ]
+           ) msgs in
+           Http.Response.json (Yojson.Safe.to_string (`Assoc [("messages", `List msgs_json)])) reqd
+       | _ -> Http.Response.json {|{"error":"not initialized"}|} reqd)
 
 (** Extended router to handle OPTIONS *)
 let make_extended_handler routes =

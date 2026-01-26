@@ -85,6 +85,9 @@ let agent_status_to_string = function
   | Listening -> "listening"
   | Inactive -> "inactive"
 
+(* Alias for dashboard compatibility *)
+let string_of_agent_status = agent_status_to_string
+
 let agent_status_of_string_opt = function
   | "active" -> Some Active
   | "busy" -> Some Busy
@@ -160,6 +163,16 @@ type task_status =
   | Done of { assignee: string; completed_at: string; notes: string option }
   | Cancelled of { cancelled_by: string; cancelled_at: string; reason: string option }
 [@@deriving show]
+
+(* Simple string representation for dashboard *)
+let task_status_to_string = function
+  | Todo -> "todo"
+  | Claimed _ -> "claimed"
+  | InProgress _ -> "in_progress"
+  | Done _ -> "done"
+  | Cancelled _ -> "cancelled"
+
+let string_of_task_status = task_status_to_string
 
 (* Manual yojson conversion for task_status (sum type with records) *)
 let task_status_to_yojson = function
@@ -339,6 +352,9 @@ let tempo_mode_to_string = function
   | Slow -> "slow"
   | Fast -> "fast"
   | Paused -> "paused"
+
+(* Alias for dashboard compatibility *)
+let string_of_tempo_mode = tempo_mode_to_string
 
 let tempo_mode_of_string = function
   | "normal" -> Ok Normal

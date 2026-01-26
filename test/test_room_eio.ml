@@ -1,5 +1,8 @@
 (** Tests for Room_eio: OCaml 5.x Eio-native Room implementation *)
 
+(* Initialize RNG before any crypto operations *)
+let () = Mirage_crypto_rng_unix.use_default ()
+
 open Masc_mcp
 
 (** Recursive directory cleanup *)

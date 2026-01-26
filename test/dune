@@ -16,13 +16,13 @@
         test_subscriptions test_session test_progress test_mitosis test_spawn
         test_validation test_response test_voice_stream test_sctp
         test_datachannel_rfc test_dtls_crypto test_dashboard
-        test_multi_room test_worktree_detection test_bounded)
+        test_multi_room test_worktree_detection test_bounded test_mention test_hat)
  (modules test_room test_types test_checkpoint test_auth test_http_negotiation
           test_sse test_encryption test_backend test_cancellation test_graphql_api
           test_subscriptions test_session test_progress test_mitosis test_spawn
           test_validation test_response test_voice_stream test_sctp
           test_datachannel_rfc test_dtls_crypto test_dashboard
-          test_multi_room test_worktree_detection test_bounded)
+          test_multi_room test_worktree_detection test_bounded test_mention test_hat)
  (libraries masc_mcp mcp_protocol alcotest str yojson mirage-crypto
             mirage-crypto-rng cohttp cstruct))
 
@@ -49,6 +49,12 @@
  (modules test_planning_eio)
  (libraries masc_mcp alcotest str yojson))
 
+; Mention module monkey/fuzz test
+(executable
+ (name test_mention_monkey)
+ (modules test_mention_monkey)
+ (libraries masc_mcp unix str))
+
 ; ============================================================
 ; Eio-native working tests (Mcp_server_eio, Session_eio)
 ; ============================================================
@@ -65,8 +71,8 @@
 
 ; Ralph Eio test (Production-ready fiber-safe Ralph)
 (test
- (name test_ralph_eio)
- (modules test_ralph_eio)
+ (name test_walph_eio)
+ (modules test_walph_eio)
  (libraries masc_mcp alcotest eio eio_main yojson))
 
 ; TODO: These tests need to be created

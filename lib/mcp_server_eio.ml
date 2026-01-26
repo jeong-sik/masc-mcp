@@ -1099,15 +1099,98 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id state ~name ~arguments =
   | "masc_claim_next" ->
       (true, Room.claim_next config ~agent_name)
 
-  | "masc_ralph_loop" ->
+  | "masc_walph_loop" ->
       let preset = get_string "preset" "drain" in
       let max_iterations = get_int "max_iterations" 10 in
       let target = match get_string "target" "" with "" -> None | t -> Some t in
-      (true, Room.ralph_loop config ~agent_name ~preset ~max_iterations ?target ())
+      (* Use Eio-native Walph for production (fiber-safe, non-blocking) *)
+      (true, Room_walph_eio.walph_loop config ~agent_name ~preset ~max_iterations ?target ())
 
-  | "masc_ralph_control" ->
+  | "masc_walph_control" ->
       let command = get_string "command" "STATUS" in
-      (true, Room.ralph_control config ~from_agent:agent_name ~command ~args:"")
+      let target_agent = match get_string "target_agent" "" with "" -> None | a -> Some a in
+      (* Use Eio-native Walph for production (fiber-safe, non-blocking) *)
+      (true, Room_walph_eio.walph_control config ~from_agent:agent_name ~command ~args:"" ~target_agent ())
+
+  | "masc_walph_natural" ->
+      (* Natural language Walph control via heuristic + optional LLM *)
+      let message = get_string "message" "" in
+      if message = "" then
+        (true, "❌ message is required for natural language control")
+      else begin
+        (* Phase 1: Heuristic-based intent classification (fast, no network) *)
+        let msg_lower = String.lowercase_ascii message in
+        let contains s = try let _ = Str.search_forward (Str.regexp_string s) msg_lower 0 in true with Not_found -> false in
+
+        let intent =
+          if contains "stop" || contains "정지" || contains "그만" || contains "멈춰" then
+            `Stop
+          else if contains "pause" || contains "일시" || contains "잠깐" then
+            `Pause
+          else if contains "resume" || contains "재개" || contains "계속" || contains "다시" then
+            `Resume
+          else if contains "status" || contains "상태" || contains "뭐해" || contains "진행" then
+            `Status
+          else if contains "start" || contains "시작" || contains "커버리지" || contains "coverage" then
+            `Start_coverage
+          else if contains "refactor" || contains "리팩" || contains "lint" then
+            `Start_refactor
+          else if contains "docs" || contains "문서" || contains "doc" then
+            `Start_docs
+          else if contains "drain" || contains "태스크" || contains "task" then
+            `Start_drain
+          else
+            `Ignore
+        in
+
+        match intent with
+        | `Ignore ->
+            (true, "ℹ️ Message not recognized as Walph command. Try: start, stop, pause, resume, status")
+        | `Stop ->
+            (true, Room_walph_eio.walph_control config ~from_agent:agent_name ~command:"STOP" ~args:"" ())
+        | `Pause ->
+            (true, Room_walph_eio.walph_control config ~from_agent:agent_name ~command:"PAUSE" ~args:"" ())
+        | `Resume ->
+            (true, Room_walph_eio.walph_control config ~from_agent:agent_name ~command:"RESUME" ~args:"" ())
+        | `Status ->
+            (true, Room_walph_eio.walph_control config ~from_agent:agent_name ~command:"STATUS" ~args:"" ())
+        | `Start_coverage ->
+            (true, Room_walph_eio.walph_loop config ~agent_name ~preset:"coverage" ~max_iterations:10 ())
+        | `Start_refactor ->
+            (true, Room_walph_eio.walph_loop config ~agent_name ~preset:"refactor" ~max_iterations:10 ())
+        | `Start_docs ->
+            (true, Room_walph_eio.walph_loop config ~agent_name ~preset:"docs" ~max_iterations:10 ())
+        | `Start_drain ->
+            (true, Room_walph_eio.walph_loop config ~agent_name ~preset:"drain" ~max_iterations:10 ())
+      end
+
+  | "masc_swarm_walph" ->
+      (* Swarm-level Walph control: manage all Walph instances in the room *)
+      let command = get_string "command" "STATUS" in
+      (true, Room_walph_eio.swarm_walph_control config ~from_agent:agent_name ~command ())
+
+  | "masc_hat_wear" ->
+      (* Change agent's hat (persona) *)
+      let hat_str = get_string "hat" "builder" in
+      let hat = Hat.of_string hat_str in
+      let result = Hat.wear ~agent_name hat in
+      let _ = Room.broadcast config ~from_agent:agent_name
+        ~content:(Printf.sprintf "%s %s" (Hat.to_emoji hat) result) in
+      (true, result)
+
+  | "masc_hat_status" ->
+      (* Get current hat status for all agents *)
+      let agents = Hat.list_all () in
+      if agents = [] then
+        (true, "🎩 No agents have worn hats yet")
+      else
+        let lines = List.map (fun a ->
+          Printf.sprintf "  %s %s: %s"
+            (Hat.to_emoji a.Hat.current_hat)
+            a.Hat.agent_name
+            (Hat.to_string a.Hat.current_hat)
+        ) agents in
+        (true, "🎩 **Hat Status**\n" ^ String.concat "\n" lines)
 
   | "masc_bounded_run" ->
       let agents = match arguments |> member "agents" with
@@ -1144,14 +1227,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id state ~name ~arguments =
         (false, Printf.sprintf "⏳ Rate limited! %d초 후 다시 시도하세요." wait_secs)
       else begin
         let result = Room.broadcast config ~from_agent:agent_name ~content:message in
-        (* Parse @mention for push *)
-        let mention =
-          let re = Str.regexp "@\\([a-zA-Z0-9_]+\\)" in
-          try
-            let _ = Str.search_forward re message 0 in
-            Some (Str.matched_group 1 message)
-          with Not_found -> None
-        in
+        (* Use Mention module for consistent parsing (Stateless/Stateful/Broadcast) *)
+        let mention = Mention.extract message in
         let _ = Session.push_message registry ~from_agent:agent_name ~content:message ~mention in
         (* Push to SSE clients immediately *)
         let notification = `Assoc [

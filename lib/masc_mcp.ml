@@ -13,7 +13,8 @@ module Notify = Notify
 
 module Room_utils = Room_utils
 module Room = Room
-module Room_ralph_eio = Room_ralph_eio
+module Room_walph_eio = Room_walph_eio
+module Llm_client_eio = Llm_client_eio
 module Room_git = Room_git
 module Room_portal = Room_portal
 module Room_worktree = Room_worktree
@@ -60,6 +61,7 @@ module Transport_grpc_next = Transport_grpc_next
 module Encryption = Encryption
 module Gcm_compat = Gcm_compat
 module Mention = Mention
+module Hat = Hat
 module Mitosis = Mitosis
 module Dashboard = Dashboard
 module Tempo = Tempo

@@ -49,6 +49,12 @@
  (modules test_planning_eio)
  (libraries masc_mcp alcotest str yojson))
 
+; Mention module monkey/fuzz test
+(executable
+ (name test_mention_monkey)
+ (modules test_mention_monkey)
+ (libraries masc_mcp unix str))
+
 ; ============================================================
 ; Eio-native working tests (Mcp_server_eio, Session_eio)
 ; ============================================================

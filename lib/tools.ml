@@ -659,6 +659,50 @@ let all_schemas : tool_schema list = [
   };
 
   {
+    name = "masc_heartbeat_start";
+    description = "Start periodic heartbeat broadcasts. Runs in background, sending pings at specified interval. Use for keep-alive or automated status updates.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("interval", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Interval in seconds between heartbeats (min: 5, max: 300)");
+          ("default", `Int 30);
+        ]);
+        ("message", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Heartbeat message content");
+          ("default", `String "🏓 heartbeat");
+        ]);
+      ]);
+    ];
+  };
+
+  {
+    name = "masc_heartbeat_stop";
+    description = "Stop a running heartbeat by ID.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("heartbeat_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "ID of heartbeat to stop (from masc_heartbeat_start)");
+        ]);
+      ]);
+      ("required", `List [`String "heartbeat_id"]);
+    ];
+  };
+
+  {
+    name = "masc_heartbeat_list";
+    description = "List all active heartbeats.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+
+  {
     name = "masc_gc";
     description = "Garbage collection - cleanup zombies, archive stale tasks, delete old messages. One command to clean everything older than N days.";
     input_schema = `Assoc [
@@ -2805,6 +2849,136 @@ of their context limits and gracefully hand over work to successors.|};
           ("default", `Bool false);
         ]);
       ]);
+    ];
+  };
+
+  (* Ralph Wiggum Pattern: Iterative Task Loop
+     Integration with llm-mcp chains:
+     - preset="coverage" → chain.orchestrate ralph-coverage (FeedbackLoop for test coverage)
+     - preset="refactor" → chain.orchestrate ralph-refactor (FeedbackLoop for lint errors)
+     - preset="docs" → chain.orchestrate ralph-docs (FeedbackLoop for documentation)
+     - preset="drain" → simple task claiming without chain execution *)
+  {
+    name = "masc_ralph_loop";
+    description = "Ralph Wiggum pattern: Keep claiming and completing tasks until stop condition. Iterates claim_next → work → done cycle. Control via @ralph in broadcast: START <preset>, STOP, PAUSE, RESUME, STATUS. Presets map to llm-mcp FeedbackLoop chains: coverage → ralph-coverage, refactor → ralph-refactor, docs → ralph-docs, drain → simple claim loop.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Your agent name for claiming tasks");
+        ]);
+        ("preset", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [
+            `String "coverage";
+            `String "refactor";
+            `String "docs";
+            `String "drain"
+          ]);
+          ("description", `String "Loop preset: coverage (80%+ test coverage), refactor (0 lint errors), docs (90%+ doc coverage), drain (empty backlog)");
+          ("default", `String "drain");
+        ]);
+        ("max_iterations", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Maximum iterations before forced stop (default: 10)");
+          ("default", `Int 10);
+          ("minimum", `Int 1);
+          ("maximum", `Int 100);
+        ]);
+        ("target", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Target file or directory for preset (e.g., src/utils.ts)");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"]);
+    ];
+  };
+
+  (* Ralph Wiggum Control: STOP, PAUSE, RESUME, STATUS *)
+  {
+    name = "masc_ralph_control";
+    description = "Control a running @ralph loop. Commands: STOP (end loop after current iteration), PAUSE (suspend loop), RESUME (continue paused loop), STATUS (get current state). Can also be triggered via broadcast: '@ralph STOP', '@ralph PAUSE', etc.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("command", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Control command");
+          ("enum", `List [`String "STOP"; `String "PAUSE"; `String "RESUME"; `String "STATUS"]);
+        ]);
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent sending the command (for audit trail)");
+        ]);
+      ]);
+      ("required", `List [`String "command"; `String "agent_name"]);
+    ];
+  };
+
+  (* Bounded Autonomy: Constrained multi-agent execution with formal guarantees *)
+  {
+    name = "masc_bounded_run";
+    description = "Run multi-agent loop with formal constraints. Guarantees: termination (hard_max_iterations), safety (post-check prevents silent violations), predictive limits (token_buffer). Use for autonomous agent collaboration with budget control.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agents", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "List of agents to use in round-robin: ['gemini', 'codex', 'claude']");
+        ]);
+        ("prompt", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Initial prompt for agents");
+        ]);
+        ("constraints", `Assoc [
+          ("type", `String "object");
+          ("description", `String "Execution limits");
+          ("properties", `Assoc [
+            ("max_turns", `Assoc [
+              ("type", `String "integer");
+              ("description", `String "Maximum agent turns (default: 10)");
+            ]);
+            ("max_tokens", `Assoc [
+              ("type", `String "integer");
+              ("description", `String "Maximum total tokens (default: 100000)");
+            ]);
+            ("max_cost_usd", `Assoc [
+              ("type", `String "number");
+              ("description", `String "Maximum cost in USD (default: 1.0)");
+            ]);
+            ("max_time_seconds", `Assoc [
+              ("type", `String "number");
+              ("description", `String "Maximum wall-clock time (default: 300)");
+            ]);
+            ("token_buffer", `Assoc [
+              ("type", `String "integer");
+              ("description", `String "Buffer for predictive token limit (default: 5000)");
+            ]);
+            ("hard_max_iterations", `Assoc [
+              ("type", `String "integer");
+              ("description", `String "Absolute failsafe iteration limit (default: 100)");
+            ]);
+          ]);
+        ]);
+        ("goal", `Assoc [
+          ("type", `String "object");
+          ("description", `String "Termination condition");
+          ("properties", `Assoc [
+            ("path", `Assoc [
+              ("type", `String "string");
+              ("description", `String "JSONPath to check in agent output, e.g., '$.status' or '$.result.done'");
+            ]);
+            ("condition", `Assoc [
+              ("type", `String "object");
+              ("description", `String "Comparison: {eq: value}, {gte: 0.95}, {lt: 5}, {in: ['done', 'success']}");
+            ]);
+          ]);
+          ("required", `List [`String "path"; `String "condition"]);
+        ]);
+      ]);
+      ("required", `List [`String "agents"; `String "prompt"; `String "goal"]);
     ];
   };
 ]

@@ -1109,6 +1109,28 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id state ~name ~arguments =
       let command = get_string "command" "STATUS" in
       (true, Room.ralph_control config ~from_agent:agent_name ~command ~args:"")
 
+  | "masc_bounded_run" ->
+      let agents = match arguments |> member "agents" with
+        | `List l -> List.filter_map (function `String s -> Some s | _ -> None) l
+        | _ -> []
+      in
+      let prompt = get_string "prompt" "" in
+      let constraints_json = arguments |> member "constraints" in
+      let goal_json = arguments |> member "goal" in
+      let constraints = Bounded.constraints_of_json constraints_json in
+      let goal = Bounded.goal_of_json goal_json in
+      (match state.Mcp_server.proc_mgr with
+       | Some pm ->
+           (* Create spawn function that uses proc_mgr *)
+           let spawn_fn agent_name prompt =
+             Spawn_eio.spawn ~sw ~proc_mgr:pm ~agent_name ~prompt ~timeout_seconds:300 ()
+           in
+           let result = Bounded.bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn in
+           let json = Bounded.result_to_json result in
+           (result.Bounded.status = `Goal_reached, Yojson.Safe.pretty_to_string json)
+       | None ->
+           (false, "❌ Process manager not available"))
+
   | "masc_update_priority" ->
       let task_id = get_string "task_id" "" in
       let priority = get_int "priority" 3 in

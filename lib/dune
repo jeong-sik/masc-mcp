@@ -4,10 +4,12 @@
  (modules
    a2a_tools
    agent_card
+   auto_responder
    auth
    error
    backend
    backend_eio
+   bounded
    cache_eio
    env_config
    cancellation
@@ -39,6 +41,7 @@
    mcp_server_eio
    mcp_session
    metrics_store_eio
+   mention
    mind_eio
    mitosis
    mode

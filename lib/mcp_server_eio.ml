@@ -14,6 +14,25 @@
 type server_state = Mcp_server.server_state
 type jsonrpc_request = Mcp_server.jsonrpc_request
 
+(** {1 Network Context for LLM Chain Calls} *)
+
+(** Type alias for generic Eio network capability *)
+type eio_net = [`Generic] Eio.Net.ty Eio.Resource.t
+
+(** Global Eio network reference for Walph chain execution.
+    Set by main_eio.ml during server initialization.
+    Used by walph_loop to call llm-mcp chain.orchestrate. *)
+let current_net : eio_net option ref = ref None
+
+(** Set the Eio network reference. Called from main_eio.ml. *)
+let set_net net = current_net := Some (net :> eio_net)
+
+(** Get the Eio network reference. Raises if not set. *)
+let get_net () : eio_net =
+  match !current_net with
+  | Some net -> net
+  | None -> failwith "Eio net not initialized - call set_net first"
+
 (** Re-export pure functions from Mcp_server *)
 let create_state ?test_mode:_ ~base_path () =
   (* test_mode is ignored - Mcp_server.create_state doesn't support it *)
@@ -1104,7 +1123,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id state ~name ~arguments =
       let max_iterations = get_int "max_iterations" 10 in
       let target = match get_string "target" "" with "" -> None | t -> Some t in
       (* Use Eio-native Walph for production (fiber-safe, non-blocking) *)
-      (true, Room_walph_eio.walph_loop config ~agent_name ~preset ~max_iterations ?target ())
+      let net = get_net () in
+      (true, Room_walph_eio.walph_loop config ~net ~agent_name ~preset ~max_iterations ?target ())
 
   | "masc_walph_control" ->
       let command = get_string "command" "STATUS" in
@@ -1155,13 +1175,17 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id state ~name ~arguments =
         | `Status ->
             (true, Room_walph_eio.walph_control config ~from_agent:agent_name ~command:"STATUS" ~args:"" ())
         | `Start_coverage ->
-            (true, Room_walph_eio.walph_loop config ~agent_name ~preset:"coverage" ~max_iterations:10 ())
+            let net = get_net () in
+            (true, Room_walph_eio.walph_loop config ~net ~agent_name ~preset:"coverage" ~max_iterations:10 ())
         | `Start_refactor ->
-            (true, Room_walph_eio.walph_loop config ~agent_name ~preset:"refactor" ~max_iterations:10 ())
+            let net = get_net () in
+            (true, Room_walph_eio.walph_loop config ~net ~agent_name ~preset:"refactor" ~max_iterations:10 ())
         | `Start_docs ->
-            (true, Room_walph_eio.walph_loop config ~agent_name ~preset:"docs" ~max_iterations:10 ())
+            let net = get_net () in
+            (true, Room_walph_eio.walph_loop config ~net ~agent_name ~preset:"docs" ~max_iterations:10 ())
         | `Start_drain ->
-            (true, Room_walph_eio.walph_loop config ~agent_name ~preset:"drain" ~max_iterations:10 ())
+            let net = get_net () in
+            (true, Room_walph_eio.walph_loop config ~net ~agent_name ~preset:"drain" ~max_iterations:10 ())
       end
 
   | "masc_swarm_walph" ->

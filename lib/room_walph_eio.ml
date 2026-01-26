@@ -189,16 +189,30 @@ let walph_should_continue config ~agent_name =
     end else true
   )
 
+(** {1 Preset Mapping} *)
+
+(** Map Walph preset to llm-mcp chain ID
+    @param preset The loop preset (coverage, refactor, docs, drain)
+    @return Some chain_id for presets with corresponding chains, None for drain *)
+let get_chain_id_for_preset = function
+  | "coverage" -> Some "walph-coverage"
+  | "refactor" -> Some "walph-refactor"
+  | "docs" -> Some "walph-docs"
+  | "drain" -> None  (* No chain for simple drain *)
+  | "figma" -> Some "walph-figma"
+  | _ -> None
+
 (** {1 Main Loop} *)
 
 (** Walph (Walph Wiggum variant) pattern: Keep claiming tasks until stop condition
     Eio-native implementation with fiber-safe concurrency.
 
+    @param net Eio network capability (for llm-mcp chain calls)
     @param preset Loop preset (drain, coverage, refactor, docs)
     @param max_iterations Maximum iterations before forced stop
     @param target Target file/directory for preset
     @return Status string with loop results *)
-let walph_loop config ~agent_name ?(preset="drain") ?(max_iterations=10) ?target () =
+let walph_loop config ~net ~agent_name ?(preset="drain") ?(max_iterations=10) ?target () =
   Room.ensure_initialized config;
 
   (* Get Walph state for this specific agent *)
@@ -274,16 +288,78 @@ let walph_loop config ~agent_name ?(preset="drain") ?(max_iterations=10) ?target
                   stop_reason := "backlog drained";
                   ()
                 end else if starts_with "✅" claim_result then begin
-                  with_walph_lock walph_state (fun () ->
-                    walph_state.completed <- walph_state.completed + 1
-                  );
+                  (* Extract task ID from claim result.
+                     Format: "✅ agent auto-claimed [P3] task-XXX: Title" *)
+                  let task_id =
+                    try
+                      let re = Str.regexp {|\(task-[0-9]+\)|} in
+                      if Str.string_match re claim_result 0 then
+                        Some (Str.matched_group 1 claim_result)
+                      else if Str.search_forward re claim_result 0 >= 0 then
+                        Some (Str.matched_group 1 claim_result)
+                      else None
+                    with _ -> None
+                  in
 
-                  (* Broadcast progress *)
-                  let _ = Room.broadcast config ~from_agent:agent_name
-                    ~content:(Printf.sprintf "📊 @walph Iteration %d: %s" walph_state.iterations claim_result) in
+                  (* Execute chain if preset has one (not drain) *)
+                  let should_chain = get_chain_id_for_preset preset <> None in
+                  let chain_result =
+                    if not should_chain then
+                      (* Drain mode: no chain, just claim/done *)
+                      Ok "drain mode - no chain"
+                    else begin
+                      (* Build goal from task info and preset *)
+                      let task_title, task_desc = match task_id with
+                        | Some tid ->
+                            let tasks = Room.get_tasks_raw config in
+                            (match List.find_opt (fun (t : Types.task) -> t.id = tid) tasks with
+                             | Some t -> (t.title, t.description)
+                             | None -> (tid, ""))
+                        | None -> ("unknown task", "")
+                      in
+                      let goal = match preset with
+                        | "coverage" ->
+                            Printf.sprintf "Improve test coverage for: %s. %s. Add comprehensive tests with edge cases." task_title task_desc
+                        | "refactor" ->
+                            Printf.sprintf "Refactor the following: %s. %s. Improve code quality, reduce complexity, follow best practices." task_title task_desc
+                        | "docs" ->
+                            Printf.sprintf "Create or improve documentation for: %s. %s. Include examples and clear explanations." task_title task_desc
+                        | _ ->
+                            Printf.sprintf "Complete this task: %s. %s" task_title task_desc
+                      in
+                      let _ = Room.broadcast config ~from_agent:agent_name
+                        ~content:(Printf.sprintf "🔗 @walph calling chain.orchestrate for '%s'..." task_title) in
+                      Llm_client_eio.call_chain ~net ~goal ()
+                    end
+                  in
 
-                  (* Continue loop *)
-                  loop ()
+                  (match chain_result with
+                   | Ok result ->
+                       with_walph_lock walph_state (fun () ->
+                         walph_state.completed <- walph_state.completed + 1
+                       );
+                       (* Mark task as done *)
+                       (match task_id with
+                        | Some tid ->
+                            let notes_str = Printf.sprintf "Chain result: %s" (String.sub result 0 (min 100 (String.length result))) in
+                            let _ = Room.transition_task_r config ~agent_name ~task_id:tid ~action:"done" ~notes:notes_str () in
+                            ()
+                        | None -> ());
+                       (* Broadcast progress *)
+                       let _ = Room.broadcast config ~from_agent:agent_name
+                         ~content:(Printf.sprintf "📊 @walph Iteration %d: %s ✅" walph_state.iterations claim_result) in
+                       loop ()
+                   | Error e ->
+                       let err_msg = match e with
+                         | Llm_client_eio.ConnectionError s -> "Connection: " ^ s
+                         | Llm_client_eio.ParseError s -> "Parse: " ^ s
+                         | Llm_client_eio.ServerError (code, s) -> Printf.sprintf "Server(%d): %s" code s
+                         | Llm_client_eio.Timeout -> "Timeout"
+                       in
+                       let _ = Room.broadcast config ~from_agent:agent_name
+                         ~content:(Printf.sprintf "⚠️ @walph chain error: %s (continuing...)" err_msg) in
+                       (* Continue even on chain error *)
+                       loop ())
                 end else begin
                   (* Error or unexpected result *)
                   stop_reason := Printf.sprintf "claim error: %s" claim_result;
@@ -308,18 +384,6 @@ let walph_loop config ~agent_name ?(preset="drain") ?(max_iterations=10) ?target
 
           result
         )
-
-(** {1 Preset Mapping} *)
-
-(** Map Walph preset to llm-mcp chain ID
-    @param preset The loop preset (coverage, refactor, docs, drain)
-    @return Some chain_id for presets with corresponding chains, None for drain *)
-let get_chain_id_for_preset = function
-  | "coverage" -> Some "walph-coverage"
-  | "refactor" -> Some "walph-refactor"
-  | "docs" -> Some "walph-docs"
-  | "drain" -> None  (* No chain for simple drain *)
-  | _ -> None
 
 (** {1 Swarm Walph - Multi-Agent Coordination} *)
 

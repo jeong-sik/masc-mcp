@@ -22,6 +22,17 @@ type server_state = Mcp_server.server_state
 (** JSON-RPC request (re-exported for convenience) *)
 type jsonrpc_request = Mcp_server.jsonrpc_request
 
+(** {1 Network Context} *)
+
+(** Type alias for generic Eio network capability *)
+type eio_net = [`Generic] Eio.Net.ty Eio.Resource.t
+
+(** Set the Eio network reference for Walph chain execution.
+    Must be called from main_eio.ml during server initialization.
+    Accepts any Eio.Net.t (Unix, Generic, etc.) and stores as generic.
+    @param net Eio network capability *)
+val set_net : _ Eio.Net.t -> unit
+
 (** {1 State Management} *)
 
 (** Create server state (synchronous, no effect)

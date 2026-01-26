@@ -235,3 +235,109 @@ Output JSON only (no markdown):
             else Ok Ignore
         | _ -> Ok Ignore
       with _ -> Ok Ignore
+
+(** {1 Chain Orchestration} *)
+
+(** Build MCP JSON-RPC request for chain.orchestrate
+    @param goal The goal description for orchestration
+    @param timeout Timeout in seconds (default: 120)
+    @param max_replans Maximum re-planning attempts (default: 2) *)
+let build_chain_request ~goal ?(timeout=120) ?(max_replans=2) () =
+  Printf.sprintf {|{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "chain.orchestrate",
+    "arguments": {
+      "goal": %s,
+      "timeout": %d,
+      "max_replans": %d,
+      "trace": false,
+      "verify_on_complete": true
+    }
+  }
+}|} (Yojson.Safe.to_string (`String goal)) timeout max_replans
+
+(** Call chain.orchestrate on llm-mcp server
+    @param net Eio network capability
+    @param goal Goal description for orchestration
+    @param host llm-mcp server host (default: 127.0.0.1)
+    @param port llm-mcp server port (default: 8932)
+    @param timeout_sec Timeout in seconds (default: 120 for long chains)
+    @return Response content or error *)
+let call_chain ~net ~goal ?(host=default_host) ?(port=default_port) ?(timeout_sec=120.0) () =
+  let request_body = build_chain_request ~goal ~timeout:(int_of_float timeout_sec) () in
+  try
+    Eio.Net.with_tcp_connect ~host ~service:(string_of_int port) net @@ fun flow ->
+    let request = Printf.sprintf
+      "POST /mcp HTTP/1.1\r\n\
+       Host: %s:%d\r\n\
+       Content-Type: application/json\r\n\
+       Accept: application/json, text/event-stream\r\n\
+       Content-Length: %d\r\n\
+       Connection: close\r\n\
+       \r\n\
+       %s"
+      host port (String.length request_body) request_body
+    in
+    Eio.Flow.copy_string request flow;
+    Eio.Flow.shutdown flow `Send;
+
+    (* Read response with timeout *)
+    let buf = Buffer.create 16384 in
+    let deadline = Unix.gettimeofday () +. timeout_sec in
+    let rec read_all () =
+      if Unix.gettimeofday () > deadline then
+        ()  (* Timeout *)
+      else
+        let chunk = Cstruct.create 4096 in
+        match Eio.Flow.single_read flow chunk with
+        | n ->
+            Buffer.add_string buf (Cstruct.to_string ~len:n chunk);
+            read_all ()
+        | exception End_of_file -> ()
+    in
+    read_all ();
+
+    (* Parse SSE response - extract last data line *)
+    let response_str = Buffer.contents buf in
+    let lines = String.split_on_char '\n' response_str in
+    let data_lines = List.filter_map (fun line ->
+      let line = String.trim line in
+      if String.length line > 6 && String.sub line 0 6 = "data: " then
+        Some (String.sub line 6 (String.length line - 6))
+      else None
+    ) lines in
+    match List.rev data_lines with
+    | last_data :: _ ->
+        (try
+          let json = Yojson.Safe.from_string last_data in
+          match json with
+          | `Assoc fields ->
+              (match List.assoc_opt "result" fields with
+               | Some (`Assoc result_fields) ->
+                   (match List.assoc_opt "content" result_fields with
+                    | Some (`List [`Assoc text_fields]) ->
+                        (match List.assoc_opt "text" text_fields with
+                         | Some (`String s) -> Ok s
+                         | _ -> Ok last_data)
+                    | Some (`String s) -> Ok s
+                    | _ -> Ok last_data)
+               | _ ->
+                   (match List.assoc_opt "error" fields with
+                    | Some (`Assoc err) ->
+                        let msg = match List.assoc_opt "message" err with
+                          | Some (`String s) -> s
+                          | _ -> "Unknown chain error"
+                        in
+                        Error (ServerError (500, msg))
+                    | _ -> Ok last_data))
+          | _ -> Ok last_data
+        with _ -> Ok last_data)
+    | [] -> Error (ParseError "No data in response")
+  with
+  | Unix.Unix_error (err, _, _) ->
+      Error (ConnectionError (Unix.error_message err))
+  | exn ->
+      Error (ConnectionError (Printexc.to_string exn))

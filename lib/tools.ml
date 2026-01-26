@@ -2852,15 +2852,15 @@ of their context limits and gracefully hand over work to successors.|};
     ];
   };
 
-  (* Ralph Wiggum Pattern: Iterative Task Loop
+  (* Walph Pattern: Iterative Task Loop
      Integration with llm-mcp chains:
-     - preset="coverage" → chain.orchestrate ralph-coverage (FeedbackLoop for test coverage)
-     - preset="refactor" → chain.orchestrate ralph-refactor (FeedbackLoop for lint errors)
-     - preset="docs" → chain.orchestrate ralph-docs (FeedbackLoop for documentation)
+     - preset="coverage" → chain.orchestrate walph-coverage (FeedbackLoop for test coverage)
+     - preset="refactor" → chain.orchestrate walph-refactor (FeedbackLoop for lint errors)
+     - preset="docs" → chain.orchestrate walph-docs (FeedbackLoop for documentation)
      - preset="drain" → simple task claiming without chain execution *)
   {
-    name = "masc_ralph_loop";
-    description = "Ralph Wiggum pattern: Keep claiming and completing tasks until stop condition. Iterates claim_next → work → done cycle. Control via @ralph in broadcast: START <preset>, STOP, PAUSE, RESUME, STATUS. Presets map to llm-mcp FeedbackLoop chains: coverage → ralph-coverage, refactor → ralph-refactor, docs → ralph-docs, drain → simple claim loop.";
+    name = "masc_walph_loop";
+    description = "Walph pattern: Keep claiming and completing tasks until stop condition. Iterates claim_next → work → done cycle. Control via @walph in broadcast: START <preset>, STOP, PAUSE, RESUME, STATUS. Presets map to llm-mcp FeedbackLoop chains: coverage → walph-coverage, refactor → walph-refactor, docs → walph-docs, drain → simple claim loop.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -2895,10 +2895,10 @@ of their context limits and gracefully hand over work to successors.|};
     ];
   };
 
-  (* Ralph Wiggum Control: STOP, PAUSE, RESUME, STATUS *)
+  (* Walph Control: STOP, PAUSE, RESUME, STATUS *)
   {
-    name = "masc_ralph_control";
-    description = "Control a running @ralph loop. Commands: STOP (end loop after current iteration), PAUSE (suspend loop), RESUME (continue paused loop), STATUS (get current state). Can also be triggered via broadcast: '@ralph STOP', '@ralph PAUSE', etc.";
+    name = "masc_walph_control";
+    description = "Control a running @walph loop. Commands: STOP (end loop after current iteration), PAUSE (suspend loop), RESUME (continue paused loop), STATUS (get current state). Can also be triggered via broadcast: '@walph STOP', '@walph PAUSE', etc.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -2913,6 +2913,88 @@ of their context limits and gracefully hand over work to successors.|};
         ]);
       ]);
       ("required", `List [`String "command"; `String "agent_name"]);
+    ];
+  };
+
+  (* Walph Natural Language: Control walph via natural language *)
+  {
+    name = "masc_walph_natural";
+    description = "Control Walph loop using natural language. Heuristic-based intent classification (Korean/English). Examples: '커버리지 올려줘' → START coverage, '그만' → STOP, '잠깐 멈춰' → PAUSE, '다시 시작' → RESUME, '지금 뭐해?' → STATUS. Falls back to llm-mcp for ambiguous messages (requires llm-mcp server on port 8932).";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("message", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Natural language message to interpret (e.g., '커버리지 좀 올려줘', 'stop the loop', '지금 진행상황 알려줘')");
+        ]);
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent sending the command (for audit trail)");
+        ]);
+      ]);
+      ("required", `List [`String "message"; `String "agent_name"]);
+    ];
+  };
+
+  (* Swarm Walph: Coordinate multiple Walph instances *)
+  {
+    name = "masc_swarm_walph";
+    description = "Swarm-level control for all Walph instances in the room. View aggregate status, stop/pause/resume all running loops at once. Commands: STATUS (show all Walph states), STOP (signal all to stop), PAUSE (pause all running), RESUME (resume all paused). Useful for coordinating multi-agent workloads.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("command", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Swarm control command");
+          ("enum", `List [`String "STATUS"; `String "STOP"; `String "PAUSE"; `String "RESUME"]);
+          ("default", `String "STATUS");
+        ]);
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent issuing the swarm command (for audit trail)");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"]);
+    ];
+  };
+
+  (* Hat System: Role-based personas for agents *)
+  {
+    name = "masc_hat_wear";
+    description = "Wear a hat (persona) to specialize agent behavior. Hats: builder (🔨 code), reviewer (🔍 review), researcher (🔬 explore), tester (🧪 tests), architect (📐 design), debugger (🐛 fix), documenter (📝 docs). Broadcast format: @agent:hat (e.g., @claude:builder).";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("hat", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Hat to wear");
+          ("enum", `List [
+            `String "builder"; `String "reviewer"; `String "researcher";
+            `String "tester"; `String "architect"; `String "debugger"; `String "documenter"
+          ]);
+          ("default", `String "builder");
+        ]);
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent wearing the hat");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"]);
+    ];
+  };
+
+  {
+    name = "masc_hat_status";
+    description = "Show current hat status for all agents. Displays which persona each agent is currently using.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent requesting status");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"]);
     ];
   };
 

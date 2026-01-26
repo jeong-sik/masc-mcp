@@ -516,13 +516,10 @@ let message_of_json json =
   with e ->
     Error (Printexc.to_string e)
 
-(** Extract @mention from message content *)
+(** Extract @mention from message content
+    Uses Mention module for Stateless/Stateful/Broadcast parsing *)
 let extract_mention content =
-  let re = Str.regexp "@\\([a-zA-Z0-9_-]+\\)" in
-  try
-    let _ = Str.search_forward re content 0 in
-    Some (Str.matched_group 1 content)
-  with Not_found -> None
+  Mention.extract content
 
 (** Key for atomic message sequence counter *)
 let message_seq_key = "counters:message_seq"

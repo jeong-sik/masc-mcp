@@ -72,7 +72,8 @@ IMPORTANT: If context_ratio exceeds 0.8, you MUST handoff. Do not ignore this.
 --- 
 |}
 
-let parse_claude_json output = 
+(** Parse Claude CLI JSON output for token tracking *)
+let parse_claude_json output =
   try
     let json = Yojson.Safe.from_string output in
     let open Yojson.Safe.Util in
@@ -86,6 +87,37 @@ let parse_claude_json output =
     (result_text, input_tokens, output_tokens, cache_creation, cache_read, cost_usd)
   with _ ->
     (Some output, None, None, None, None, None)
+
+(** Parse Gemini output for token tracking
+    Format: {"usageMetadata": {"promptTokenCount": N, "candidatesTokenCount": M}} *)
+let parse_gemini_output output =
+  try
+    let json = Yojson.Safe.from_string output in
+    let open Yojson.Safe.Util in
+    let usage = json |> member "usageMetadata" in
+    let input_tokens = usage |> member "promptTokenCount" |> to_int_option in
+    let output_tokens = usage |> member "candidatesTokenCount" |> to_int_option in
+    (* Gemini doesn't report cost directly, estimate at $0.00025 per 1K tokens *)
+    let cost = match input_tokens, output_tokens with
+      | Some inp, Some out -> Some (float_of_int (inp + out) *. 0.00025 /. 1000.0)
+      | _ -> None
+    in
+    (input_tokens, output_tokens, cost)
+  with _ ->
+    (None, None, None)
+
+(** Parse Ollama output for token tracking
+    Format: {"prompt_eval_count": N, "eval_count": M} *)
+let parse_ollama_output output =
+  try
+    let json = Yojson.Safe.from_string output in
+    let open Yojson.Safe.Util in
+    let input_tokens = json |> member "prompt_eval_count" |> to_int_option in
+    let output_tokens = json |> member "eval_count" |> to_int_option in
+    (* Local ollama has no cost *)
+    (input_tokens, output_tokens, Some 0.0)
+  with _ ->
+    (None, None, None)
 
 let default_configs = [
   ("claude", {
@@ -172,12 +204,19 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir () =
         | `Signaled _ -> -1
       in 
 
-      let (output, input_tokens, output_tokens, cache_creation, cache_read, cost_usd) = 
-        if agent_name = "claude" then 
-          let (result_opt, inp, out, cache_c, cache_r, cost) = parse_claude_json raw_output in 
-          (Option.value result_opt ~default:raw_output, inp, out, cache_c, cache_r, cost)
-        else 
-          (raw_output, None, None, None, None, None)
+      let (output, input_tokens, output_tokens, cache_creation, cache_read, cost_usd) =
+        match agent_name with
+        | "claude" ->
+            let (result_opt, inp, out, cache_c, cache_r, cost) = parse_claude_json raw_output in
+            (Option.value result_opt ~default:raw_output, inp, out, cache_c, cache_r, cost)
+        | "gemini" ->
+            let (inp, out, cost) = parse_gemini_output raw_output in
+            (raw_output, inp, out, None, None, cost)
+        | "ollama" ->
+            let (inp, out, cost) = parse_ollama_output raw_output in
+            (raw_output, inp, out, None, None, cost)
+        | _ ->
+            (raw_output, None, None, None, None, None)
       in 
 
       {

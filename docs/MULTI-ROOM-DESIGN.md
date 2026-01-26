@@ -1,5 +1,8 @@
 # MASC Multi-Room Design
 
+Status: design (not implemented/verified)
+Verification: none recorded (2026-01-25)
+
 ## Problem Statement
 
 현재 MASC는 단일 방(Single Room) 모델:
@@ -120,7 +123,7 @@ type config = {
 {
   "id": "my-project-dev",
   "name": "My Project Development",
-  "message": "✅ Room 'my-project-dev' created"
+  "message": "Room 'my-project-dev' created"
 }
 ```
 
@@ -142,7 +145,7 @@ type config = {
   "previous_room": "default",
   "current_room": "my-project-dev",
   "nickname": "claude-swift-fox",
-  "message": "✅ Entered room 'my-project-dev' as claude-swift-fox"
+  "message": "Entered room 'my-project-dev' as claude-swift-fox"
 }
 ```
 
@@ -206,7 +209,7 @@ let room_path config room_id =
 ┌─────────────────────────────────────────────────────┐
 │  masc_rooms_list                                    │
 │  ─────────────────────────────────────────────────  │
-│  📁 Rooms (3)                                       │
+│  Rooms (3)                                       │
 │                                                     │
 │  ● default        [2 agents, 5 tasks] ← current    │
 │  ○ my-project-dev   [0 agents, 3 tasks]              │
@@ -219,7 +222,7 @@ let room_path config room_id =
 ## Questions
 
 1. **방 간 에이전트 공유?**
-   - Option A: 에이전트는 한 번에 하나의 방에만 존재 (권장)
+   - Option A: 에이전트는 한 번에 하나의 방에만 존재
    - Option B: 에이전트가 여러 방에 동시 참여 가능
 
 2. **방 권한?**

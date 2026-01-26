@@ -20,7 +20,7 @@ let _num_connections = 1           (* Start with single connection, for future m
 
 (** Receiver with acknowledgment - sends ACKs back *)
 let run_receiver ~net ~sw port stop_flag =
-  let config = { Udp_socket_eio.default_config with
+  let config : Udp_socket_eio.config = {
     bind_addr = "127.0.0.1";
     bind_port = port;
     recv_buffer_size = 262144;  (* 256KB recv buffer *)

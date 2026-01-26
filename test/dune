@@ -169,3 +169,23 @@
  (name test_atomic_simple)
  (modules test_atomic_simple)
  (libraries masc_mcp eio eio_main))
+
+; ============================================================
+; Benchmarks (local, reproducible)
+; ============================================================
+(executables
+ (names
+   bench_udp_fair
+   bench_udp_throughput
+   bench_udp_oneway
+   bench_sctp_transport
+   bench_sctp_batch
+   bench_burst_send)
+ (modules
+   bench_udp_fair
+   bench_udp_throughput
+   bench_udp_oneway
+   bench_sctp_transport
+   bench_sctp_batch
+   bench_burst_send)
+ (libraries masc_mcp eio eio_main mtime mtime.clock))

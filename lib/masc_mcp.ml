@@ -85,3 +85,4 @@ module Voice_stream = Voice_stream
 module Void = Void
 module Webrtc_bindings = Webrtc_bindings
 module Webrtc_common = Webrtc_common
+module Udp_socket_eio = Udp_socket_eio

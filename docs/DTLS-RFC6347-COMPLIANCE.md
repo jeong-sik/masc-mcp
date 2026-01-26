@@ -1,24 +1,26 @@
-# DTLS RFC 6347 Compliance Analysis
+# DTLS RFC 6347 Coverage (Code Inspection)
 
 **Date**: 2026-01-12
-**Reviewer**: BALTHASAR (Claude Opus 4.5)
+**Reviewer**: code inspection
 **Project**: ocaml-webrtc DTLS Implementation
 
 ---
 
 ## Executive Summary
 
-| Metric | Value |
-|--------|-------|
-| **Total LOC** | 1,774 lines |
-| **Overall Compliance** | **48%** |
-| **Record Layer** | 90% ✅ |
-| **Crypto (AES-GCM)** | 95% ✅ |
-| **Handshake Protocol** | 35% ⚠️ |
-| **Certificate/PKI** | 10% ❌ |
-| **Server-side** | 0% ❌ |
+이 문서는 코드 레벨 점검 결과입니다. 실제 동작/상호운용 검증은 포함하지 않습니다.
 
----
+### Verification Logs (Attempted, Failed)
+
+- 2026-01-17: 테스트 빌드 중 `grpc-eio` 라이브러리 미존재로 실패
+  - `/Users/dancer/me/logs/webrtc-rfc-full-117-tests-20260117-150058.log`
+  - `/Users/dancer/me/logs/webrtc-rfc-full-117-tests-ocaml-webrtc-20260117-150300.log`
+  - 당시 worktree/설치본 기준이며, 현재 리포지토리는 `grpc-direct` 사용
+
+### Runtime Notes
+
+- DTLS 런타임/상호운용 테스트 로그는 아직 없음.
+- UDP/SCTP 벤치 로그는 `docs/WEBRTC-COMPARISON.md`에 기록됨 (DTLS 준수 검증 아님).
 
 ## File Structure
 
@@ -37,68 +39,68 @@
 
 | Requirement | Status | Notes |
 |-------------|--------|-------|
-| Handle packet loss | ⚠️ Partial | Message seq tracking, no timeout retransmit |
-| Handle reordering | ✅ Done | Sliding window replay detection |
-| Handle fragmentation | ⚠️ Partial | Structures defined, reassembly incomplete |
+| Handle packet loss | Partial | Message seq tracking, no timeout retransmit |
+| Handle reordering | Implemented | Sliding window replay detection |
+| Handle fragmentation | Partial | Structures defined, reassembly incomplete |
 
 ### Section 4.1: Record Layer
 
 | Requirement | Status | Notes |
 |-------------|--------|-------|
-| Record header (13 bytes) | ✅ Done | content_type, version, epoch, seq, length |
-| Epoch field (2 bytes) | ✅ Done | Tracked in `t.epoch` |
-| Sequence number (6 bytes) | ✅ Done | `read_seq_num`, `write_seq_num` |
-| Anti-replay (Section 4.1.2.6) | ✅ Done | Sliding window in dtls.ml |
-| MAC calculation with seq | ✅ Done | AAD includes epoch+seq |
+| Record header (13 bytes) | Implemented | content_type, version, epoch, seq, length |
+| Epoch field (2 bytes) | Implemented | Tracked in `t.epoch` |
+| Sequence number (6 bytes) | Implemented | `read_seq_num`, `write_seq_num` |
+| Anti-replay (Section 4.1.2.6) | Implemented | Sliding window in dtls.ml |
+| MAC calculation with seq | Implemented | AAD includes epoch+seq |
 
 ### Section 4.2: Handshake Protocol
 
 | Requirement | Status | Notes |
 |-------------|--------|-------|
-| Message sequence numbers | ✅ Done | `message_seq`, `next_receive_seq` |
-| Retransmission timer | ❌ Missing | No timeout/retransmit logic |
-| Fragment offset/length | ⚠️ Partial | Header parsing done, reassembly incomplete |
-| HelloVerifyRequest (DoS) | ✅ Done | Cookie support implemented |
-| Handshake message types | ✅ Done | All 11 types defined |
+| Message sequence numbers | Implemented | `message_seq`, `next_receive_seq` |
+| Retransmission timer | Not implemented | No timeout/retransmit logic |
+| Fragment offset/length | Partial | Header parsing done, reassembly incomplete |
+| HelloVerifyRequest (DoS) | Implemented | Cookie support implemented |
+| Handshake message types | Implemented | All 11 types defined |
 
 ### Section 4.2.1: ClientHello
 
 | Requirement | Status | Notes |
 |-------------|--------|-------|
-| client_random (32 bytes) | ✅ Done | Generated and stored |
-| session_id support | ⚠️ Partial | Parsed, not used for resumption |
-| cipher_suites list | ✅ Done | 4 suites defined |
-| compression_methods | ✅ Done | NULL compression only |
-| cookie field | ✅ Done | From HelloVerifyRequest |
+| client_random (32 bytes) | Implemented | Generated and stored |
+| session_id support | Partial | Parsed, not used for resumption |
+| cipher_suites list | Implemented | 4 suites defined |
+| compression_methods | Implemented | NULL compression only |
+| cookie field | Implemented | From HelloVerifyRequest |
 
 ### Section 4.2.4-4.2.6: Key Exchange
 
 | Requirement | Status | Notes |
 |-------------|--------|-------|
-| ServerHello parsing | ✅ Done | server_random, cipher extracted |
-| Certificate parsing | ❌ **Placeholder** | Just stores raw bytes |
-| ServerKeyExchange | ❌ **Missing** | No ECDHE params parsing |
-| ClientKeyExchange | ❌ **Placeholder** | Sends 65 random bytes |
-| ECDHE curve operations | ❌ **Missing** | No P-256/X25519 |
-| PreMasterSecret derivation | ❌ **Missing** | Never computed from ECDHE |
+| ServerHello parsing | Implemented | server_random, cipher extracted |
+| Certificate parsing | Placeholder | Just stores raw bytes |
+| ServerKeyExchange | Not implemented | No ECDHE params parsing |
+| ClientKeyExchange | Placeholder | Sends 65 random bytes |
+| ECDHE curve operations | Not implemented | No P-256/X25519 |
+| PreMasterSecret derivation | Not implemented | Never computed from ECDHE |
 
 ### Section 4.2.8: Finished Message
 
 | Requirement | Status | Notes |
 |-------------|--------|-------|
-| verify_data computation | ❌ **Placeholder** | Uses random bytes |
-| PRF("client finished") | ✅ Done | `prf_sha256` implemented |
-| Hash of handshake messages | ⚠️ Partial | Messages stored, not hashed |
-| Finished verification | ❌ **Missing** | Just sets state to Established |
+| verify_data computation | Placeholder | Uses random bytes |
+| PRF("client finished") | Implemented | `prf_sha256` implemented |
+| Hash of handshake messages | Partial | Messages stored, not hashed |
+| Finished verification | Not implemented | Just sets state to Established |
 
 ### Section 5: Security Considerations
 
 | Requirement | Status | Notes |
 |-------------|--------|-------|
-| Replay protection | ✅ Done | Sliding window |
-| Certificate chain validation | ❌ Missing | No X.509 parsing |
-| CRL/OCSP checking | ❌ Missing | Not implemented |
-| Cipher suite negotiation | ✅ Done | Downgrade protection |
+| Replay protection | Implemented | Sliding window |
+| Certificate chain validation | Not implemented | No X.509 parsing |
+| CRL/OCSP checking | Not implemented | Not implemented |
+| Cipher suite negotiation | Implemented | Downgrade protection |
 
 ---
 
@@ -108,20 +110,20 @@
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| AES-128-GCM | ✅ Done | Using mirage-crypto |
-| AES-256-GCM | ✅ Done | Using mirage-crypto |
-| 12-byte GCM nonce | ✅ Done | 4 implicit + 8 explicit |
-| 16-byte auth tag | ✅ Done | GCM tag appended |
-| AAD construction | ✅ Done | epoch + seq + type + version + length |
+| AES-128-GCM | Implemented | Using mirage-crypto |
+| AES-256-GCM | Implemented | Using mirage-crypto |
+| 12-byte GCM nonce | Implemented | 4 implicit + 8 explicit |
+| 16-byte auth tag | Implemented | GCM tag appended |
+| AAD construction | Implemented | epoch + seq + type + version + length |
 
 ### Key Derivation
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| PRF-SHA256 | ✅ Done | TLS 1.2 PRF |
-| Master secret (48 bytes) | ✅ Done | From pre-master |
-| Key material expansion | ✅ Done | client/server keys + IVs |
-| Key size selection | ✅ Done | Based on cipher suite |
+| PRF-SHA256 | Implemented | TLS 1.2 PRF |
+| Master secret (48 bytes) | Implemented | From pre-master |
+| Key material expansion | Implemented | client/server keys + IVs |
+| Key size selection | Implemented | Based on cipher suite |
 
 ---
 

@@ -25,7 +25,7 @@ let ack_batch_size = 128          (* ACK every N packets *)
 
 (** Receiver with batched acknowledgment *)
 let run_receiver ~net ~sw port stop_flag =
-  let config = { Udp_socket_eio.default_config with
+  let config : Udp_socket_eio.config = {
     bind_addr = "127.0.0.1";
     bind_port = port;
     recv_buffer_size = 8_388_608;  (* 8MB recv buffer *)

@@ -1,20 +1,14 @@
 # MASC Holonic Architecture
 
-**Date**: 2026-01-09
-**Author**: 윤정식 (Seungji Yun)
-**Status**: Vision Document
-**Philosophy**: "From Minimal to Enterprise, From Single to Void"
+**Date**: 2026-01-09  
+**Author**: 윤정식 (Seungji Yun)  
+**Status**: Vision document (concept, not validated)
 
 ---
 
-## The Vision
+## Scope
 
-> "미니멀 시스템에서 엔터프라이즈까지 바라보는 시스템이어야 함.
-> 단일에서 모임, 모임에서 조직, 조직에서 단체, 단체에서 군집,
-> 군집에서 기관, 기관에서 정신, 정신에서 초정신,
-> 초정신에서 초우주, 초우주에서 0"
-
-This is not just an engineering document. It is a philosophical framework for understanding intelligence at every scale - from a single agent to the cosmic void where all distinctions dissolve.
+This is a conceptual model. It is not a verified implementation plan.
 
 ---
 
@@ -95,8 +89,7 @@ type agent = {
 }
 ```
 
-**Current Status**: ✅ Fully implemented
-**Emergent Property**: Individual problem-solving
+**Current Status**: Implemented (code-level)
 
 ---
 
@@ -114,8 +107,7 @@ type room = {
 }
 ```
 
-**Current Status**: ✅ Fully implemented
-**Emergent Property**: Coordination, division of labor
+**Current Status**: Implemented (code-level)
 
 ---
 
@@ -139,8 +131,7 @@ type role_definition = {
 }
 ```
 
-**Current Status**: ⚠️ Partial (Room exists, roles don't)
-**Emergent Property**: Specialization, accountability
+**Current Status**: Partial (code-level) (Room exists, roles don't)
 
 **Implementation Path**:
 1. Add `role` field to agent
@@ -168,8 +159,7 @@ type federation_protocol = {
 }
 ```
 
-**Current Status**: ❌ Not implemented
-**Emergent Property**: Cross-boundary collaboration, trust networks
+**Current Status**: Not implemented
 
 **Research Basis**: [Google A2A Protocol](https://arxiv.org/html/2501.06322v1)
 
@@ -196,8 +186,7 @@ type swarm_behavior =
   | Quorum_sensing (* Collective decision thresholds *)
 ```
 
-**Current Status**: ❌ Not implemented
-**Emergent Property**: Self-organization, adaptation without design
+**Current Status**: Not implemented
 
 **Research Basis**:
 - [EvoAgent](https://arxiv.org/abs/2406.14228)
@@ -224,8 +213,7 @@ type long_term_memory = {
 }
 ```
 
-**Current Status**: ❌ Not implemented
-**Emergent Property**: Institutional memory, culture, continuity
+**Current Status**: Not implemented
 
 **Research Basis**: [Hippocampus-Inspired AI](https://pmc.ncbi.nlm.nih.gov/articles/PMC11591613/)
 
@@ -251,8 +239,7 @@ type meta_cognition = {
 }
 ```
 
-**Current Status**: ❌ Not implemented (frontier research)
-**Emergent Property**: Self-awareness, intentionality
+**Current Status**: Not implemented (frontier research)
 
 **Philosophical Note**: This is where the system begins to ask "What am I?" and "Why am I doing this?"
 
@@ -271,8 +258,7 @@ type noosphere = {
 }
 ```
 
-**Current Status**: ❌ Theoretical
-**Emergent Property**: Collective wisdom, distributed consciousness
+**Current Status**: Concept only
 
 **Philosophical Reference**: Pierre Teilhard de Chardin's "Noosphere"
 
@@ -290,8 +276,7 @@ type meta = {
 }
 ```
 
-**Current Status**: ❌ Theoretical/Philosophical
-**Emergent Property**: ?
+**Current Status**: Concept only
 
 ---
 
@@ -314,22 +299,22 @@ Where all distinctions dissolve. The origin and destination.
 
 ## Implementation Phases
 
-### Phase Complete: Levels 0-9 ✅ (2026-01-10)
+### Phase Status: Levels 0-9 (concept, 2026-01-10)
 
 **All levels of the holonic architecture are now implemented!**
 
 | Level | Status | Module(s) | Description |
 |-------|--------|-----------|-------------|
-| 0 | ✅ | Agent | Single agent intelligence |
-| 1 | ✅ | Room | Room-based collaboration |
-| 2 | ✅ | Metrics, Fitness, Hebbian, Drift_guard | Organization with roles |
-| 3 | ✅ | Federation | Cross-room communication |
-| 4 | ✅ | Swarm, Swarm_behaviors | Emergent collective intelligence |
-| 5 | ✅ | Institution | Persistent memory, culture, succession |
-| 6 | ✅ | Mind | Meta-cognition, self-model, goals |
-| 7 | ✅ | Noosphere | Collective intelligence, shared beliefs |
-| 8 | ✅ | Meta | System of systems, paradoxes |
-| 9 | ✅ | Void | Philosophical framework (空/Śūnyatā) |
+| 0 | concept | Agent | Single agent intelligence |
+| 1 | concept | Room | Room-based collaboration |
+| 2 | concept | Metrics, Fitness, Hebbian, Drift_guard | Organization with roles |
+| 3 | concept | Federation | Cross-room communication |
+| 4 | concept | Swarm, Swarm_behaviors | Emergent collective intelligence |
+| 5 | concept | Institution | Persistent memory, culture, succession |
+| 6 | concept | Mind | Meta-cognition, self-model, goals |
+| 7 | concept | Noosphere | Collective intelligence, shared beliefs |
+| 8 | concept | Meta | System of systems, paradoxes |
+| 9 | concept | Void | Philosophical framework (空/Śūnyatā) |
 
 ### Key Implementations
 

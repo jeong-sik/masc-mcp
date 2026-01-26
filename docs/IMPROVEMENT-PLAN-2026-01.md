@@ -1,24 +1,31 @@
-# MASC Improvement Plan (2025-01)
+# MASC Improvement Plan (2026-01)
 
-> Based on multi-agent LLM research findings (arXiv:2503.13657, 2505.21298, etc.)
+## Goal
 
-## Executive Summary
+멀티 에이전트 협업의 안정성/재현성을 높이는 개선안을 정리합니다.
 
-연구에 따르면 멀티 에이전트 시스템의 **79% 실패**가 조직/조정 문제에서 발생합니다.
-MASC는 이미 많은 부분을 해결하고 있으나, 다음 개선을 통해 **업계 선도적 위치**를 확보할 수 있습니다.
+## Verified (real-world)
+
+- 기록 없음. 실행 로그(run_id/날짜/환경/데이터셋)를 함께 적는다.
+
+## Comparisons (measured)
+
+- 기록 없음. 비교 조건/지표/로그를 함께 적는다.
+
+## Planned (hypotheses)
 
 ---
 
 ## Priority Matrix
 
-| 우선순위 | 개선 항목 | 해결하는 실패 | 예상 효과 | 난이도 |
+| 우선순위 | 개선 항목 | 해결하는 실패 | 기대 효과(가설) | 난이도 |
 |---------|----------|--------------|----------|--------|
-| **P1** | Schema Validation | 36.94% 조정 실패 | High | Medium |
+| **P1** | Schema Validation | 메시지 조정 실패 | 감소 | Medium |
 | **P1** | Checkpointing | 장기 작업 실패 복구 | High | Medium |
-| **P2** | Judge Agent Pattern | 21.30% 검증 실패 | 7x 정확도 | Low |
+| **P2** | Judge Agent Pattern | 검증 실패 | 개선 | Low |
 | **P2** | Lamport Timestamps | 메시지 순서 보장 | Medium | Low |
 | **P3** | Adaptive Orchestration | 스케일링 오버헤드 | Medium | High |
-| **P3** | Bloom Filter Discovery | 에이전트 매칭 속도 | 100x 빠름 | Medium |
+| **P3** | Bloom Filter Discovery | 에이전트 매칭 속도 | 개선 | Medium |
 
 ---
 
@@ -26,7 +33,7 @@ MASC는 이미 많은 부분을 해결하고 있으나, 다음 개선을 통해 
 
 ### 1.1 Schema-Based Message Validation
 
-**문제**: 에이전트 간 메시지 형식 불일치로 36.94% 조정 실패 발생
+**문제**: 에이전트 간 메시지 형식 불일치로 조정 실패 발생
 
 **현재 MASC**:
 ```ocaml
@@ -78,8 +85,8 @@ masc_checkpoint_list(task_id)               → 체크포인트 목록
 ```
 
 **LangGraph와 차별화**:
-- LangGraph: 매 단계 저장 (20% 오버헤드)
-- MASC: 설정 가능한 간격 + 핸드오버와 통합 (5% 오버헤드)
+- LangGraph: 매 단계 저장
+- MASC: 설정 가능한 간격 + 핸드오버와 통합
 
 **구현 위치**: `features/masc-mcp/lib/core/checkpoint.ml`
 
@@ -103,9 +110,7 @@ masc_checkpoint_list(task_id)               → 체크포인트 목록
 
 ### 2.1 Judge Agent Pattern
 
-**문제**: 에이전트 자가 검증은 21.30% 검증 실패 유발
-
-**PwC 사례**: 독립 Judge로 10% → 70% 정확도 (7x 향상)
+**문제**: 에이전트 자가 검증은 검증 실패를 유발할 수 있음
 
 **개선안**:
 ```ocaml
@@ -166,11 +171,11 @@ let send_message ~agent ~message =
 
 ## P3: Strategic Improvements
 
-### 3.1 Adaptive Orchestration (arXiv:2505.19591 기반)
+### 3.1 Adaptive Orchestration
 
 **문제**: 정적 조직 구조는 복잡성 증가 시 조정 오버헤드
 
-**연구 인사이트**: "Evolving Orchestration" - 작업에 따라 조직 구조 동적 변경
+**배경**: 작업에 따라 조직 구조 동적 변경
 
 **개선안**:
 ```ocaml
@@ -208,8 +213,6 @@ let find_agents_with_capability cap =
   (* O(1) 초기 필터링 *)
 ```
 
-**예상 효과**: 100+ 에이전트 시 100x 빠른 매칭
-
 **예상 LOC**: ~150 lines
 
 ---
@@ -233,14 +236,14 @@ let find_agents_with_capability cap =
 
 ---
 
-## Success Metrics
+## Measurement Plan
 
-| 메트릭 | 현재 | 목표 | 측정 방법 |
-|--------|------|------|----------|
-| 메시지 형식 오류 | 미측정 | 0% | Schema 검증 로그 |
-| 작업 실패 복구 시간 | 전체 재시작 | 마지막 체크포인트부터 | 복구 로그 |
-| 검증 정확도 | 미측정 | 70%+ | Judge 판정 기록 |
-| 10+ 에이전트 매칭 속도 | TBD | <10ms | 벤치마크 |
+| 메트릭 | 기준 | 측정 방법 |
+|--------|------|----------|
+| 메시지 형식 오류 | 미측정 | Schema 검증 로그 |
+| 작업 실패 복구 시간 | 미측정 | 복구 로그 |
+| 검증 결과 | 미측정 | Judge 판정 기록 |
+| 에이전트 매칭 속도 | 미측정 | 벤치마크 |
 
 ---
 
@@ -254,14 +257,10 @@ let find_agents_with_capability cap =
 
 ---
 
-## References
+## References (ideas)
 
-- arXiv:2503.13657 - Why Do Multi-Agent LLM Systems Fail?
-- arXiv:2505.19591 - Multi-Agent Collaboration via Evolving Orchestration
-- Augment Code Guide - Why Multi-Agent LLM Systems Fail (and How to Fix Them)
 - MASC v2 Design Doc - features/masc-mcp/docs/MASC-V2-DESIGN.md
 
 ---
 
-*Created: 2025-01-13*
-*Author: Claude Code Research Session*
+*Updated: 2026-01-25*

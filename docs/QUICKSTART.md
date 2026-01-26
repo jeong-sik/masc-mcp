@@ -1,11 +1,9 @@
 # MASC Quick Start Guide
 
-> 실제 사용 시나리오 기반 가이드
-
-## 🚀 30초 시작
+## 시작
 
 ```bash
-# 1. PostgreSQL 모드로 서버 시작 (권장)
+# 1. PostgreSQL 모드로 서버 시작
 export MASC_STORAGE_TYPE=postgres
 export MASC_POSTGRES_URL=$POSTGRES_URL
 cd ~/me/features/masc-mcp && ./start-masc-mcp.sh --http
@@ -16,17 +14,17 @@ curl http://127.0.0.1:8935/health
 
 ---
 
-## 📡 지원 프로토콜
+## 지원 프로토콜
 
 | 프로토콜 | 포트 | 바이너리 | 용도 |
 |----------|------|----------|------|
 | **HTTP/SSE** | 8935 | main.exe / main_eio.exe | MCP 클라이언트 (Claude Code) |
-| **gRPC** | 9936 | masc_grpc_eio.exe | 고성능 Agent 통신 |
+| **gRPC** | 9936 | masc_grpc_eio.exe | gRPC 기반 Agent 통신 |
 | **WebRTC** | - | (실험) | P2P 실시간 협업 |
 
 ---
 
-## 🎯 시나리오별 설정
+## 시나리오별 설정
 
 ### 시나리오 1: 로컬 싱글 머신 (Claude + Gemini)
 
@@ -58,7 +56,7 @@ export MASC_CLUSTER_NAME=me  # 클러스터 이름 통일!
 ./start-masc-mcp.sh --http
 ```
 
-### 시나리오 3: gRPC 고성능 통신
+### 시나리오 3: gRPC 통신
 
 ```bash
 # HTTP + gRPC 동시 실행
@@ -80,7 +78,7 @@ print(response.agents)
 
 ---
 
-## 🔧 실전 워크플로우
+## 실전 워크플로우
 
 ### 워크플로우 1: Task 기반 협업
 
@@ -117,7 +115,7 @@ await masc_done({ task_id: "implement-feature-x" })
 await masc_broadcast({ message: "@gemini 다음 차례야" })
 ```
 
-### 워크플로우 2: Git Worktree 격리 (권장)
+### 워크플로우 2: Git Worktree 격리
 
 ```bash
 # Claude: worktree 생성
@@ -148,7 +146,7 @@ const response = await masc_portal_status({ target: "gemini" })
 
 ---
 
-## 🏥 트러블슈팅
+## 트러블슈팅
 
 ### Redis Blocking 문제
 ```
@@ -176,7 +174,7 @@ export MASC_STORAGE_TYPE=postgres
 
 ---
 
-## 📊 모니터링
+## 모니터링
 
 ### 실시간 상태 확인
 ```bash
@@ -197,7 +195,7 @@ dune exec ./bin/masc_cost.exe
 
 ---
 
-## 🔗 관련 문서
+## 관련 문서
 
 - [MASC-V2-DESIGN.md](./MASC-V2-DESIGN.md) - 아키텍처 상세
 - [README.md](../README.md) - 설치 및 빌드

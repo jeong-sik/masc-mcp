@@ -22,7 +22,7 @@ let recv_buffer_size = 16_777_216  (* 16MB *)
 
 (** Receiver - just counts, no ACKs *)
 let run_receiver ~net ~sw port stop_flag =
-  let config = { Udp_socket_eio.default_config with
+  let config : Udp_socket_eio.config = {
     bind_addr = "127.0.0.1";
     bind_port = port;
     recv_buffer_size = recv_buffer_size;

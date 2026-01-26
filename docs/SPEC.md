@@ -2,21 +2,19 @@
 
 > Multi-Agent Streaming Coordination over Model Context Protocol
 
-**Version**: 3.0.0 (Phase 13 Complete)
+**Version**: 3.0.0 (Phase 13)
 **Last Updated**: 2026-01-09
-**Status**: Production Ready
-**Tests**: 291+ (see latest run for exact count)
-**Modules**: 75 library modules (~39,000 lines of OCaml in `lib/`)
+**Modules**: see `lib/`
 
 ---
 
 ## Executive Summary
 
-MASC-MCP는 MCP(Model Context Protocol) 2025-11-25 스펙을 완전 구현한 OCaml 네이티브 다중 에이전트 협업 시스템입니다. A2A(Agent-to-Agent) 프로토콜의 핵심 기능을 통합하여 **Universal Agent Glue** 역할을 수행합니다.
+MASC-MCP는 MCP(Model Context Protocol) 2025-11-25 기반의 OCaml MCP 서버이며, A2A(Agent-to-Agent) 관련 기능을 포함합니다.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    MASC: The Glue Layer                     │
+│                        MASC Layer                           │
 ├─────────────────────────────────────────────────────────────┤
 │  Claude Code ←→ MCP ←→ MASC ←→ A2A/gRPC ←→ Gemini/Codex   │
 │  Cursor      ←→ MCP ←→ MASC ←→ REST     ←→ Custom Agents  │
@@ -30,7 +28,7 @@ MASC-MCP는 MCP(Model Context Protocol) 2025-11-25 스펙을 완전 구현한 OC
 
 1. [What's New in v3.0](#whats-new-in-v30)
 2. [Architecture](#architecture)
-3. [MCP Tools Reference (144 tools)](#mcp-tools-reference)
+3. [MCP Tools Reference](#mcp-tools-reference)
 4. [MCP 2025-11-25 Compliance](#mcp-2025-11-25-compliance)
 5. [A2A Integration](#a2a-integration)
 6. [Feature Matrix](#feature-matrix)
@@ -53,17 +51,6 @@ MASC-MCP는 MCP(Model Context Protocol) 2025-11-25 스펙을 완전 구현한 OC
 | **12** | Cluster Tempo Control | 4 | Adaptive orchestrator intervals |
 | **13** | Visual Dashboard | 1 | Terminal-based status viewer |
 
-### Key Metrics Change
-
-| Metric | v2.1.0 (Phase 7) | v3.0.0 (Phase 13) | Change |
-|--------|------------------|-------------------|--------|
-| MCP Tools | 70+ | **144** | +105% |
-| Library Modules | 23 | **75** | +226% |
-| Tests | 234 | **291+** | +24% |
-| Lines of Code | ~12,000 | **~39,000** | +225% |
-
----
-
 ## Architecture
 
 ### Module Structure (44 modules)
@@ -84,7 +71,7 @@ lib/
 │   ├── mcp_server.ml      # HTTP/SSE server (2,172 lines)
 │   ├── mcp_protocol.ml    # JSON-RPC 2.0
 │   ├── mcp_session.ml     # Legacy session
-│   ├── tools.ml           # 144 MCP tool definitions (~2,793 lines)
+│   ├── tools.ml           # MCP tool definitions
 │   ├── sse.ml             # SSE with Event IDs
 │   └── log.ml             # Logging
 │
@@ -149,7 +136,7 @@ Client Request
    └──────┼──────┘
           ▼
 ┌─────────────────┐
-│   Tool Router   │ ← 144 MCP tools
+│   Tool Router   │ ← MCP tools
 │    (tools.ml)   │
 └────────┬────────┘
          │
@@ -169,7 +156,7 @@ Client Request
 
 ## MCP Tools Reference
 
-### Overview: 144 Tools grouped by family
+### Overview: Tools grouped by family
 
 | Family | Examples |
 |--------|----------|
@@ -274,34 +261,36 @@ Client Request
 
 ## MCP 2025-11-25 Compliance
 
-### MUST Requirements (100% Complete)
+Status here is code-level (unverified). Use test logs for runtime verification.
+
+### MUST Requirements (implemented)
 
 | Requirement | Status | Implementation |
 |-------------|--------|----------------|
-| JSON-RPC 2.0 Format | ✅ | `mcp_protocol.ml` |
-| Protocol Version Header | ✅ | `X-MCP-Protocol-Version: 2025-11-25` |
-| Standard Error Codes | ✅ | -32700, -32600, -32601, -32602, -32603 |
-| Origin Validation | ✅ | `validate_origin` with allowlist |
+| JSON-RPC 2.0 Format | yes | `mcp_protocol.ml` |
+| Protocol Version Header | yes | `X-MCP-Protocol-Version: 2025-11-25` |
+| Standard Error Codes | yes | -32700, -32600, -32601, -32602, -32603 |
+| Origin Validation | yes | `validate_origin` with allowlist |
 
-### SHOULD Requirements (100% Complete)
-
-| Requirement | Status | Implementation |
-|-------------|--------|----------------|
-| SSE Support | ✅ | `sse.ml` with chunked encoding |
-| Streamable HTTP | ✅ | Transfer-Encoding: chunked |
-| Graceful Shutdown | ✅ | SIGTERM handler, pending task wait |
-| Tool Result Streaming | ✅ | Progress notifications |
-
-### MAY Requirements (100% Complete)
+### SHOULD Requirements (implemented)
 
 | Requirement | Status | Implementation |
 |-------------|--------|----------------|
-| Session ID | ✅ | `session.ml` - `X-MCP-Session-ID` header |
-| Event IDs (Resumability) | ✅ | SSE `id:` field, `Last-Event-ID` reconnect |
-| Cancellation Tokens | ✅ | `cancellation.ml` - LIFO callbacks |
-| Resource Subscriptions | ✅ | `subscriptions.ml` - 6 resource types |
-| Progress Notifications | ✅ | Real-time task progress streaming |
-| Logging Interface | ✅ | Server logs to client via SSE |
+| SSE Support | yes | `sse.ml` with chunked encoding |
+| Streamable HTTP | yes | Transfer-Encoding: chunked |
+| Graceful Shutdown | yes | SIGTERM handler, pending task wait |
+| Tool Result Streaming | yes | Progress notifications |
+
+### MAY Requirements (implemented)
+
+| Requirement | Status | Implementation |
+|-------------|--------|----------------|
+| Session ID | yes | `session.ml` - `X-MCP-Session-ID` header |
+| Event IDs (Resumability) | yes | SSE `id:` field, `Last-Event-ID` reconnect |
+| Cancellation Tokens | yes | `cancellation.ml` - LIFO callbacks |
+| Resource Subscriptions | yes | `subscriptions.ml` - 6 resource types |
+| Progress Notifications | yes | Real-time task progress streaming |
+| Logging Interface | yes | Server logs to client via SSE |
 
 ---
 
@@ -369,31 +358,8 @@ Endpoint: `GET /.well-known/agent-card.json`
 | **Discovery** | Manual config | Agent Cards | Both |
 | **State Management** | Client-side | Task artifacts | Room-based |
 | **Authentication** | Per-server | Bearer/OAuth | Built-in |
-| **Cellular Agents** | ❌ | ❌ | ✅ |
-| **Shared Cache** | ❌ | ❌ | ✅ |
-
----
-
-## Pros and Cons Analysis
-
-### Strengths
-
-| Strength | Evidence | Impact |
-|----------|----------|--------|
-| **OCaml Performance** | ~2ms tool latency | 10x faster than Python MCP servers |
-| **Full MCP Spec** | 100% MAY compliance | Future-proof |
-| **Cellular Agent Pattern** | DNA handover, mitosis | Agent continuity |
-| **Type Safety** | OCaml's type system | Fewer runtime errors |
-| **Production Ready** | 291+ tests | Battle-tested |
-| **144 Tools** | Comprehensive coverage | One-stop solution |
-
-### Weaknesses
-
-| Weakness | Mitigation | Priority |
-|----------|------------|----------|
-| **room.ml complexity** (2,150 lines) | Split into submodules | P2 |
-| **OCaml ecosystem** | Smaller than Python/JS | Trade-off for performance |
-| **Learning curve** | Documentation, examples | Ongoing |
+| **Cellular Agents** | no | no | yes |
+| **Shared Cache** | no | no | yes |
 
 ---
 
@@ -443,12 +409,12 @@ masc_handover_create --source claude --reason context_limit
 
 ### Recent Completions (v3.0)
 
-- ✅ Phase 8: Cellular Agent Handover
-- ✅ Phase 9: Execution Memory
-- ✅ Phase 10: Token Usage Tracking
-- ✅ Phase 11: Internal Caching
-- ✅ Phase 12: Cluster Tempo Control
-- ✅ Phase 13: Visual Dashboard
+- Phase 8: Cellular Agent Handover
+- Phase 9: Execution Memory
+- Phase 10: Token Usage Tracking
+- Phase 11: Internal Caching
+- Phase 12: Cluster Tempo Control
+- Phase 13: Visual Dashboard
 
 ### Planned
 
@@ -521,4 +487,4 @@ MASC_GRPC_PORT=8936
 
 ---
 
-*Generated: 2026-01-09 | MASC-MCP v3.0.0 (Phase 13)*
+*Updated: 2026-01-09 | MASC-MCP v3.0.0 (Phase 13)*

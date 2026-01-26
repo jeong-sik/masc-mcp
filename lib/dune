@@ -80,6 +80,7 @@
    tools
    transport
    transport_grpc_next
+   udp_socket_eio
    types
    validation
    voice_bridge_eio

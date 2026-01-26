@@ -162,7 +162,7 @@ Claude (85% context) → masc_handover_create
 ### 2. Handover DNA 생성됨
 
 ```markdown
-# 🧬 Agent Handover DNA
+# Agent Handover DNA
 
 ## Meta
 - **ID**: handover-abc123
@@ -170,10 +170,10 @@ Claude (85% context) → masc_handover_create
 - **Task**: task-001
 - **Reason**: context_limit_85
 
-## 🎯 Current Goal
+## Current Goal
 PK-32008 LocalStorage SSR 버그 수정
 
-## ✅ Completed
+## Completed
 - 버그 재현 확인
 - SSR 환경에서 window 객체 접근 문제 확인
 
@@ -182,7 +182,7 @@ PK-32008 LocalStorage SSR 버그 수정
 - 테스트 작성
 - PR 생성
 
-## 🧠 Key Decisions
+## Key Decisions
 - SSR-safe 패턴으로 typeof window !== 'undefined' 사용
 ```
 

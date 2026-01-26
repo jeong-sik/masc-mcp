@@ -427,6 +427,106 @@ export MASC_NOTIFY_FOCUS_ON_OSASCRIPT=1
 | `MASC_NOTIFY_FOCUS_ON_OSASCRIPT` | `0` | Auto-focus with osascript |
 | **Testing** | | |
 | `MASC_SKIP_NET_TESTS` | `0` | Skip STUN/UDP tests |
+| **Auto-Responder** | | |
+| `MASC_AUTO_RESPOND` | `false` | Enable auto-response: `true`/`spawn` (CLI), `llm`/`fast` (HTTP) |
+| `LLM_MCP_URL` | `http://127.0.0.1:8932/mcp` | llm-mcp endpoint for LLM mode |
+| `MASC_HTTP_PORT` | `8935` | MASC server port for LLM mode callbacks |
+
+### Auto-Responder Daemon
+
+When `MASC_AUTO_RESPOND` is enabled, MASC automatically spawns agents to respond to @mentions.
+
+**Three Response Modes:**
+
+| Mode | Env Value | Description | Speed |
+|------|-----------|-------------|-------|
+| **Spawn** | `true`, `spawn` | Full CLI process (`gemini --yolo`, etc.) | ~10-15s |
+| **LLM** | `llm`, `fast` | Direct HTTP via llm-mcp | ~3-5s |
+| **Subagent** | (manual) | Claude Code Task tool | ~2-3s |
+
+**Spawn Mode** (default when enabled):
+```bash
+export MASC_AUTO_RESPOND=true  # or "spawn"
+# Supported agents: gemini, codex, claude, ollama, glm
+# Spawns: gemini --yolo, codex exec, claude -p, ollama run, glm (via llm-mcp)
+# Agent handles MASC join/broadcast/leave
+```
+
+**LLM Mode** (fast path):
+```bash
+export MASC_AUTO_RESPOND=llm  # or "fast"
+# Supported: gemini, codex, claude-cli, ollama, glm (via llm-mcp HTTP)
+# Auto-responder handles MASC join/broadcast/leave
+# Faster (~3-5s) but simpler responses
+```
+
+**Subagent Mode** (Claude Code only):
+```typescript
+// In Claude Code session, spawn subagent for MASC work
+Task({
+  description: "MASC subagent",
+  prompt: "Join MASC, respond to @mention, leave",
+  subagent_type: "general-purpose"
+})
+// Subagent gets full MCP access including MASC tools
+```
+
+**Self-Loop Prevention**: Auto-responder skips when `@mention` matches sender's agent type (e.g., claude won't auto-respond to @claude).
+
+### Bounded Autonomy
+
+`masc_bounded_run` provides formal guarantees for autonomous multi-agent execution with constraints.
+
+**Key Features:**
+- **Constraint-based termination**: limits on turns, tokens, cost, time
+- **Goal-driven completion**: JSONPath conditions (eq, gte, between, etc.)
+- **Formal safety**: pre-check + post-check prevents silent limit violations
+- **Hard failsafe**: `hard_max_iterations` ensures guaranteed termination
+
+**Example Usage:**
+```json
+{
+  "agents": ["gemini", "ollama"],
+  "prompt": "Analyze this code and output {\"status\": \"done\"} when finished",
+  "constraints": {
+    "max_turns": 5,
+    "max_tokens": 50000,
+    "max_cost_usd": 0.10,
+    "hard_max_iterations": 10
+  },
+  "goal": {
+    "path": "$.status",
+    "condition": {"eq": "done"}
+  }
+}
+```
+
+**Constraint Types:**
+
+| Constraint | Type | Description |
+|------------|------|-------------|
+| `max_turns` | int | Maximum agent invocations |
+| `max_tokens` | int | Cumulative token budget |
+| `max_cost_usd` | float | Maximum cost in USD |
+| `max_time_seconds` | float | Wall-clock time limit |
+| `token_buffer` | int | Predictive stop buffer (default: 5000) |
+| `hard_max_iterations` | int | Absolute failsafe (default: 100) |
+
+**Goal Conditions:**
+
+| Condition | Example | Description |
+|-----------|---------|-------------|
+| `eq` | `{"eq": "done"}` | Exact match |
+| `neq` | `{"neq": "error"}` | Not equal |
+| `gte` | `{"gte": 0.95}` | Greater than or equal |
+| `lt` | `{"lt": 10}` | Less than |
+| `between` | `{"between": [0.5, 1.0]}` | Range inclusive |
+| `in` | `{"in": ["a", "b"]}` | Member of set |
+
+**Return Status:**
+- `goal_reached`: Goal condition satisfied
+- `constraint_exceeded`: Limit hit (reason field specifies which)
+- `error`: Agent failure or exception
 
 ### MCP Configuration
 

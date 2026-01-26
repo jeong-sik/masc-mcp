@@ -111,7 +111,7 @@ let default_configs = [
   });
   ("ollama", {
     agent_name = "ollama";
-    command = "llm-mcp --agent ollama --prompt";
+    command = "ollama run devstral";
     timeout_seconds = 300;
     working_dir = None;
     mcp_tools = [];

@@ -160,6 +160,21 @@ let parse_codex_output output =
   with _ ->
     (None, None, None, None)
 
+(** Parse GLM (Z.ai) output for token tracking - OpenAI-compatible format
+    Format: {"choices": [...], "usage": {"prompt_tokens": N, "completion_tokens": M}} *)
+let parse_glm_output output =
+  try
+    let json = Yojson.Safe.from_string output in
+    let open Yojson.Safe.Util in
+    let usage = json |> member "usage" in
+    let input_tokens = usage |> member "prompt_tokens" |> to_int_option in
+    let output_tokens = usage |> member "completion_tokens" |> to_int_option in
+    (* GLM-4.7: Z.ai Coding Plan pricing is subscription-based, estimate $0 per token *)
+    let cost = Some 0.0 in
+    (input_tokens, output_tokens, cost)
+  with _ ->
+    (None, None, None)
+
 let default_configs = [
   ("claude", {
     agent_name = "claude";
@@ -188,6 +203,14 @@ let default_configs = [
     timeout_seconds = 300;
     working_dir = None;
     mcp_tools = [];
+  });
+  (* GLM uses llm-mcp HTTP endpoint via curl *)
+  ("glm", {
+    agent_name = "glm";
+    command = "curl -s -X POST http://localhost:8932/mcp -H 'Content-Type: application/json' -d";
+    timeout_seconds = 300;
+    working_dir = None;
+    mcp_tools = [];  (* MCP tools not applicable for API call *)
   });
 ]
 
@@ -224,9 +247,21 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir () =
   let mcp_flags = build_mcp_flags agent_name config.mcp_tools in
   let augmented_prompt = prompt ^ masc_lifecycle_suffix in
 
-  (* Prepare arguments for shell execution *)
-  let full_cmd_str = Printf.sprintf "echo %s | timeout %d %s%s"
-    (Filename.quote augmented_prompt) timeout config.command mcp_flags in
+  (* Prepare arguments for shell execution - GLM uses special llm-mcp HTTP call *)
+  let full_cmd_str =
+    if agent_name = "glm" then
+      (* Build JSON-RPC request for llm-mcp glm tool *)
+      let escaped_prompt = String.concat "\\\"" (String.split_on_char '"' augmented_prompt) in
+      let escaped_prompt = String.concat "\\n" (String.split_on_char '\n' escaped_prompt) in
+      let json_body = Printf.sprintf
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"glm\",\"arguments\":{\"prompt\":\"%s\",\"stream\":false}}}"
+        escaped_prompt in
+      Printf.sprintf "timeout %d curl -s -X POST http://localhost:8932/mcp -H 'Content-Type: application/json' -d '%s'"
+        timeout json_body
+    else
+      Printf.sprintf "echo %s | timeout %d %s%s"
+        (Filename.quote augmented_prompt) timeout config.command mcp_flags
+  in
 
   let original_dir = Sys.getcwd () in
   (match working_dir with Some d -> Sys.chdir d | None -> ());
@@ -259,6 +294,29 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir () =
         | "codex" ->
             let (inp, out, cached, cost) = parse_codex_output raw_output in
             (raw_output, inp, out, cached, None, cost)
+        | "glm" ->
+            (* GLM response comes wrapped in MCP JSON-RPC, extract the text content *)
+            let (response_text, inp, out, cost) =
+              try
+                let json = Yojson.Safe.from_string raw_output in
+                let open Yojson.Safe.Util in
+                let result = json |> member "result" in
+                let content = result |> member "content" in
+                let text = match content with
+                  | `List items ->
+                      let texts = List.filter_map (fun item ->
+                        match item |> member "type" |> to_string_option with
+                        | Some "text" -> item |> member "text" |> to_string_option
+                        | _ -> None
+                      ) items in
+                      String.concat "\n" texts
+                  | _ -> raw_output
+                in
+                let (inp, out, cost) = parse_glm_output raw_output in
+                (text, inp, out, cost)
+              with _ -> (raw_output, None, None, None)
+            in
+            (response_text, inp, out, None, None, cost)
         | _ ->
             (raw_output, None, None, None, None, None)
       in 

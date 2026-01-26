@@ -240,9 +240,15 @@ Output JSON only (no markdown):
 
 (** Build MCP JSON-RPC request for chain.orchestrate
     @param goal The goal description for orchestration
+    @param chain_id Optional explicit chain ID to use (bypasses auto-selection)
     @param timeout Timeout in seconds (default: 120)
     @param max_replans Maximum re-planning attempts (default: 2) *)
-let build_chain_request ~goal ?(timeout=120) ?(max_replans=2) () =
+let build_chain_request ~goal ?chain_id ?(timeout=120) ?(max_replans=2) () =
+  let chain_id_field = match chain_id with
+    | Some id -> Printf.sprintf {|"chain_id": %s,
+      |} (Yojson.Safe.to_string (`String id))
+    | None -> ""
+  in
   Printf.sprintf {|{
   "jsonrpc": "2.0",
   "id": 1,
@@ -250,24 +256,25 @@ let build_chain_request ~goal ?(timeout=120) ?(max_replans=2) () =
   "params": {
     "name": "chain.orchestrate",
     "arguments": {
-      "goal": %s,
+      %s"goal": %s,
       "timeout": %d,
       "max_replans": %d,
       "trace": false,
       "verify_on_complete": true
     }
   }
-}|} (Yojson.Safe.to_string (`String goal)) timeout max_replans
+}|} chain_id_field (Yojson.Safe.to_string (`String goal)) timeout max_replans
 
 (** Call chain.orchestrate on llm-mcp server
     @param net Eio network capability
     @param goal Goal description for orchestration
+    @param chain_id Optional explicit chain ID (bypasses auto-selection)
     @param host llm-mcp server host (default: 127.0.0.1)
     @param port llm-mcp server port (default: 8932)
     @param timeout_sec Timeout in seconds (default: 120 for long chains)
     @return Response content or error *)
-let call_chain ~net ~goal ?(host=default_host) ?(port=default_port) ?(timeout_sec=120.0) () =
-  let request_body = build_chain_request ~goal ~timeout:(int_of_float timeout_sec) () in
+let call_chain ~net ~goal ?chain_id ?(host=default_host) ?(port=default_port) ?(timeout_sec=120.0) () =
+  let request_body = build_chain_request ~goal ?chain_id ~timeout:(int_of_float timeout_sec) () in
   try
     Eio.Net.with_tcp_connect ~host ~service:(string_of_int port) net @@ fun flow ->
     let request = Printf.sprintf

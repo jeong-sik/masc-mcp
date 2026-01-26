@@ -303,12 +303,13 @@ let walph_loop config ~net ~agent_name ?(preset="drain") ?(max_iterations=10) ?t
                   in
 
                   (* Execute chain if preset has one (not drain) *)
-                  let should_chain = get_chain_id_for_preset preset <> None in
+                  let chain_id = get_chain_id_for_preset preset in
                   let chain_result =
-                    if not should_chain then
+                    match chain_id with
+                    | None ->
                       (* Drain mode: no chain, just claim/done *)
                       Ok "drain mode - no chain"
-                    else begin
+                    | Some cid ->
                       (* Build goal from task info and preset *)
                       let task_title, task_desc = match task_id with
                         | Some tid ->
@@ -325,13 +326,14 @@ let walph_loop config ~net ~agent_name ?(preset="drain") ?(max_iterations=10) ?t
                             Printf.sprintf "Refactor the following: %s. %s. Improve code quality, reduce complexity, follow best practices." task_title task_desc
                         | "docs" ->
                             Printf.sprintf "Create or improve documentation for: %s. %s. Include examples and clear explanations." task_title task_desc
+                        | "review" ->
+                            Printf.sprintf "Review PR: %s. %s. Check code quality, security, test coverage." task_title task_desc
                         | _ ->
                             Printf.sprintf "Complete this task: %s. %s" task_title task_desc
                       in
                       let _ = Room.broadcast config ~from_agent:agent_name
-                        ~content:(Printf.sprintf "🔗 @walph calling chain.orchestrate for '%s'..." task_title) in
-                      Llm_client_eio.call_chain ~net ~goal ()
-                    end
+                        ~content:(Printf.sprintf "🔗 @walph calling chain '%s' for '%s'..." cid task_title) in
+                      Llm_client_eio.call_chain ~net ~goal ~chain_id:cid ()
                   in
 
                   (match chain_result with

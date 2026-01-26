@@ -209,6 +209,90 @@ let test_bounded_run_spawn_exception () =
      with Not_found -> false)
 
 (* ============================================ *)
+(* Retry logic tests                            *)
+(* ============================================ *)
+
+let test_is_retryable_error () =
+  (* Retryable errors *)
+  check bool "timeout is retryable" true (Bounded.is_retryable_error "Connection timeout");
+  check bool "rate limit is retryable" true (Bounded.is_retryable_error "Rate limit exceeded 429");
+  check bool "503 is retryable" true (Bounded.is_retryable_error "Service unavailable 503");
+  check bool "connection refused is retryable" true (Bounded.is_retryable_error "ECONNREFUSED");
+  (* Non-retryable errors *)
+  check bool "generic error not retryable" false (Bounded.is_retryable_error "Invalid JSON");
+  check bool "auth error not retryable" false (Bounded.is_retryable_error "Unauthorized 401")
+
+let test_retry_config_parsing () =
+  let json = Yojson.Safe.from_string {|
+    {
+      "max_turns": 5,
+      "retry": {
+        "max_retries": 5,
+        "base_delay_ms": 500,
+        "max_delay_ms": 10000,
+        "jitter_factor": 0.3
+      }
+    }
+  |} in
+  let c = Bounded.constraints_of_json json in
+  check int "retry max_retries" 5 c.retry.max_retries;
+  check int "retry base_delay_ms" 500 c.retry.base_delay_ms;
+  check int "retry max_delay_ms" 10000 c.retry.max_delay_ms;
+  check (float 0.01) "retry jitter_factor" 0.3 c.retry.jitter_factor
+
+let test_retry_success_after_failures () =
+  let retry_cfg = { Bounded.default_retry_config with max_retries = 3; base_delay_ms = 1 } in
+  let constraints = { Bounded.default_constraints with
+    max_turns = Some 5;
+    retry = retry_cfg;
+  } in
+  let goal = { Bounded.path = "$.done"; condition = Bounded.Eq (`Bool true) } in
+  let call_count = ref 0 in
+  let spawn_fn _ _ =
+    incr call_count;
+    if !call_count <= 2 then
+      (* First 2 calls fail with retryable error *)
+      mock_spawn_result ~success:false ~output:"Connection timeout" ()
+    else
+      (* Third call succeeds *)
+      mock_spawn_result ~success:true ~output:{|{"done": true}|} ()
+  in
+  let result = Bounded.bounded_run ~constraints ~goal ~agents:["test"] ~prompt:"test" ~spawn_fn in
+  check bool "should reach goal after retries" true (result.status = `Goal_reached);
+  check int "total retries recorded" 2 result.stats.total_retries;
+  check int "history entry retries" 2 (List.hd result.history).retries
+
+let test_retry_exhausted () =
+  let retry_cfg = { Bounded.default_retry_config with max_retries = 2; base_delay_ms = 1 } in
+  let constraints = { Bounded.default_constraints with
+    max_turns = Some 5;
+    retry = retry_cfg;
+  } in
+  let goal = { Bounded.path = "$.done"; condition = Bounded.Eq (`Bool true) } in
+  let spawn_fn _ _ =
+    (* Always fail with retryable error *)
+    mock_spawn_result ~success:false ~output:"Connection timeout" ()
+  in
+  let result = Bounded.bounded_run ~constraints ~goal ~agents:["test"] ~prompt:"test" ~spawn_fn in
+  check bool "should be error after exhausted retries" true (result.status = `Error);
+  check bool "reason mentions attempts" true
+    (try let _ = Str.search_forward (Str.regexp "3 attempts") result.reason 0 in true
+     with Not_found -> false)
+
+let test_backoff_calculation () =
+  let retry_cfg = {
+    Bounded.max_retries = 5;
+    base_delay_ms = 1000;
+    max_delay_ms = 10000;
+    jitter_factor = 0.0;  (* No jitter for deterministic test *)
+  } in
+  (* attempt 0: 1000ms, attempt 1: 2000ms, attempt 2: 4000ms, etc *)
+  check int "backoff attempt 0" 1000 (Bounded.calc_backoff_delay retry_cfg 0);
+  check int "backoff attempt 1" 2000 (Bounded.calc_backoff_delay retry_cfg 1);
+  check int "backoff attempt 2" 4000 (Bounded.calc_backoff_delay retry_cfg 2);
+  check int "backoff capped at max" 10000 (Bounded.calc_backoff_delay retry_cfg 5)
+
+(* ============================================ *)
 (* Result serialization tests                   *)
 (* ============================================ *)
 
@@ -258,6 +342,14 @@ let bounded_run_tests = [
   "spawn exception", `Quick, test_bounded_run_spawn_exception;
 ]
 
+let retry_tests = [
+  "is_retryable_error", `Quick, test_is_retryable_error;
+  "retry config parsing", `Quick, test_retry_config_parsing;
+  "retry success after failures", `Quick, test_retry_success_after_failures;
+  "retry exhausted", `Quick, test_retry_exhausted;
+  "backoff calculation", `Quick, test_backoff_calculation;
+]
+
 let serialization_tests = [
   "result to json", `Quick, test_result_to_json;
 ]
@@ -268,5 +360,6 @@ let () =
     "goal_parsing", goal_parsing_tests;
     "goal_checking", goal_checking_tests;
     "bounded_run", bounded_run_tests;
+    "retry", retry_tests;
     "serialization", serialization_tests;
   ]

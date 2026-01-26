@@ -27,6 +27,22 @@ type goal = {
   condition: comparison;
 }
 
+(** Retry configuration *)
+type retry_config = {
+  max_retries: int;            (** Maximum retry attempts per agent call *)
+  base_delay_ms: int;          (** Base delay in milliseconds *)
+  max_delay_ms: int;           (** Maximum delay cap *)
+  jitter_factor: float;        (** Jitter multiplier (0.0-1.0) *)
+}
+
+(** Default retry config - conservative defaults *)
+let default_retry_config = {
+  max_retries = 3;
+  base_delay_ms = 1000;
+  max_delay_ms = 30000;
+  jitter_factor = 0.2;
+}
+
 (** Constraint specification *)
 type constraints = {
   max_turns: int option;
@@ -35,6 +51,7 @@ type constraints = {
   max_time_seconds: float option;
   token_buffer: int;           (** Buffer for predictive checking *)
   hard_max_iterations: int;    (** Absolute failsafe limit *)
+  retry: retry_config;         (** Retry configuration *)
 }
 
 (** Default constraints - safe defaults *)
@@ -45,6 +62,7 @@ let default_constraints = {
   max_time_seconds = Some 300.0;
   token_buffer = 5000;
   hard_max_iterations = 100;
+  retry = default_retry_config;
 }
 
 (** Bounded execution state *)
@@ -53,9 +71,48 @@ type bounded_state = {
   mutable tokens_in: int;
   mutable tokens_out: int;
   mutable cost_usd: float;
+  mutable total_retries: int;
   start_time: float;
   constraints: constraints;
 }
+
+(** Calculate exponential backoff delay with jitter *)
+let calc_backoff_delay retry_config attempt =
+  let base = float_of_int retry_config.base_delay_ms in
+  let max_delay = float_of_int retry_config.max_delay_ms in
+  (* Exponential: base * 2^attempt *)
+  let exp_delay = base *. (2.0 ** float_of_int attempt) in
+  let capped = min exp_delay max_delay in
+  (* Add jitter: delay * (1 - jitter/2 + random * jitter) *)
+  let jitter_range = capped *. retry_config.jitter_factor in
+  let jitter = (Random.float jitter_range) -. (jitter_range /. 2.0) in
+  int_of_float (capped +. jitter)
+
+(** Check if error is retryable (transient failures) *)
+let is_retryable_error msg =
+  let msg_lower = String.lowercase_ascii msg in
+  List.exists (fun pattern ->
+    let pattern_lower = String.lowercase_ascii pattern in
+    try
+      let _ = Str.search_forward (Str.regexp_string pattern_lower) msg_lower 0 in
+      true
+    with Not_found -> false
+  ) [
+    "timeout";
+    "timed out";
+    "connection refused";
+    "connection reset";
+    "network";
+    "ECONNREFUSED";
+    "ETIMEDOUT";
+    "rate limit";
+    "429";
+    "503";
+    "502";
+    "504";
+    "overloaded";
+    "temporarily unavailable";
+  ]
 
 (** Create new bounded state *)
 let create_state constraints =
@@ -64,6 +121,7 @@ let create_state constraints =
     tokens_in = 0;
     tokens_out = 0;
     cost_usd = 0.0;
+    total_retries = 0;
     start_time = Unix.gettimeofday ();
     constraints;
   }
@@ -177,6 +235,7 @@ type history_entry = {
   tokens_out: int;
   cost_usd: float;
   elapsed_ms: int;
+  retries: int;               (** Number of retries for this turn *)
   goal_met: bool;
 }
 
@@ -245,23 +304,48 @@ let bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn =
           let agent_idx = state.turns mod (List.length agents) in
           let agent = List.nth agents agent_idx in
 
-          (* 4. Execute agent with exception handling *)
-          let result =
-            try Ok (spawn_fn agent prompt)
-            with e -> Error (Printexc.to_string e)
+          (* 4. Execute agent with retry logic *)
+          let rec try_spawn attempt =
+            let result =
+              try Ok (spawn_fn agent prompt)
+              with e -> Error (Printexc.to_string e)
+            in
+            match result with
+            | Ok spawn_result when spawn_result.success ->
+                (* Success - return result with retry count *)
+                Ok (spawn_result, attempt)
+            | Ok spawn_result ->
+                (* Agent returned failure (non-zero exit) *)
+                let err_msg = spawn_result.output in
+                if attempt < constraints.retry.max_retries && is_retryable_error err_msg then begin
+                  let delay_ms = calc_backoff_delay constraints.retry attempt in
+                  Unix.sleepf (float_of_int delay_ms /. 1000.0);
+                  state.total_retries <- state.total_retries + 1;
+                  try_spawn (attempt + 1)
+                end else
+                  Error (Printf.sprintf "Agent failed after %d attempts: %s" (attempt + 1) err_msg)
+            | Error msg ->
+                (* Exception during spawn *)
+                if attempt < constraints.retry.max_retries && is_retryable_error msg then begin
+                  let delay_ms = calc_backoff_delay constraints.retry attempt in
+                  Unix.sleepf (float_of_int delay_ms /. 1000.0);
+                  state.total_retries <- state.total_retries + 1;
+                  try_spawn (attempt + 1)
+                end else
+                  Error (Printf.sprintf "Agent execution failed after %d attempts: %s" (attempt + 1) msg)
           in
 
-          match result with
+          match try_spawn 0 with
           | Error msg ->
               {
                 status = `Error;
-                reason = Printf.sprintf "Agent execution failed: %s" msg;
+                reason = msg;
                 final_output = None;
                 stats = state;
                 history = List.rev !history;
                 warning = None;
               }
-          | Ok spawn_result ->
+          | Ok (spawn_result, retries_used) ->
               (* 5. Update state AFTER execution *)
               update_state state spawn_result;
 
@@ -277,6 +361,7 @@ let bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn =
               let entry = {
                 turn = state.turns;
                 agent;
+                retries = retries_used;
                 tokens_in = Option.value spawn_result.input_tokens ~default:0;
                 tokens_out = Option.value spawn_result.output_tokens ~default:0;
                 cost_usd = Option.value spawn_result.cost_usd ~default:0.0;
@@ -327,6 +412,7 @@ let result_to_json result =
       ("tokens_out", `Int e.tokens_out);
       ("cost_usd", `Float e.cost_usd);
       ("elapsed_ms", `Int e.elapsed_ms);
+      ("retries", `Int e.retries);
       ("goal_met", `Bool e.goal_met);
     ]
   ) result.history in
@@ -342,6 +428,7 @@ let result_to_json result =
       ("tokens_out", `Int result.stats.tokens_out);
       ("tokens_total", `Int (result.stats.tokens_in + result.stats.tokens_out));
       ("cost_usd", `Float result.stats.cost_usd);
+      ("total_retries", `Int result.stats.total_retries);
       ("elapsed_seconds", `Float (Unix.gettimeofday () -. result.stats.start_time));
     ]);
     ("history", `List history_json);
@@ -349,6 +436,28 @@ let result_to_json result =
       | Some w -> `String w
       | None -> `Null);
   ]
+
+(** Parse retry config from JSON *)
+let retry_config_of_json json =
+  let open Yojson.Safe.Util in
+  let retry = json |> member "retry" in
+  if retry = `Null then
+    default_retry_config
+  else
+    {
+      max_retries =
+        (try retry |> member "max_retries" |> to_int
+         with _ -> default_retry_config.max_retries);
+      base_delay_ms =
+        (try retry |> member "base_delay_ms" |> to_int
+         with _ -> default_retry_config.base_delay_ms);
+      max_delay_ms =
+        (try retry |> member "max_delay_ms" |> to_int
+         with _ -> default_retry_config.max_delay_ms);
+      jitter_factor =
+        (try retry |> member "jitter_factor" |> to_float
+         with _ -> default_retry_config.jitter_factor);
+    }
 
 (** Parse constraints from JSON *)
 let constraints_of_json json =
@@ -372,6 +481,7 @@ let constraints_of_json json =
     hard_max_iterations =
       (try json |> member "hard_max_iterations" |> to_int
        with _ -> default_constraints.hard_max_iterations);
+    retry = retry_config_of_json json;
   }
 
 (** Parse goal from JSON *)

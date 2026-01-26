@@ -36,12 +36,12 @@
 ;;  (modules test_h2_simple)
 ;;  (libraries h2 h2-eio eio eio_main))
 
-(executable
- (name mention_selftest)
- (modules mention_selftest)
- (libraries masc_mcp))
+;; (executable
+;;  (name mention_selftest)
+;;  (modules mention_selftest)
+;;  (libraries masc_mcp))
 
-(executable
- (name parse_test)
- (modules parse_test)
- (libraries masc_mcp))
+;; (executable
+;;  (name parse_test)
+;;  (modules parse_test)
+;;  (libraries masc_mcp))

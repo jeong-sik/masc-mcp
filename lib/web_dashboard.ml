@@ -208,7 +208,7 @@ let html () = {|<!DOCTYPE html>
         <div class="stat-value" id="stat-in-progress">-</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Locks</div>
+        <div class="stat-label">Status</div>
         <div class="stat-value" id="stat-locks">-</div>
       </div>
     </div>
@@ -252,19 +252,21 @@ let html () = {|<!DOCTYPE html>
     const statusDot = document.getElementById('status-dot');
     const tempoBadge = document.getElementById('tempo-badge');
 
-    // Fetch initial data
+    // REST API helper
+    async function apiCall(endpoint) {
+      const res = await fetch('/api/v1/' + endpoint);
+      return res.json();
+    }
+
+    // Fetch initial data via REST API
     async function fetchData() {
       try {
-        const [statusRes, tasksRes, agentsRes, msgsRes] = await Promise.all([
-          fetch('/api/v1/status'),
-          fetch('/api/v1/tasks'),
-          fetch('/api/v1/agents'),
-          fetch('/api/v1/messages')
+        const [status, tasks, agents, msgs] = await Promise.all([
+          apiCall('status'),
+          apiCall('tasks'),
+          apiCall('agents'),
+          apiCall('messages')
         ]);
-        const status = await statusRes.json();
-        const tasks = await tasksRes.json();
-        const agents = await agentsRes.json();
-        const msgs = await msgsRes.json();
 
         updateStats(agents, tasks, status);
         updateAgents(agents);
@@ -283,7 +285,7 @@ let html () = {|<!DOCTYPE html>
       document.getElementById('stat-tasks').textContent = taskList.length;
       document.getElementById('stat-in-progress').textContent =
         taskList.filter(t => t.status === 'in_progress' || t.status === 'claimed').length;
-      document.getElementById('stat-locks').textContent = status.locks_count || 0;
+      document.getElementById('stat-locks').textContent = status.paused ? '⏸' : '✓';
     }
 
     function updateAgents(data) {
@@ -352,9 +354,14 @@ let html () = {|<!DOCTYPE html>
     }
 
     function updateTempo(status) {
-      const mode = (status.tempo_mode || status.tempo || 'normal').toLowerCase();
+      // Convert tempo_interval_s to mode: <120s=fast, <400s=normal, else=slow
+      const interval = status.tempo_interval_s || 300;
+      let mode = 'normal';
+      if (status.paused) mode = 'paused';
+      else if (interval < 120) mode = 'fast';
+      else if (interval > 400) mode = 'slow';
       tempoBadge.className = 'tempo-badge ' + mode;
-      tempoBadge.textContent = mode.charAt(0).toUpperCase() + mode.slice(1);
+      tempoBadge.textContent = mode.charAt(0).toUpperCase() + mode.slice(1) + ' (' + Math.round(interval) + 's)';
     }
 
     // SSE for real-time updates

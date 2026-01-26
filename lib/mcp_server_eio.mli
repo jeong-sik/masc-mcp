@@ -64,6 +64,17 @@ val create_state_eio :
     @return JSON response *)
 val handle_request : clock:_ Eio.Time.clock -> sw:Eio.Switch.t -> ?mcp_session_id:string -> server_state -> string -> Yojson.Safe.t
 
+(** Execute a single tool by name (for REST API)
+    @return (success, result_json_string) *)
+val execute_tool_eio :
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  ?mcp_session_id:string ->
+  server_state ->
+  name:string ->
+  arguments:Yojson.Safe.t ->
+  bool * string
+
 (** {1 Stdio Transport - Eio Native} *)
 
 (** Run MCP server in stdio mode with Eio

@@ -635,6 +635,14 @@ let run_http ~port ~base_path =
             ~body:(Masc_mcp.Mcp_server.health_response state) ()
         in
         Lwt.return (`Response rsp)
+    | `GET, "/dashboard" ->
+        let headers = Cohttp.Header.of_list [
+          ("Content-Type", "text/html; charset=utf-8");
+          ("Cache-Control", "no-cache");
+        ] in
+        let* rsp = Server.respond_string ~status:`OK ~headers
+          ~body:(Masc_mcp.Web_dashboard.html ()) () in
+        Lwt.return (`Response rsp)
     | `GET, "/.well-known/agent-card.json" ->
         let card = Masc_mcp.Agent_card.generate_default ~port () in
         let json = Masc_mcp.Agent_card.to_json card in

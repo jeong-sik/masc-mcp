@@ -26,11 +26,13 @@
    gcm_compat
    graphql_api
    handover_eio
+   hat
    hebbian_eio
    http_server_eio
    institution_eio
    level2_config
    level4_config
+   llm_client_eio
    log
    prometheus
    rate_limit
@@ -56,6 +58,7 @@
    response
    room
    room_eio
+   room_walph_eio
    room_git
    room_portal
    room_utils

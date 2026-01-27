@@ -15,6 +15,10 @@ let setup_test_room () =
 let cleanup_test_room test_dir =
   ignore (Sys.command (Printf.sprintf "rm -rf %s" test_dir))
 
+let task_count config =
+  let backlog = Room.read_backlog config in
+  List.length backlog.tasks
+
 (* ============================================ *)
 (* Room Registry Tests                          *)
 (* ============================================ *)
@@ -158,6 +162,31 @@ let test_current_room_after_enter () =
   )
 
 (* ============================================ *)
+(* Room Isolation Tests                         *)
+(* ============================================ *)
+
+let test_room_task_isolation () =
+  let (config, test_dir) = setup_test_room () in
+  Fun.protect ~finally:(fun () -> cleanup_test_room test_dir) (fun () ->
+    ignore (Room.init config ~agent_name:None);
+
+    ignore (Room.add_task config ~title:"default-task" ~priority:3 ~description:"default room task");
+    check int "default room task count" 1 (task_count config);
+
+    ignore (Room.room_create config ~name:"Isolated Room" ~description:None);
+    ignore (Room.room_enter config ~room_id:"isolated-room" ~agent_type:"codex");
+
+    (* Default room tasks should not leak into the new room. *)
+    check int "isolated room starts empty" 0 (task_count config);
+
+    ignore (Room.add_task config ~title:"isolated-task" ~priority:3 ~description:"isolated room task");
+    check int "isolated room task count" 1 (task_count config);
+
+    ignore (Room.room_enter config ~room_id:"default" ~agent_type:"codex");
+    check int "default room remains isolated" 1 (task_count config);
+  )
+
+(* ============================================ *)
 (* Backward Compatibility Tests                 *)
 (* ============================================ *)
 
@@ -204,6 +233,9 @@ let () =
       test_case "enter room" `Quick test_room_enter;
       test_case "enter nonexistent error" `Quick test_room_enter_nonexistent;
       test_case "current room updates" `Quick test_current_room_after_enter;
+    ];
+    "room_isolation", [
+      test_case "tasks are isolated per room" `Quick test_room_task_isolation;
     ];
     "backward_compat", [
       test_case "legacy masc as default" `Quick test_legacy_masc_as_default_room;

@@ -123,6 +123,22 @@ let auto_detect_backend () =
 (* Backend creation                             *)
 (* ============================================ *)
 
+(* Sanitize namespace/cluster name for filesystem path segments.
+   Keep alnum, '-', '_' and replace others with '-'. *)
+let sanitize_namespace_segment name =
+  let buf = Buffer.create (String.length name) in
+  String.iter (fun c ->
+    let is_safe =
+      (c >= 'a' && c <= 'z') ||
+      (c >= 'A' && c <= 'Z') ||
+      (c >= '0' && c <= '9') ||
+      c = '-' || c = '_'
+    in
+    Buffer.add_char buf (if is_safe then c else '-')
+  ) name;
+  let sanitized = String.trim (Buffer.contents buf) in
+  if sanitized = "" then "default" else sanitized
+
 let backend_config_for base_path =
   let raw_storage_type = storage_type_from_env () in
   let storage_type =
@@ -149,10 +165,21 @@ let backend_config_for base_path =
     | "memory" -> Backend.Memory
     | _ -> Backend.FileSystem
   in
+  let masc_root = Filename.concat base_path ".masc" in
+  let cluster_segment =
+    match cluster_name with
+    | "" | "default" -> None
+    | other -> Some (sanitize_namespace_segment other)
+  in
+  let backend_base_path =
+    match cluster_segment with
+    | None -> masc_root
+    | Some seg -> Filename.concat (Filename.concat masc_root "clusters") seg
+  in
   {
     Backend.backend_type;
     Backend.postgres_url;
-    Backend.base_path = Filename.concat base_path ".masc";
+    Backend.base_path = backend_base_path;
     Backend.cluster_name;
     Backend.node_id = Backend.generate_node_id ();
     Backend.pubsub_max_messages = Backend.pubsub_max_messages_from_env ();
@@ -262,7 +289,59 @@ let default_config_eio ~sw ~env base_path =
 (* Path utilities                               *)
 (* ============================================ *)
 
-let masc_dir config = Filename.concat config.base_path ".masc"
+let masc_root_dir config =
+  let masc_root = Filename.concat config.base_path ".masc" in
+  let cluster_name = config.backend_config.Backend.cluster_name in
+  match cluster_name with
+  | "" | "default" -> masc_root
+  | other ->
+      let seg = sanitize_namespace_segment other in
+      Filename.concat (Filename.concat masc_root "clusters") seg
+
+let rooms_root_dir config = Filename.concat (masc_root_dir config) "rooms"
+let registry_root_path config = Filename.concat (masc_root_dir config) "rooms.json"
+let current_room_root_path config = Filename.concat (masc_root_dir config) "current_room"
+
+(* Legacy paths (pre-room refactor) kept for backward compatibility *)
+let legacy_rooms_root_dir config = Filename.concat config.base_path "rooms"
+let legacy_registry_root_path config = Filename.concat config.base_path "rooms.json"
+let legacy_current_room_path config = Filename.concat config.base_path "current_room"
+
+(** Read current room ID from .masc/current_room with legacy fallback. *)
+let read_current_room config =
+  let read_from path =
+    if Sys.file_exists path then
+      try
+        let ic = open_in path in
+        let room_id = input_line ic in
+        close_in ic;
+        Some (String.trim room_id)
+      with _ -> None
+    else
+      None
+  in
+  match read_from (current_room_root_path config) with
+  | Some room_id -> Some room_id
+  | None ->
+      (match read_from (legacy_current_room_path config) with
+       | Some legacy_room -> Some legacy_room
+       | None -> Some "default")
+
+let room_dir_for config room_id =
+  if room_id = "default" then
+    masc_root_dir config
+  else
+    let root_path = Filename.concat (rooms_root_dir config) room_id in
+    let legacy_path = Filename.concat (legacy_rooms_root_dir config) room_id in
+    if Sys.file_exists root_path then root_path
+    else if Sys.file_exists legacy_path then legacy_path
+    else root_path
+
+let masc_dir config =
+  match read_current_room config with
+  | Some room_id -> room_dir_for config room_id
+  | None -> masc_root_dir config
+
 let agents_dir config = Filename.concat (masc_dir config) "agents"
 let tasks_dir config = Filename.concat (masc_dir config) "tasks"
 let messages_dir config = Filename.concat (masc_dir config) "messages"
@@ -403,21 +482,24 @@ let project_prefix config =
     For distributed backends: includes project hash prefix for isolation.
     Example: /tmp/test-abc/.masc/state.json -> "a1b2c3d4:state.json"
     For filesystem: returns relative path without prefix. *)
-let key_of_path config path =
-  let masc_root = masc_dir config in
-  let prefix = masc_root ^ "/" in
+let key_of_path_from_root config ~root path =
+  let prefix = root ^ "/" in
   if String.length path >= String.length prefix &&
      String.sub path 0 (String.length prefix) = prefix then
-    let rel = String.sub path (String.length prefix) (String.length path - String.length prefix) in
+    let rel =
+      String.sub path (String.length prefix) (String.length path - String.length prefix)
+    in
     let key = String.map (fun c -> if c = '/' then ':' else c) rel in
-    (* For Memory/Postgres backends, add project prefix for isolation *)
     match config.backend with
-    | Memory _ | PostgresNative _ ->
-        Some (project_prefix config ^ ":" ^ key)
-    | FileSystem _ ->
-        Some key
+    | Memory _ | PostgresNative _ -> Some (project_prefix config ^ ":" ^ key)
+    | FileSystem _ -> Some key
   else
     None
+
+(* Key mapping is always relative to the .masc root so room paths
+   are preserved in the backend key (e.g., rooms:my-room:state.json). *)
+let key_of_path config path = key_of_path_from_root config ~root:(masc_root_dir config) path
+let root_key_of_path config path = key_of_path_from_root config ~root:(masc_root_dir config) path
 
 let strip_prefix prefix s =
   if String.length s >= String.length prefix then
@@ -446,18 +528,42 @@ let list_dir config path =
 (* Initialization check                         *)
 (* ============================================ *)
 
-(** Check if MASC room is initialized - backend-agnostic *)
+let root_state_path config = Filename.concat (masc_root_dir config) "root-state.json"
+
+(* Legacy root marker before root/room split lived at .masc/state.json. *)
+let legacy_root_state_path config = Filename.concat (masc_root_dir config) "state.json"
+
+(** Root initialization check - independent of current room.
+    Used by room/cluster management features. *)
+let root_is_initialized config =
+  match config.backend with
+  | Memory _ | PostgresNative _ ->
+      let exists_root path ~fallback_key =
+        let key =
+          match root_key_of_path config path with
+          | Some k -> k
+          | None -> fallback_key
+        in
+        backend_exists config ~key
+      in
+      exists_root (root_state_path config) ~fallback_key:"root-state.json" ||
+      exists_root (legacy_root_state_path config) ~fallback_key:"state.json"
+  | FileSystem _ ->
+      Sys.file_exists (masc_root_dir config) &&
+      Sys.is_directory (masc_root_dir config) &&
+      (Sys.file_exists (root_state_path config) || Sys.file_exists (legacy_root_state_path config))
+
+(** Check if current room is initialized - backend-agnostic *)
 let is_initialized config =
   match config.backend with
   | Memory _ | PostgresNative _ ->
-      (* For distributed/memory/postgres backends, check state exists in backend *)
-      let state_key = match key_of_path config (state_path config) with
+      let state_key =
+        match key_of_path config (state_path config) with
         | Some k -> k
-        | None -> "state.json"  (* fallback key *)
+        | None -> "state.json"
       in
       backend_exists config ~key:state_key
   | FileSystem _ ->
-      (* For filesystem, check directory structure and state file *)
       Sys.file_exists (masc_dir config) &&
       Sys.is_directory (masc_dir config) &&
       Sys.file_exists (state_path config)
@@ -596,6 +702,39 @@ let write_json_local path json =
     Out_channel.flush oc
   );
   Unix.rename tmp_path path
+
+(* Root-scoped JSON helpers for shared room registry/current_room metadata. *)
+let read_json_root config path =
+  match root_key_of_path config path with
+  | Some key -> begin
+      match backend_get config ~key with
+      | Ok (Some content) ->
+          (try
+             if String.trim content = "" then `Assoc []
+             else Yojson.Safe.from_string content
+           with _ -> `Assoc [])
+      | Ok None -> `Assoc []
+      | Error _ -> `Assoc []
+    end
+  | None -> read_json_local path
+
+let write_json_root config path json =
+  match root_key_of_path config path with
+  | Some key ->
+      let content = Yojson.Safe.pretty_to_string json in
+      let _ = backend_set config ~key ~value:content in
+      ()
+  | None -> write_json_local path json
+
+let delete_path_root config path =
+  match root_key_of_path config path with
+  | Some key -> ignore (backend_delete config ~key)
+  | None -> if Sys.file_exists path then Sys.remove path
+
+let path_exists_root config path =
+  match root_key_of_path config path with
+  | Some key -> backend_exists config ~key
+  | None -> Sys.file_exists path
 
 let read_json config path =
   match key_of_path config path with

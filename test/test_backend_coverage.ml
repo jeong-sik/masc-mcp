@@ -117,23 +117,52 @@ let test_key_with_shell_metachar () =
 (* Backend.ml - FileSystem CAS and list_keys                     *)
 (* ============================================================ *)
 
-(* NOTE: FileSystemBackend uses non-reentrant Mutex, causing deadlock when
-   compare_and_swap calls get/set internally. These operations are tested
-   in test_backend_eio.ml using Eio-native backend instead. *)
-let test_filesystem_compare_and_swap () =
-  (* Skip: Mutex deadlock due to non-reentrant locking in FileSystemBackend.
-     See test_backend_eio.ml for Eio-native CAS tests. *)
-  ()
+(* NOTE: FileSystemBackend uses non-reentrant Mutex. Use MemoryBackend for these tests. *)
+let test_memory_compare_and_swap () =
+  match Backend.MemoryBackend.create Backend.default_config with
+  | Error _ -> fail "Failed to create MemoryBackend"
+  | Ok backend ->
+      let key = make_unique_key "cas" in
+      let _ = Backend.MemoryBackend.set backend ~key ~value:"initial" in
 
-let test_filesystem_list_keys () =
-  (* Skip: Mutex deadlock due to non-reentrant locking in FileSystemBackend.
-     See test_backend_eio.ml for Eio-native list_keys tests. *)
-  ()
+      (* CAS with wrong expected should fail *)
+      (match Backend.MemoryBackend.compare_and_swap backend ~key ~expected:"wrong" ~value:"new" with
+      | Ok false -> ()
+      | _ -> fail "CAS should fail with wrong expected");
 
-let test_filesystem_get_all () =
-  (* Skip: Mutex deadlock due to non-reentrant locking in FileSystemBackend.
-     See test_backend_eio.ml for Eio-native get_all tests. *)
-  ()
+      (* CAS with correct expected should succeed *)
+      (match Backend.MemoryBackend.compare_and_swap backend ~key ~expected:"initial" ~value:"updated" with
+      | Ok true -> ()
+      | _ -> fail "CAS should succeed");
+
+      (* Verify update *)
+      (match Backend.MemoryBackend.get backend ~key with
+      | Ok (Some v) -> check string "CAS updated" "updated" v
+      | _ -> fail "get after CAS failed")
+
+let test_memory_list_keys () =
+  match Backend.MemoryBackend.create Backend.default_config with
+  | Error _ -> fail "Failed to create MemoryBackend"
+  | Ok backend ->
+      let prefix = make_unique_key "list" in
+      let _ = Backend.MemoryBackend.set backend ~key:(prefix ^ ":a") ~value:"1" in
+      let _ = Backend.MemoryBackend.set backend ~key:(prefix ^ ":b") ~value:"2" in
+
+      match Backend.MemoryBackend.list_keys backend ~prefix with
+      | Ok keys -> check int "list_keys count" 2 (List.length keys)
+      | Error _ -> fail "list_keys failed"
+
+let test_memory_get_all () =
+  match Backend.MemoryBackend.create Backend.default_config with
+  | Error _ -> fail "Failed to create MemoryBackend"
+  | Ok backend ->
+      let prefix = make_unique_key "getall" in
+      let _ = Backend.MemoryBackend.set backend ~key:(prefix ^ ":a") ~value:"1" in
+      let _ = Backend.MemoryBackend.set backend ~key:(prefix ^ ":b") ~value:"2" in
+
+      match Backend.MemoryBackend.get_all backend ~prefix with
+      | Ok pairs -> check int "get_all count" 2 (List.length pairs)
+      | Error _ -> fail "get_all failed"
 
 let test_filesystem_health_check () =
   let cfg = { Backend.default_config with base_path = make_test_dir "masc_health_test" } in
@@ -728,10 +757,10 @@ let () =
       test_case "quotes" `Quick test_key_with_quotes;
       test_case "shell metachar" `Quick test_key_with_shell_metachar;
     ];
-    "filesystem_ops", [
-      test_case "compare_and_swap" `Quick test_filesystem_compare_and_swap;
-      test_case "list_keys" `Quick test_filesystem_list_keys;
-      test_case "get_all" `Quick test_filesystem_get_all;
+    "memory_ops", [
+      test_case "compare_and_swap" `Quick test_memory_compare_and_swap;
+      test_case "list_keys" `Quick test_memory_list_keys;
+      test_case "get_all" `Quick test_memory_get_all;
       test_case "health_check" `Quick test_filesystem_health_check;
     ];
     "pubsub", [

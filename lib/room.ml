@@ -1303,12 +1303,14 @@ let walph_should_continue config =
   )
 
 (** Map Walph preset to llm-mcp chain ID
-    @param preset The loop preset (coverage, refactor, docs, drain)
+    @param preset The loop preset (coverage, refactor, docs, review, figma, drain)
     @return Some chain_id for presets with corresponding chains, None for drain *)
 let get_chain_id_for_preset = function
   | "coverage" -> Some "walph-coverage"
   | "refactor" -> Some "walph-refactor"
   | "docs" -> Some "walph-docs"
+  | "review" -> Some "pr-review-pipeline"  (* PR self-review *)
+  | "figma" -> Some "walph-figma"  (* Vision-first Figma loop *)
   | "drain" -> None  (* No chain for simple drain *)
   | _ -> None
 

@@ -179,6 +179,32 @@ let resolve_agent_name config agent_name =
 
 (** Initialize MASC room *)
 let rec init config ~agent_name =
+  (* Ensure root .masc structure exists even when initializing a non-default room. *)
+  let root_dir = masc_root_dir config in
+  let root_agents_dir = Filename.concat root_dir "agents" in
+  let root_tasks_dir = Filename.concat root_dir "tasks" in
+  let root_messages_dir = Filename.concat root_dir "messages" in
+  let root_backlog_path = Filename.concat root_tasks_dir "backlog.json" in
+  List.iter mkdir_p [root_agents_dir; root_tasks_dir; root_messages_dir; rooms_root_dir config];
+  if not (path_exists_root config (root_state_path config)) then begin
+    let root_state = {
+      protocol_version = "0.1.0";
+      project = Filename.basename config.base_path;
+      started_at = now_iso ();
+      message_seq = 0;
+      active_agents = [];
+      paused = false;
+      pause_reason = None;
+      paused_by = None;
+      paused_at = None;
+    } in
+    write_json_root config (root_state_path config) (room_state_to_yojson root_state)
+  end;
+  if not (path_exists_root config root_backlog_path) then begin
+    let root_backlog = { tasks = []; last_updated = now_iso (); version = 1 } in
+    write_json_root config root_backlog_path (backlog_to_yojson root_backlog)
+  end;
+
   if is_initialized config then
     "MASC already initialized."
   else begin
@@ -441,19 +467,7 @@ let status config =
 
   let state = read_state config in
   let backlog = read_backlog config in
-  (* Read current room inline - can't use read_current_room due to definition order *)
-  let current_room =
-    let path = Filename.concat config.base_path "current_room" in
-    if Sys.file_exists path then
-      try
-        let ic = open_in path in
-        let room_id = input_line ic in
-        close_in ic;
-        String.trim room_id
-      with _ -> "default"
-    else
-      "default"
-  in
+  let current_room = read_current_room config |> Option.value ~default:"default" in
 
   let buf = Buffer.create 256 in
   Buffer.add_string buf (Printf.sprintf "🏢 Cluster: %s\n" state.project);
@@ -2258,42 +2272,50 @@ let slugify name =
       if len > 0 && s.[len - 1] = '-' then String.sub s 0 (len - 1) else s)
 
 (** Get rooms directory path *)
-let rooms_dir config = Filename.concat config.base_path "rooms"
+let rooms_dir config = rooms_root_dir config
 
 (** Get room registry file path *)
-let registry_path config = Filename.concat config.base_path "rooms.json"
+let registry_path config = registry_root_path config
 
 (** Get current room file path *)
-let current_room_path config = Filename.concat config.base_path "current_room"
+let current_room_path config = current_room_root_path config
 
 (** Read current room ID *)
 let read_current_room config =
-  let path = current_room_path config in
-  if Sys.file_exists path then
-    try
-      let ic = open_in path in
-      let room_id = input_line ic in
-      close_in ic;
-      Some (String.trim room_id)
-    with _ -> Some "default"
-  else
-    Some "default"
+  let read_from path =
+    if Sys.file_exists path then
+      try
+        let ic = open_in path in
+        let room_id = input_line ic in
+        close_in ic;
+        Some (String.trim room_id)
+      with _ -> None
+    else
+      None
+  in
+  match read_from (current_room_path config) with
+  | Some room_id -> Some room_id
+  | None ->
+      (match read_from (legacy_current_room_path config) with
+       | Some legacy_room -> Some legacy_room
+       | None -> Some "default")
 
 (** Write current room ID *)
 let write_current_room config room_id =
-  let path = current_room_path config in
-  let oc = open_out path in
-  output_string oc room_id;
-  output_char oc '\n';
-  close_out oc
+  let write_to path =
+    mkdir_p (Filename.dirname path);
+    let oc = open_out path in
+    output_string oc room_id;
+    output_char oc '\n';
+    close_out oc
+  in
+  (* Canonical location inside .masc/ *)
+  write_to (current_room_path config);
+  (* Legacy compatibility: keep base_path/current_room in sync *)
+  write_to (legacy_current_room_path config)
 
 (** Get path for a specific room *)
-let room_path config room_id =
-  if room_id = "default" then
-    (* Legacy backward compatibility: default room uses root .masc/ *)
-    config.base_path
-  else
-    Filename.concat (rooms_dir config) room_id
+let room_path config room_id = room_dir_for config room_id
 
 (** Count agents in a room *)
 let count_agents_in_room config room_id =
@@ -2315,25 +2337,37 @@ let count_tasks_in_room config room_id =
 
 (** Load room registry *)
 let load_registry config : Types.room_registry =
-  let path = registry_path config in
-  if Sys.file_exists path then
-    try
-      let json = read_json config path in
-      match Types.room_registry_of_yojson json with
-      | Ok registry -> registry
-      | Error _ -> { rooms = []; default_room = "default"; current_room = Some "default" }
-    with _ -> { rooms = []; default_room = "default"; current_room = Some "default" }
-  else
+  let default_registry =
     { rooms = []; default_room = "default"; current_room = Some "default" }
+  in
+  let parse_registry json =
+    match Types.room_registry_of_yojson json with
+    | Ok registry -> registry
+    | Error _ -> default_registry
+  in
+  let root_path = registry_path config in
+  let legacy_path = legacy_registry_root_path config in
+  if path_exists_root config root_path then
+    parse_registry (read_json_root config root_path)
+  else if Sys.file_exists legacy_path then
+    (* Legacy fallback: migrate rooms.json into .masc/ root. *)
+    let legacy_registry = parse_registry (read_json_local legacy_path) in
+    write_json_root config root_path (Types.room_registry_to_yojson legacy_registry);
+    legacy_registry
+  else
+    default_registry
 
 (** Save room registry *)
 let save_registry config (registry : Types.room_registry) =
   let path = registry_path config in
-  write_json config path (Types.room_registry_to_yojson registry)
+  mkdir_p (rooms_dir config);
+  write_json_root config path (Types.room_registry_to_yojson registry);
+  (* Keep legacy location in sync for older clients. *)
+  write_json_local (legacy_registry_root_path config) (Types.room_registry_to_yojson registry)
 
 (** List all available rooms *)
 let rooms_list config : Yojson.Safe.t =
-  if not (is_initialized config) then
+  if not (root_is_initialized config) then
     `Assoc [
       ("rooms", `List []);
       ("current_room", `Null);
@@ -2378,7 +2412,7 @@ let rooms_list config : Yojson.Safe.t =
 
 (** Create a new room *)
 let room_create config ~name ~description : Yojson.Safe.t =
-  if not (is_initialized config) then
+  if not (root_is_initialized config) then
     `Assoc [("error", `String "MASC not initialized")]
   else begin
     let room_id = slugify name in
@@ -2391,6 +2425,7 @@ let room_create config ~name ~description : Yojson.Safe.t =
       `Assoc [("error", `String "Cannot create room with reserved name 'default'")]
     else begin
       (* Create room directory structure *)
+      mkdir_p (rooms_dir config);
       let rpath = room_path config room_id in
       mkdir_p rpath;
       mkdir_p (Filename.concat rpath "agents");
@@ -2425,7 +2460,7 @@ let room_create config ~name ~description : Yojson.Safe.t =
 
 (** Enter a room (switch context) *)
 let room_enter config ~room_id ~agent_type : Yojson.Safe.t =
-  if not (is_initialized config) then
+  if not (root_is_initialized config) then
     `Assoc [("error", `String "MASC not initialized")]
   else begin
     (* Check if room exists *)
@@ -2442,6 +2477,10 @@ let room_enter config ~room_id ~agent_type : Yojson.Safe.t =
 
       (* Update current room *)
       write_current_room config room_id;
+
+      (* Initialize the room on first entry (no auto-join). *)
+      if not (is_initialized config) then
+        ignore (init config ~agent_name:None);
 
       (* Join the new room *)
       let join_result = join config ~agent_name:agent_type ~capabilities:[] () in

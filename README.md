@@ -9,7 +9,7 @@ OCaml로 만든 개인용 MCP 서버입니다.
 - API와 동작은 자주 바뀔 수 있습니다.
 - 보안·권한 모델은 강하지 않습니다. 로컬 또는 신뢰된 네트워크를 전제로 합니다.
 
-## Quickstart
+## 빠른 시작
 
 ```bash
 ./start-masc-mcp.sh --http --port 8935

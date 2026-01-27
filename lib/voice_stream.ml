@@ -250,7 +250,7 @@ let ipaddr_of_host host =
 
 (** {1 Server Lifecycle} *)
 
-let start ~sw ~net t =
+let start ~sw ~net ~clock t =
   if t.is_running then
     ()
   else begin
@@ -263,7 +263,7 @@ let start ~sw ~net t =
       Ws_eio.Server.create_connection_handler ~sw (websocket_handler t)
     in
     Log.info ~ctx:"voice_stream" "WebSocket server starting on port %d" t.port;
-    let rec accept_loop () =
+    let rec accept_loop backoff_s =
       if t.should_stop then
         ()
       else
@@ -273,16 +273,18 @@ let start ~sw ~net t =
             try connection_handler client_addr flow
             with exn ->
               Log.error ~ctx:"voice_stream" "Handler error: %s" (Printexc.to_string exn));
-          accept_loop ()
+          accept_loop 0.05
         with exn ->
           if t.should_stop then
             ()
           else begin
             Log.error ~ctx:"voice_stream" "Accept error: %s" (Printexc.to_string exn);
-            accept_loop ()
+            (try Eio.Time.sleep clock backoff_s with _ -> ());
+            let next_backoff = Float.min 2.0 (backoff_s *. 1.5) in
+            accept_loop next_backoff
           end
     in
-    Eio.Fiber.fork ~sw accept_loop;
+    Eio.Fiber.fork ~sw (fun () -> accept_loop 0.05);
     Log.info ~ctx:"voice_stream" "WebSocket server started on port %d" t.port
   end
 

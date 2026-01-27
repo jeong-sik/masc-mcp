@@ -62,6 +62,14 @@ type server_event =
   | MessageReceived of string * client_message  (** client_id, message *)
   | ClientError of string * string  (** client_id, error_message - P1: Error events *)
 
+(** {1 Utility Functions} *)
+
+(** Generate a unique client ID *)
+val generate_client_id : unit -> string
+
+(** Parse a client message from JSON string *)
+val parse_client_message : string -> client_message
+
 (** {1 Creation} *)
 
 (** Create a new voice stream server.
@@ -76,8 +84,9 @@ val create : ?port:int -> unit -> t
 
     @param sw Eio switch controlling server lifetime
     @param net Eio network provider
+    @param clock Eio clock for backoff delays
     @param t The stream server *)
-val start : sw:Eio.Switch.t -> net:[> `Generic] Eio.Net.t -> t -> unit
+val start : sw:Eio.Switch.t -> net:[> `Generic] Eio.Net.t -> clock:_ Eio.Time.clock -> t -> unit
 
 (** Stop the server and disconnect all clients.
 

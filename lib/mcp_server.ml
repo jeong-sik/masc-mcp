@@ -125,7 +125,7 @@ let protocol_version_from_params params =
 (** Server info *)
 let server_info = `Assoc [
   ("name", `String "masc-mcp");
-  ("version", `String "2.2.7");
+  ("version", `String "2.2.8");
 ]
 
 let capabilities = `Assoc [

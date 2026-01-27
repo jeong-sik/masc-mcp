@@ -259,7 +259,7 @@ end
 
 (** Health check endpoint - JSON response *)
 let health_handler _request reqd =
-  let json = {|{"status":"ok","server":"masc-mcp","version":"2.2.7"}|} in
+  let json = {|{"status":"ok","server":"masc-mcp","version":"2.2.8"}|} in
   Response.json json reqd
 
 (** Readiness probe - Kubernetes *)

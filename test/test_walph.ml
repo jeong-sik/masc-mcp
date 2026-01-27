@@ -11,6 +11,10 @@ let test_chain_mapping () =
     (Some "walph-refactor") (R.get_chain_id_for_preset "refactor");
   check (option string) "docs preset"
     (Some "walph-docs") (R.get_chain_id_for_preset "docs");
+  check (option string) "review preset"
+    (Some "pr-review-pipeline") (R.get_chain_id_for_preset "review");
+  check (option string) "figma preset"
+    (Some "walph-figma") (R.get_chain_id_for_preset "figma");
   check (option string) "drain preset"
     None (R.get_chain_id_for_preset "drain");
   check (option string) "unknown preset"

@@ -41,12 +41,12 @@ jobs:
           opam install . --deps-only -y
 
       - name: Build
-        run: opam exec -- dune build --release
+        run: opam exec -- dune build --release bin/main_eio.exe
 
       - name: Package binary
         run: |
           mkdir -p dist
-          cp _build/default/bin/main.exe dist/masc-mcp-${{ matrix.arch }}
+          cp _build/default/bin/main_eio.exe dist/masc-mcp-${{ matrix.arch }}
           chmod +x dist/masc-mcp-${{ matrix.arch }}
 
       - name: Upload artifact

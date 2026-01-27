@@ -1155,7 +1155,7 @@ let server_cmd =
 
 let cmd =
   let doc = "MASC - Multi-Agent Streaming Coordination (MCP 2025-11-25)" in
-  let info = Cmd.info "masc-mcp" ~version:"2.2.6" ~doc in
+  let info = Cmd.info "masc-mcp" ~version:"2.2.7" ~doc in
   Cmd.group info ~default:Term.(const main $ http_flag $ stdio_flag $ port_arg $ grpc_port_arg $ path_arg) [
     server_cmd;
     dashboard_cmd;

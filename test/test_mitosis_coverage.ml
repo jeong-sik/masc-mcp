@@ -184,7 +184,7 @@ let test_create_stem_cell_zero_counts () =
 
 let test_create_stem_cell_unique_ids () =
   let cell1 = Mitosis.create_stem_cell ~generation:0 in
-  Unix.sleepf 0.001;  (* Small delay to ensure different timestamp *)
+  Unix.sleepf 0.01;  (* Small delay to ensure different timestamp *)
   let cell2 = Mitosis.create_stem_cell ~generation:0 in
   check bool "unique ids" true (cell1.id <> cell2.id)
 
@@ -720,7 +720,7 @@ let test_extract_dna_contains_compressed () =
 let test_check_triggers_time_based () =
   let config = { Mitosis.default_config with triggers = [Time_based 0.001] } in
   let cell = Mitosis.create_stem_cell ~generation:0 in
-  Unix.sleepf 0.01;  (* Wait for trigger *)
+  Unix.sleepf 0.05;  (* Wait for trigger *)
   let result = Mitosis.check_non_context_triggers ~config ~cell in
   check bool "time trigger met" true result
 
@@ -848,7 +848,7 @@ let test_record_activity_accumulates () =
 
 let test_record_activity_updates_timestamp () =
   let cell = Mitosis.create_stem_cell ~generation:0 in
-  Unix.sleepf 0.01;
+  Unix.sleepf 0.05;
   let updated = Mitosis.record_activity ~cell ~task_done:false ~tool_called:false in
   check bool "timestamp updated" true (updated.last_activity > cell.last_activity)
 

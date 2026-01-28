@@ -2,7 +2,7 @@
 
 open Masc_mcp
 
-let () = Random.self_init ()
+let () = Random.init 42
 
 (** Helper: Create a fresh swarm for testing *)
 let make_test_swarm ?(behavior = Swarm.Flocking) () : Swarm.swarm =

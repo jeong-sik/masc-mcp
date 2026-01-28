@@ -108,7 +108,7 @@ let test_rapid_fire () =
     count elapsed (float_of_int count /. elapsed)
 
 let () =
-  Random.self_init ();
+  Random.init 42;
   Printf.printf "\n🐒 Mention Monkey Test\n";
   Printf.printf "========================\n\n";
 

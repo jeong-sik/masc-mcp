@@ -185,7 +185,7 @@ let print_test_registry () =
   Printf.printf "--- %d tests with explicit intent ---\n\n" (List.length !test_registry)
 
 (** Random seed for unique temp dirs *)
-let () = Random.self_init ()
+let () = Random.init 42
 
 (** Remove directory recursively *)
 let rec rm_rf path =

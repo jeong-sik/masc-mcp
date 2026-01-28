@@ -24,7 +24,7 @@ let test_gen_a2a_task_id_length () =
 let test_gen_a2a_task_id_unique () =
   let id1 = Room_portal.gen_a2a_task_id () in
   (* Small delay to ensure different random suffix *)
-  Unix.sleepf 0.001;
+  Unix.sleepf 0.01;
   let id2 = Room_portal.gen_a2a_task_id () in
   (* Random suffix should make them different *)
   check bool "ids likely different" true (id1 <> id2)

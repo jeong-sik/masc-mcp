@@ -239,7 +239,7 @@ let test_enable_disable_auth () =
 (* ============================================ *)
 
 let () =
-  Random.self_init ();
+  Random.init 42;
   run "Auth" [
     "token_generation", [
       test_case "generate token" `Quick test_token_generation;

@@ -252,9 +252,22 @@ let html () = {|<!DOCTYPE html>
     const statusDot = document.getElementById('status-dot');
     const tempoBadge = document.getElementById('tempo-badge');
 
+    const params = new URLSearchParams(window.location.search);
+    const agent = params.get('agent') || params.get('agent_name');
+    const token = params.get('token');
+
+    function authHeaders() {
+      const headers = {};
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      if (agent) headers['X-MASC-Agent'] = agent;
+      return headers;
+    }
+
     // REST API helper
     async function apiCall(endpoint) {
-      const res = await fetch('/api/v1/' + endpoint);
+      const res = await fetch('/api/v1/' + endpoint, {
+        headers: authHeaders()
+      });
       return res.json();
     }
 
@@ -366,7 +379,11 @@ let html () = {|<!DOCTYPE html>
 
     // SSE for real-time updates
     function connectSSE() {
-      const es = new EventSource('/sse');
+      const sseParams = new URLSearchParams();
+      if (agent) sseParams.set('agent', agent);
+      if (token) sseParams.set('token', token);
+      const sseUrl = sseParams.toString() ? ('/sse?' + sseParams.toString()) : '/sse';
+      const es = new EventSource(sseUrl);
       es.onopen = () => {
         statusDot.classList.add('connected');
         console.log('SSE connected');
@@ -387,9 +404,8 @@ let html () = {|<!DOCTYPE html>
 
     function handleEvent(event) {
       const type = event.type || event.event;
-      if (type === 'broadcast' || type === 'agent_joined' || type === 'agent_left' ||
-          type === 'task_update' || type === 'tempo_change') {
-        fetchData(); // Refresh on relevant events
+      if (type) {
+        fetchData(); // Refresh on any known event
       }
     }
 

@@ -24,6 +24,7 @@ Thumbs.db
 
 # Test artifacts
 *.log
+benchmarks/results/
 
 
 # Downloaded release binary

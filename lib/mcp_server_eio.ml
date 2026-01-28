@@ -548,7 +548,7 @@ let cosine_similarity a b =
 
     All legacy bridges have been removed.
 *)
-let execute_tool_eio ~sw ~clock ?mcp_session_id state ~name ~arguments =
+let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~arguments =
   (* clock parameter used for Session_eio.wait_for_message *)
   (* mcp_session_id: HTTP MCP session ID for agent_name persistence across tool calls *)
   let open Yojson.Safe.Util in
@@ -650,6 +650,25 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id state ~name ~arguments =
             generated)
   in
 
+  let token =
+    match get_string_opt "token" with
+    | Some t -> Some t
+    | None -> auth_token
+  in
+
+  (* Enforce tool authorization when enabled *)
+  let auth_result =
+    if Auth.is_auth_enabled config.base_path then
+      match Auth.authorize_tool config.base_path ~agent_name ~token ~tool_name:name with
+      | Ok () -> Ok ()
+      | Error err -> Error err
+    else
+      Ok ()
+  in
+
+  match auth_result with
+  | Error err -> (false, Types.masc_error_to_string err)
+  | Ok () ->
   (* Log tool call *)
   Log.Mcp.debug "[%s] %s" agent_name name;
 
@@ -1360,7 +1379,7 @@ Time: %s
 (** {1 Eio-Native JSON-RPC Handlers} *)
 
 (** Eio-native handler for tools/call - uses execute_tool_eio directly *)
-let handle_call_tool_eio ~sw ~clock ?mcp_session_id state id params =
+let handle_call_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state id params =
   let open Yojson.Safe.Util in
   let name = params |> member "name" |> to_string in
   let arguments = params |> member "arguments" in
@@ -1368,7 +1387,7 @@ let handle_call_tool_eio ~sw ~clock ?mcp_session_id state id params =
   (* Measure execution time for telemetry *)
   let start_time = Eio.Time.now clock in
   let (success, message) =
-    try execute_tool_eio ~sw ~clock ?mcp_session_id state ~name ~arguments
+    try execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~arguments
     with exn ->
       (* Never let a tool exception crash the MCP server. *)
       let err = Printexc.to_string exn in
@@ -1481,7 +1500,7 @@ let handle_list_prompts_eio id =
     Uses execute_tool_eio for tool calls.
     mcp_session_id: HTTP MCP session ID for agent_name persistence
 *)
-let handle_request ~clock ~sw ?mcp_session_id state request_str =
+let handle_request ~clock ~sw ?mcp_session_id ?auth_token state request_str =
   try
     let json =
       try Ok (Yojson.Safe.from_string request_str)
@@ -1523,7 +1542,7 @@ let handle_request ~clock ~sw ?mcp_session_id state request_str =
                         Printf.eprintf "[MCP] tools/call: %s (id=%s, session=%s)\n%!" name
                           (match id with `Int i -> string_of_int i | `String s -> s | _ -> "?")
                           (match mcp_session_id with Some s -> s | None -> "none");
-                        let result = handle_call_tool_eio ~sw ~clock ?mcp_session_id state id params in
+                        let result = handle_call_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state id params in
                         Printf.eprintf "[MCP] tools/call done: %s\n%!" name;
                         result
                     | None -> make_error ~id (-32602) "Missing params")

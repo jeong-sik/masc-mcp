@@ -97,10 +97,9 @@ let test_remaining_multiple () =
 let test_cleanup_removes_old () =
   let limiter = Rate_limit.create () in
   let _ = Rate_limit.check limiter ~key:"old" in
-  (* Ensure entry is older than the cleanup threshold. *)
-  Unix.sleepf 0.001;
+  (* Cleanup with 0 threshold: anything created before cleanup is considered old *)
   let removed = Rate_limit.cleanup limiter ~older_than_seconds:0 in
-  check bool "removed old entries" true (removed >= 1)
+  check int "removes immediately when threshold=0" 1 removed
 
 let test_cleanup_keeps_recent () =
   let limiter = Rate_limit.create () in

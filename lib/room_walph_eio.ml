@@ -209,11 +209,12 @@ let get_chain_id_for_preset = function
     Eio-native implementation with fiber-safe concurrency.
 
     @param net Eio network capability (for llm-mcp chain calls)
+    @param clock Eio clock capability (for hard timeouts)
     @param preset Loop preset (drain, coverage, refactor, docs)
     @param max_iterations Maximum iterations before forced stop
     @param target Target file/directory for preset
     @return Status string with loop results *)
-let walph_loop config ~net ~agent_name ?(preset="drain") ?(max_iterations=10) ?target () =
+let walph_loop config ~net ~clock ~agent_name ?(preset="drain") ?(max_iterations=10) ?target () =
   Room.ensure_initialized config;
 
   (* Get Walph state for this specific agent *)
@@ -339,7 +340,7 @@ let walph_loop config ~net ~agent_name ?(preset="drain") ?(max_iterations=10) ?t
                       in
                       let _ = Room.broadcast config ~from_agent:agent_name
                         ~content:(Printf.sprintf "🔗 @walph calling chain '%s' for '%s'..." cid task_title) in
-                      Llm_client_eio.call_chain ~net ~goal ~chain_id:cid ()
+                      Llm_client_eio.call_chain ~net ~clock ~goal ~chain_id:cid ()
                   in
 
                   (match chain_result with

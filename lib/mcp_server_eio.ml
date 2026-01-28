@@ -1135,7 +1135,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id state ~name ~arguments =
       let target = match get_string "target" "" with "" -> None | t -> Some t in
       (* Use Eio-native Walph for production (fiber-safe, non-blocking) *)
       let net = get_net () in
-      (true, Room_walph_eio.walph_loop config ~net ~agent_name ~preset ~max_iterations ?target ())
+      (true, Room_walph_eio.walph_loop config ~net ~clock ~agent_name ~preset ~max_iterations ?target ())
 
   | "masc_walph_control" ->
       let command = get_string "command" "STATUS" in
@@ -1187,16 +1187,16 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id state ~name ~arguments =
             (true, Room_walph_eio.walph_control config ~from_agent:agent_name ~command:"STATUS" ~args:"" ())
         | `Start_coverage ->
             let net = get_net () in
-            (true, Room_walph_eio.walph_loop config ~net ~agent_name ~preset:"coverage" ~max_iterations:10 ())
+            (true, Room_walph_eio.walph_loop config ~net ~clock ~agent_name ~preset:"coverage" ~max_iterations:10 ())
         | `Start_refactor ->
             let net = get_net () in
-            (true, Room_walph_eio.walph_loop config ~net ~agent_name ~preset:"refactor" ~max_iterations:10 ())
+            (true, Room_walph_eio.walph_loop config ~net ~clock ~agent_name ~preset:"refactor" ~max_iterations:10 ())
         | `Start_docs ->
             let net = get_net () in
-            (true, Room_walph_eio.walph_loop config ~net ~agent_name ~preset:"docs" ~max_iterations:10 ())
+            (true, Room_walph_eio.walph_loop config ~net ~clock ~agent_name ~preset:"docs" ~max_iterations:10 ())
         | `Start_drain ->
             let net = get_net () in
-            (true, Room_walph_eio.walph_loop config ~net ~agent_name ~preset:"drain" ~max_iterations:10 ())
+            (true, Room_walph_eio.walph_loop config ~net ~clock ~agent_name ~preset:"drain" ~max_iterations:10 ())
       end
 
   | "masc_swarm_walph" ->

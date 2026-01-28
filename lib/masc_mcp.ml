@@ -95,8 +95,3 @@ module Webrtc_bindings = Webrtc_bindings
 module Webrtc_common = Webrtc_common
 module Webrtc_datachannel = Webrtc_datachannel
 module Udp_socket_eio = Udp_socket_eio
-
-(* Additional modules for coverage testing *)
-module Credits_dashboard = Credits_dashboard
-module Auto_responder = Auto_responder
-module Error = Error

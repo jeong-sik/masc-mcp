@@ -137,4 +137,5 @@
    ;; Zstd compression
    zstd
    )
- (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))
+ (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq))
+ (instrumentation (backend bisect_ppx)))

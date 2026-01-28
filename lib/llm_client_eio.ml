@@ -282,13 +282,14 @@ let build_chain_request ~goal ?chain_id ?(timeout=120) ?(max_replans=2) () =
 
 (** Call chain.orchestrate on llm-mcp server
     @param net Eio network capability
+    @param clock Eio clock capability for hard timeout
     @param goal Goal description for orchestration
     @param chain_id Optional explicit chain ID (bypasses auto-selection)
     @param host llm-mcp server host (default: 127.0.0.1)
     @param port llm-mcp server port (default: 8932)
     @param timeout_sec Timeout in seconds (default: 120 for long chains)
     @return Response content or error *)
-let call_chain ~net ~goal ?chain_id ?(host=default_host) ?(port=default_port) ?(timeout_sec=120.0) () =
+let call_chain ~net ~clock ~goal ?chain_id ?(host=default_host) ?(port=default_port) ?(timeout_sec=120.0) () =
   let request_body = build_chain_request ~goal ?chain_id ~timeout:(int_of_float timeout_sec) () in
   try
     Eio.Net.with_tcp_connect ~host ~service:(string_of_int port) net @@ fun flow ->
@@ -306,72 +307,84 @@ let call_chain ~net ~goal ?chain_id ?(host=default_host) ?(port=default_port) ?(
     Eio.Flow.copy_string request flow;
     Eio.Flow.shutdown flow `Send;
 
-    (* Read response with timeout *)
+    (* Read response with hard timeout *)
     let buf = Buffer.create 16384 in
-    let deadline = Unix.gettimeofday () +. timeout_sec in
+    let deadline = Eio.Time.now clock +. timeout_sec in
     let rec read_all () =
-      if Unix.gettimeofday () > deadline then
-        ()  (* Timeout *)
+      let now = Eio.Time.now clock in
+      if now >= deadline then
+        Error Timeout
       else
-        let chunk = Cstruct.create 4096 in
-        match Eio.Flow.single_read flow chunk with
-        | n ->
-            Buffer.add_string buf (Cstruct.to_string ~len:n chunk);
-            read_all ()
-        | exception End_of_file -> ()
+        let remaining = deadline -. now in
+        let read_once () =
+          let chunk = Cstruct.create 4096 in
+          match Eio.Flow.single_read flow chunk with
+          | n ->
+              Buffer.add_string buf (Cstruct.to_string ~len:n chunk);
+              `Data
+          | exception End_of_file -> `Eof
+        in
+        match Eio.Fiber.first read_once (fun () ->
+          Eio.Time.sleep clock remaining;
+          `Timeout) with
+        | `Data -> read_all ()
+        | `Eof -> Ok ()
+        | `Timeout -> Error Timeout
     in
-    read_all ();
-
-    (* Parse HTTP response - prefer SSE data lines, fallback to JSON body *)
-    let response_str = Buffer.contents buf in
-    let body_start =
-      try
-        let idx = Str.search_forward (Str.regexp "\r\n\r\n") response_str 0 in
-        idx + 4
-      with Not_found -> 0
-    in
-    let body =
-      String.sub response_str body_start (String.length response_str - body_start)
-    in
-    let parse_chain_json json_str =
-      try
-        let json = Yojson.Safe.from_string json_str in
-        match json with
-        | `Assoc fields ->
-            (match List.assoc_opt "result" fields with
-             | Some (`Assoc result_fields) ->
-                 (match List.assoc_opt "content" result_fields with
-                  | Some (`List [`Assoc text_fields]) ->
-                      (match List.assoc_opt "text" text_fields with
-                       | Some (`String s) -> Ok s
-                       | _ -> Ok json_str)
-                  | Some (`String s) -> Ok s
-                  | _ -> Ok json_str)
-             | _ ->
-                 (match List.assoc_opt "error" fields with
-                  | Some (`Assoc err) ->
-                      let msg = match List.assoc_opt "message" err with
-                        | Some (`String s) -> s
-                        | _ -> "Unknown chain error"
-                      in
-                      Error (ServerError (500, msg))
-                  | _ -> Ok json_str))
-        | _ -> Ok json_str
-      with _ -> Ok json_str
-    in
-    let lines = String.split_on_char '\n' body in
-    let data_lines = List.filter_map (fun line ->
-      let line = String.trim line in
-      if String.length line > 6 && String.sub line 0 6 = "data: " then
-        Some (String.sub line 6 (String.length line - 6))
-      else None
-    ) lines in
-    match List.rev data_lines with
-    | last_data :: _ -> parse_chain_json last_data
-    | [] ->
-        let trimmed = String.trim body in
-        if trimmed = "" then Error (ParseError "No data in response")
-        else parse_chain_json trimmed
+    match read_all () with
+    | Error Timeout -> Error Timeout
+    | Error e -> Error e
+    | Ok () ->
+        (* Parse HTTP response - prefer SSE data lines, fallback to JSON body *)
+        let response_str = Buffer.contents buf in
+        let body_start =
+          try
+            let idx = Str.search_forward (Str.regexp "\r\n\r\n") response_str 0 in
+            idx + 4
+          with Not_found -> 0
+        in
+        let body =
+          String.sub response_str body_start (String.length response_str - body_start)
+        in
+        let parse_chain_json json_str =
+          try
+            let json = Yojson.Safe.from_string json_str in
+            match json with
+            | `Assoc fields ->
+                (match List.assoc_opt "result" fields with
+                 | Some (`Assoc result_fields) ->
+                     (match List.assoc_opt "content" result_fields with
+                      | Some (`List [`Assoc text_fields]) ->
+                          (match List.assoc_opt "text" text_fields with
+                           | Some (`String s) -> Ok s
+                           | _ -> Ok json_str)
+                      | Some (`String s) -> Ok s
+                      | _ -> Ok json_str)
+                 | _ ->
+                     (match List.assoc_opt "error" fields with
+                      | Some (`Assoc err) ->
+                          let msg = match List.assoc_opt "message" err with
+                            | Some (`String s) -> s
+                            | _ -> "Unknown chain error"
+                          in
+                          Error (ServerError (500, msg))
+                      | _ -> Ok json_str))
+            | _ -> Ok json_str
+          with _ -> Ok json_str
+        in
+        let lines = String.split_on_char '\n' body in
+        let data_lines = List.filter_map (fun line ->
+          let line = String.trim line in
+          if String.length line > 6 && String.sub line 0 6 = "data: " then
+            Some (String.sub line 6 (String.length line - 6))
+          else None
+        ) lines in
+        match List.rev data_lines with
+        | last_data :: _ -> parse_chain_json last_data
+        | [] ->
+            let trimmed = String.trim body in
+            if trimmed = "" then Error (ParseError "No data in response")
+            else parse_chain_json trimmed
   with
   | Unix.Unix_error (err, _, _) ->
       Error (ConnectionError (Unix.error_message err))

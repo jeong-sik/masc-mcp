@@ -93,7 +93,7 @@ let cleanup limiter ~older_than_seconds =
     let now = Unix.gettimeofday () in
     let threshold = now -. float_of_int older_than_seconds in
     let to_remove = Hashtbl.fold (fun key bucket acc ->
-      if bucket.last_update < threshold then key :: acc
+      if bucket.last_update <= threshold then key :: acc
       else acc
     ) limiter.buckets [] in
     List.iter (Hashtbl.remove limiter.buckets) to_remove;

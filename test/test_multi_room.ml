@@ -19,6 +19,21 @@ let task_count config =
   let backlog = Room.read_backlog config in
   List.length backlog.tasks
 
+let extract_nickname result =
+  let prefix = "  Nickname: " in
+  try
+    let start_idx =
+      let idx = ref 0 in
+      while !idx < String.length result - String.length prefix &&
+            String.sub result !idx (String.length prefix) <> prefix do
+        incr idx
+      done;
+      !idx + String.length prefix
+    in
+    let end_idx = String.index_from result start_idx '\n' in
+    String.sub result start_idx (end_idx - start_idx)
+  with _ -> "unknown-agent"
+
 (* ============================================ *)
 (* Room Registry Tests                          *)
 (* ============================================ *)
@@ -113,7 +128,7 @@ let test_room_enter () =
     (* 새 방 생성 *)
     let _ = Room.room_create config ~name:"Other Room" ~description:None in
     (* 방 입장 *)
-    let result = Room.room_enter config ~room_id:"other-room" ~agent_type:"claude" in
+    let result = Room.room_enter config ~room_id:"other-room" ~agent_type:"claude" () in
     match result with
     | `Assoc fields ->
         (match List.assoc_opt "current_room" fields with
@@ -131,7 +146,7 @@ let test_room_enter_nonexistent () =
   Fun.protect ~finally:(fun () -> cleanup_test_room test_dir) (fun () ->
     let _ = Room.init config ~agent_name:None in
     (* 존재하지 않는 방 입장 시도 *)
-    let result = Room.room_enter config ~room_id:"nonexistent" ~agent_type:"claude" in
+    let result = Room.room_enter config ~room_id:"nonexistent" ~agent_type:"claude" () in
     match result with
     | `Assoc fields ->
         (match List.assoc_opt "error" fields with
@@ -150,7 +165,7 @@ let test_current_room_after_enter () =
     let _ = Room.init config ~agent_name:None in
     (* 새 방 생성하고 입장 *)
     let _ = Room.room_create config ~name:"New Room" ~description:None in
-    let _ = Room.room_enter config ~room_id:"new-room" ~agent_type:"claude" in
+    let _ = Room.room_enter config ~room_id:"new-room" ~agent_type:"claude" () in
     (* rooms_list에서 current_room 확인 *)
     let result = Room.rooms_list config in
     match result with
@@ -165,6 +180,22 @@ let test_current_room_after_enter () =
 (* Room Isolation Tests                         *)
 (* ============================================ *)
 
+let test_room_enter_moves_agent () =
+  let (config, test_dir) = setup_test_room () in
+  Fun.protect ~finally:(fun () -> cleanup_test_room test_dir) (fun () ->
+    ignore (Room.init config ~agent_name:None);
+
+    let join_result = Room.join config ~agent_name:"codex" ~capabilities:[] () in
+    let nickname = extract_nickname join_result in
+    check int "default room has agent" 1 (Room.count_agents_in_room config "default");
+
+    ignore (Room.room_create config ~name:"Move Room" ~description:None);
+    ignore (Room.room_enter config ~room_id:"move-room" ~agent_type:"codex" ~agent_name:nickname ());
+
+    check int "default room cleared after move" 0 (Room.count_agents_in_room config "default");
+    check int "move room has agent" 1 (Room.count_agents_in_room config "move-room");
+  )
+
 let test_room_task_isolation () =
   let (config, test_dir) = setup_test_room () in
   Fun.protect ~finally:(fun () -> cleanup_test_room test_dir) (fun () ->
@@ -174,7 +205,7 @@ let test_room_task_isolation () =
     check int "default room task count" 1 (task_count config);
 
     ignore (Room.room_create config ~name:"Isolated Room" ~description:None);
-    ignore (Room.room_enter config ~room_id:"isolated-room" ~agent_type:"codex");
+    ignore (Room.room_enter config ~room_id:"isolated-room" ~agent_type:"codex" ());
 
     (* Default room tasks should not leak into the new room. *)
     check int "isolated room starts empty" 0 (task_count config);
@@ -182,7 +213,7 @@ let test_room_task_isolation () =
     ignore (Room.add_task config ~title:"isolated-task" ~priority:3 ~description:"isolated room task");
     check int "isolated room task count" 1 (task_count config);
 
-    ignore (Room.room_enter config ~room_id:"default" ~agent_type:"codex");
+    ignore (Room.room_enter config ~room_id:"default" ~agent_type:"codex" ());
     check int "default room remains isolated" 1 (task_count config);
   )
 
@@ -235,6 +266,7 @@ let () =
       test_case "current room updates" `Quick test_current_room_after_enter;
     ];
     "room_isolation", [
+      test_case "agent moves between rooms" `Quick test_room_enter_moves_agent;
       test_case "tasks are isolated per room" `Quick test_room_task_isolation;
     ];
     "backward_compat", [

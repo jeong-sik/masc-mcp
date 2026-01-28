@@ -470,7 +470,14 @@ let status config =
   let current_room = read_current_room config |> Option.value ~default:"default" in
 
   let buf = Buffer.create 256 in
-  Buffer.add_string buf (Printf.sprintf "🏢 Cluster: %s\n" state.project);
+  let cluster_name =
+    match config.backend_config.Backend.cluster_name with
+    | "" -> state.project
+    | name -> name
+  in
+  Buffer.add_string buf (Printf.sprintf "🏢 Cluster: %s\n" cluster_name);
+  if cluster_name <> state.project then
+    Buffer.add_string buf (Printf.sprintf "📦 Project: %s\n" state.project);
   Buffer.add_string buf (Printf.sprintf "📍 Room: %s\n" current_room);
   Buffer.add_string buf (Printf.sprintf "📁 Path: %s\n" config.base_path);
   Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
@@ -2459,7 +2466,7 @@ let room_create config ~name ~description : Yojson.Safe.t =
   end
 
 (** Enter a room (switch context) *)
-let room_enter config ~room_id ~agent_type : Yojson.Safe.t =
+let room_enter config ~room_id ?(agent_name="") ~agent_type () : Yojson.Safe.t =
   if not (root_is_initialized config) then
     `Assoc [("error", `String "MASC not initialized")]
   else begin
@@ -2474,6 +2481,19 @@ let room_enter config ~room_id ~agent_type : Yojson.Safe.t =
       `Assoc [("error", `String (Printf.sprintf "Room '%s' does not exist" room_id))]
     else begin
       let previous_room = read_current_room config in
+      let trimmed_agent_name = String.trim agent_name in
+      let effective_agent_name =
+        if trimmed_agent_name <> "" then trimmed_agent_name else agent_type
+      in
+
+      (* If we have a concrete agent name, remove it from the previous room to avoid duplication. *)
+      let should_auto_leave =
+        trimmed_agent_name <> "" && is_agent_joined config ~agent_name:effective_agent_name
+      in
+      (match previous_room with
+       | Some prev when prev <> room_id && should_auto_leave ->
+           ignore (leave config ~agent_name:effective_agent_name)
+       | _ -> ());
 
       (* Update current room *)
       write_current_room config room_id;
@@ -2483,7 +2503,7 @@ let room_enter config ~room_id ~agent_type : Yojson.Safe.t =
         ignore (init config ~agent_name:None);
 
       (* Join the new room *)
-      let join_result = join config ~agent_name:agent_type ~capabilities:[] () in
+      let join_result = join config ~agent_name:effective_agent_name ~capabilities:[] () in
 
       (* Extract nickname from join result (format: "  Nickname: xxx\n...") *)
       let nickname =

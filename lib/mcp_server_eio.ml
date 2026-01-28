@@ -775,7 +775,29 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id state ~name ~arguments =
     fs = state.Mcp_server.fs;
     agent_name;
   } in
+  let simple_ctx_config = { Tool_plan.config } in
+  let simple_ctx_run = { Tool_run.config } in
+  let simple_ctx_cache = { Tool_cache.config } in
+  let simple_ctx_tempo = { Tool_tempo.config; agent_name } in
+  let simple_ctx_mitosis = { Tool_mitosis.config } in
+
+  (* Chain through all extracted tool modules *)
   match Tool_swarm.dispatch swarm_ctx ~name ~args:arguments with
+  | Some result -> result
+  | None ->
+  match Tool_plan.dispatch simple_ctx_config ~name ~args:arguments with
+  | Some result -> result
+  | None ->
+  match Tool_run.dispatch simple_ctx_run ~name ~args:arguments with
+  | Some result -> result
+  | None ->
+  match Tool_cache.dispatch simple_ctx_cache ~name ~args:arguments with
+  | Some result -> result
+  | None ->
+  match Tool_tempo.dispatch simple_ctx_tempo ~name ~args:arguments with
+  | Some result -> result
+  | None ->
+  match Tool_mitosis.dispatch simple_ctx_mitosis ~name ~args:arguments with
   | Some result -> result
   | None ->
 

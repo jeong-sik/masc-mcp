@@ -81,6 +81,11 @@
    tempo
    tools
    tool_swarm
+   tool_plan
+   tool_run
+   tool_cache
+   tool_tempo
+   tool_mitosis
    transport
    transport_grpc_next
    udp_socket_eio

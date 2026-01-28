@@ -98,3 +98,8 @@ module Udp_socket_eio = Udp_socket_eio
 
 (* Tool handler modules (extracted for testability) *)
 module Tool_swarm = Tool_swarm
+module Tool_plan = Tool_plan
+module Tool_run = Tool_run
+module Tool_cache = Tool_cache
+module Tool_tempo = Tool_tempo
+module Tool_mitosis = Tool_mitosis

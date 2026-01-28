@@ -70,7 +70,7 @@ let handle_room_enter ctx args =
     (false, "❌ Room ID is required")
   else
     let agent_type = get_string args "agent_type" "claude" in
-    let result = Room.room_enter ctx.config ~room_id ~agent_type in
+    let result = Room.room_enter ctx.config ~room_id ~agent_type ~agent_name:ctx.agent_name () in
     let success = match result with
       | `Assoc fields -> not (List.mem_assoc "error" fields)
       | _ -> false

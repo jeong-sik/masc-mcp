@@ -55,6 +55,8 @@ let make_response = Mcp_server.make_response
 let make_error = Mcp_server.make_error
 let is_valid_request_id = Mcp_server.is_valid_request_id
 let validate_initialize_params = Mcp_server.validate_initialize_params
+let has_field = Mcp_server.has_field
+let get_field = Mcp_server.get_field
 
 (** Heartbeat management module - periodic background broadcasts *)
 module Heartbeat = struct
@@ -734,11 +736,20 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id state ~name ~arguments =
 
   (* Check if agent must join first *)
   let join_required = List.mem name requires_join in
-  let is_joined = Room.is_agent_joined config ~agent_name in
+  let room_initialized = Room.is_initialized config in
+  let is_joined =
+    if room_initialized then
+      (* Some tools (e.g., masc_init) must run before initialization.
+         Guard the join check to avoid raising and crashing the server. *)
+      try Room.is_agent_joined config ~agent_name with _ -> false
+    else
+      false
+  in
 
   (* Debug: log join check *)
-  Printf.eprintf "[DEBUG] tool=%s agent_name=%s join_required=%b is_joined=%b\n%!"
-    name agent_name join_required is_joined;
+  Printf.eprintf
+    "[DEBUG] tool=%s agent_name=%s join_required=%b room_initialized=%b is_joined=%b\n%!"
+    name agent_name join_required room_initialized is_joined;
 
   if join_required && not is_joined then
     (false, Printf.sprintf "❌ Join required: Call masc_join first before using %s.\n\n💡 Workflow: masc_join → masc_status → %s\n📚 See: @~/me/instructions/masc-workflow.md\n[DEBUG] agent_name=%s is_joined=%b" name name agent_name is_joined)
@@ -1525,13 +1536,18 @@ Time: %s
         let rec loop () =
           match Heartbeat.get hb_id with
           | Some hb when hb.Heartbeat.active ->
-              (* Send heartbeat broadcast *)
-              let _ = Room.broadcast config ~from_agent:agent_name ~content:message in
+              (* Heartbeat must never crash the server switch. *)
+              (try
+                 ignore (Room.broadcast config ~from_agent:agent_name ~content:message)
+               with exn ->
+                 Printf.eprintf "[Heartbeat] broadcast error: %s\n%!"
+                   (Printexc.to_string exn));
               Eio.Time.sleep clock (float_of_int interval);
               loop ()
           | _ -> () (* Heartbeat stopped or not found *)
         in
-        loop ()
+        try loop () with exn ->
+          Printf.eprintf "[Heartbeat] loop error: %s\n%!" (Printexc.to_string exn)
       );
       (true, Printf.sprintf "✅ Heartbeat started: %s (interval: %ds, message: %s)" hb_id interval message)
 
@@ -3200,7 +3216,14 @@ let handle_call_tool_eio ~sw ~clock ?mcp_session_id state id params =
 
   (* Measure execution time for telemetry *)
   let start_time = Eio.Time.now clock in
-  let (success, message) = execute_tool_eio ~sw ~clock ?mcp_session_id state ~name ~arguments in
+  let (success, message) =
+    try execute_tool_eio ~sw ~clock ?mcp_session_id state ~name ~arguments
+    with exn ->
+      (* Never let a tool exception crash the MCP server. *)
+      let err = Printexc.to_string exn in
+      Log.Mcp.error "tools/call crashed: %s" err;
+      (false, Printf.sprintf "❌ Internal error: %s" err)
+  in
   let end_time = Eio.Time.now clock in
   let duration_ms = int_of_float ((end_time -. start_time) *. 1000.0) in
 

@@ -460,6 +460,7 @@ let options_handler request reqd =
 (** Eio switch and clock references for MCP handlers *)
 let current_sw : Eio.Switch.t option ref = ref None
 let current_clock : float Eio.Time.clock_ty Eio.Resource.t option ref = ref None
+let current_net : _ Eio.Net.t option ref = ref None
 
 let http_status_of_graphql = function
   | `OK -> `OK
@@ -811,6 +812,10 @@ let make_routes () =
   |> Http.Router.get "/health" health_handler
   |> Http.Router.get "/dashboard" (fun _req reqd ->
        Http.Response.html (Masc_mcp.Web_dashboard.html ()) reqd)
+  |> Http.Router.get "/dashboard/credits" (fun _req reqd ->
+       Http.Response.html (Masc_mcp.Credits_dashboard.html ()) reqd)
+  |> Http.Router.get "/api/v1/credits" (fun _req reqd ->
+       Http.Response.json (Masc_mcp.Credits_dashboard.json_api ()) reqd)
   |> Http.Router.get "/" (fun _req reqd -> Http.Response.text "MASC MCP Server" reqd)
   |> Http.Router.get "/static/css/middleware.css"
        (serve_playground_asset "static/css/middleware.css")
@@ -946,9 +951,13 @@ let run_server ~sw ~env ~port ~base_path =
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let fs = Eio.Stdenv.fs env in
 
-  (* Store switch and clock references for handlers *)
+  (* Store switch, clock, and net references for handlers *)
   current_sw := Some sw;
   current_clock := Some clock;
+  current_net := Some net;
+
+  (* Set net reference in Mcp_eio for Walph chain execution *)
+  Mcp_eio.set_net net;
 
   (* Create Caqti-compatible stdenv adapter
      Note: net type coercion from [Generic|Unix] to [Generic] is safe
@@ -993,22 +1002,28 @@ let run_server ~sw ~env ~port ~base_path =
   Printf.printf "   POST /messages → legacy client->server messages\n%!";
   Printf.printf "   GET  /health → Health check\n%!";
 
-  let rec accept_loop () =
-    let flow, client_addr = Eio.Net.accept ~sw socket in
-    Eio.Fiber.fork ~sw (fun () ->
-      try
-        Httpun_eio.Server.create_connection_handler
-          ~sw
-          ~request_handler
-          ~error_handler:Http.error_handler
-          client_addr
-          flow
-      with exn ->
-        Printf.eprintf "Connection error: %s\n%!" (Printexc.to_string exn)
-    );
-    accept_loop ()
+  let rec accept_loop backoff_s =
+    try
+      let flow, client_addr = Eio.Net.accept ~sw socket in
+      Eio.Fiber.fork ~sw (fun () ->
+        try
+          Httpun_eio.Server.create_connection_handler
+            ~sw
+            ~request_handler
+            ~error_handler:Http.error_handler
+            client_addr
+            flow
+        with exn ->
+          Printf.eprintf "Connection error: %s\n%!" (Printexc.to_string exn)
+      );
+      accept_loop 0.05
+    with exn ->
+      Printf.eprintf "Accept error: %s\n%!" (Printexc.to_string exn);
+      (try Eio.Time.sleep clock backoff_s with _ -> ());
+      let next_backoff = Float.min 2.0 (backoff_s *. 1.5) in
+      accept_loop next_backoff
   in
-  accept_loop ()
+  accept_loop 0.05
 
 (** CLI options *)
 let port =

@@ -328,6 +328,12 @@ let walph_loop config ~net ~agent_name ?(preset="drain") ?(max_iterations=10) ?t
                             Printf.sprintf "Create or improve documentation for: %s. %s. Include examples and clear explanations." task_title task_desc
                         | "review" ->
                             Printf.sprintf "Review PR: %s. %s. Check code quality, security, test coverage." task_title task_desc
+                        | "figma" ->
+                            if String.length (String.trim task_desc) > 0 then task_desc
+                            else
+                              Printf.sprintf
+                                "Vision-first Figma task: %s. Provide figma_dsl JSON in the task description."
+                                task_title
                         | _ ->
                             Printf.sprintf "Complete this task: %s. %s" task_title task_desc
                       in

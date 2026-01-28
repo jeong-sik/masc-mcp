@@ -94,36 +94,28 @@ let parse_response json_str =
   | Yojson.Json_error msg -> Error (ParseError msg)
   | _ -> Error (ParseError "Unknown parse error")
 
-(** {1 Public API} *)
+(** {1 HTTP Transport Layer} *)
 
-(** Call LLM model with prompt (Eio-native, non-blocking)
+(** HTTP POST function type for dependency injection *)
+type http_post_fn = host:string -> port:int -> path:string -> body:string -> (string, error) result
 
-    @param net Eio network capability
-    @param model LLM model to use (default: Gemini for speed)
-    @param host llm-mcp server host (default: 127.0.0.1)
-    @param port llm-mcp server port (default: 8932)
-    @param prompt The prompt to send
-    @return Response or error *)
-let call ~net ?(model=Gemini) ?(host=default_host) ?(port=default_port) ~prompt () =
-  let request_body = build_request ~model ~prompt in
+(** Eio-based HTTP POST implementation *)
+let eio_http_post ~net : http_post_fn = fun ~host ~port ~path ~body ->
   try
-    (* Connect to llm-mcp server using Eio.Net *)
     Eio.Net.with_tcp_connect ~host ~service:(string_of_int port) net @@ fun flow ->
-    (* Send HTTP request *)
     let request = Printf.sprintf
-      "POST /mcp HTTP/1.1\r\n\
+      "POST %s HTTP/1.1\r\n\
        Host: %s:%d\r\n\
        Content-Type: application/json\r\n\
        Content-Length: %d\r\n\
        Connection: close\r\n\
        \r\n\
        %s"
-      host port (String.length request_body) request_body
+      path host port (String.length body) body
     in
     Eio.Flow.copy_string request flow;
     Eio.Flow.shutdown flow `Send;
 
-    (* Read response *)
     let buf = Buffer.create 4096 in
     let rec read_all () =
       let chunk = Cstruct.create 4096 in
@@ -135,7 +127,6 @@ let call ~net ?(model=Gemini) ?(host=default_host) ?(port=default_port) ~prompt 
     in
     read_all ();
 
-    (* Parse HTTP response *)
     let response_str = Buffer.contents buf in
     let body_start =
       try
@@ -143,13 +134,37 @@ let call ~net ?(model=Gemini) ?(host=default_host) ?(port=default_port) ~prompt 
         idx + 4
       with Not_found -> 0
     in
-    let body = String.sub response_str body_start (String.length response_str - body_start) in
-    parse_response body
+    Ok (String.sub response_str body_start (String.length response_str - body_start))
   with
-  | Unix.Unix_error (err, _, _) ->
-      Error (ConnectionError (Unix.error_message err))
-  | exn ->
-      Error (ConnectionError (Printexc.to_string exn))
+  | Unix.Unix_error (err, _, _) -> Error (ConnectionError (Unix.error_message err))
+  | exn -> Error (ConnectionError (Printexc.to_string exn))
+
+(** {1 Public API} *)
+
+(** Call LLM model with prompt (testable version with injected HTTP)
+
+    @param http_post HTTP POST function (use eio_http_post ~net for production)
+    @param model LLM model to use (default: Gemini for speed)
+    @param host llm-mcp server host (default: 127.0.0.1)
+    @param port llm-mcp server port (default: 8932)
+    @param prompt The prompt to send
+    @return Response or error *)
+let call_with_http ~http_post ?(model=Gemini) ?(host=default_host) ?(port=default_port) ~prompt () =
+  let request_body = build_request ~model ~prompt in
+  match http_post ~host ~port ~path:"/mcp" ~body:request_body with
+  | Ok body -> parse_response body
+  | Error e -> Error e
+
+(** Call LLM model with prompt (Eio-native, non-blocking)
+
+    @param net Eio network capability
+    @param model LLM model to use (default: Gemini for speed)
+    @param host llm-mcp server host (default: 127.0.0.1)
+    @param port llm-mcp server port (default: 8932)
+    @param prompt The prompt to send
+    @return Response or error *)
+let call ~net ?(model=Gemini) ?(host=default_host) ?(port=default_port) ~prompt () =
+  call_with_http ~http_post:(eio_http_post ~net) ~model ~host ~port ~prompt ()
 
 (** Convenience function for quick classification tasks *)
 let classify ~net ~prompt () =

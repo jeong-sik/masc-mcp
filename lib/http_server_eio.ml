@@ -307,7 +307,7 @@ let error_handler _client_addr ?request:_ error start_response =
   Httpun.Body.Writer.close response_body
 
 (** Run the HTTP server with Eio *)
-let run ~sw ~net config routes =
+let run ~sw ~net ~clock config routes =
   let request_handler = make_request_handler routes in
   (* Parse IP address using Ipaddr library then convert to Eio format *)
   let ip = match Ipaddr.of_string config.host with
@@ -319,19 +319,31 @@ let run ~sw ~net config routes =
   Printf.printf "🚀 MASC MCP Server listening on http://%s:%d\n" config.host config.port;
   Printf.printf "   Graceful shutdown: SIGTERM/SIGINT supported\n%!";
 
+  let initial_backoff_s = 0.05 in
+  let max_backoff_s = 1.0 in
+  let backoff_s = ref initial_backoff_s in
+  let reset_backoff () = backoff_s := initial_backoff_s in
+  let bump_backoff () = backoff_s := min max_backoff_s (!backoff_s *. 2.0) in
   let rec accept_loop () =
-    let flow, client_addr = Eio.Net.accept ~sw socket in
-    Eio.Fiber.fork ~sw (fun () ->
-      try
-        Httpun_eio.Server.create_connection_handler
-          ~sw
-          ~request_handler
-          ~error_handler
-          client_addr
-          flow
-      with exn ->
-        Printf.eprintf "Connection error: %s\n%!" (Printexc.to_string exn)
-    );
+    (try
+       let flow, client_addr = Eio.Net.accept ~sw socket in
+       reset_backoff ();
+       Eio.Fiber.fork ~sw (fun () ->
+         try
+           Httpun_eio.Server.create_connection_handler
+             ~sw
+             ~request_handler
+             ~error_handler
+             client_addr
+             flow
+         with exn ->
+           Printf.eprintf "Connection error: %s\n%!" (Printexc.to_string exn))
+     with exn ->
+       let delay = !backoff_s in
+       Printf.eprintf "Accept error: %s (backoff %.2fs)\n%!"
+         (Printexc.to_string exn) delay;
+       Eio.Time.sleep clock delay;
+       bump_backoff ());
     accept_loop ()
   in
   accept_loop ()
@@ -343,6 +355,7 @@ exception Shutdown
 let start ?(config = default_config) ?(routes = default_routes) () =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
 
   (* Graceful shutdown setup *)
   let switch_ref = ref None in
@@ -362,7 +375,7 @@ let start ?(config = default_config) ?(routes = default_routes) () =
   (try
     Eio.Switch.run @@ fun sw ->
     switch_ref := Some sw;
-    run ~sw ~net config routes
+    run ~sw ~net ~clock config routes
   with
   | Shutdown ->
       Printf.eprintf "🚀 MASC MCP: Shutdown complete.\n%!"

@@ -591,7 +591,10 @@ let start_server ~sw ~env config room_config : server =
 
   (* Start server in background fiber *)
   Eio.Fiber.fork ~sw (fun () ->
-    Grpc_eio.Server.serve ~sw ~env grpc_server
+    try
+      Grpc_eio.Server.serve ~sw ~env grpc_server
+    with exn ->
+      Eio.traceln "[gRPC] serve crashed: %s" (Printexc.to_string exn)
   );
 
   { grpc_server; config; running = true }

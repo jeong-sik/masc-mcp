@@ -18,6 +18,7 @@ module Room_utils = Masc_mcp.Room_utils
 module Graphql_api = Masc_mcp.Graphql_api
 module Types = Masc_mcp.Types
 module Tempo = Masc_mcp.Tempo
+module Auth = Masc_mcp.Auth
 module Http_negotiation = Masc_mcp.Mcp_protocol.Http_negotiation
 module Progress = Masc_mcp.Progress
 module Sse = Masc_mcp.Sse
@@ -98,6 +99,90 @@ let get_protocol_version_for_session ?session_id request =
       | Some v -> v
       | None -> get_protocol_version request)
   | None -> get_protocol_version request
+
+(** Parse query param from request target *)
+let query_param request key =
+  let uri = Uri.of_string request.Httpun.Request.target in
+  Uri.get_query_param uri key
+
+let int_query_param request key ~default =
+  match query_param request key with
+  | None -> default
+  | Some s -> (try int_of_string s with _ -> default)
+
+let bearer_token_from_header value =
+  let prefix = "Bearer " in
+  let prefix_lower = "bearer " in
+  if String.length value >= String.length prefix &&
+     String.sub value 0 (String.length prefix) = prefix then
+    Some (String.sub value (String.length prefix) (String.length value - String.length prefix))
+  else if String.length value >= String.length prefix_lower &&
+          String.sub value 0 (String.length prefix_lower) = prefix_lower then
+    Some (String.sub value (String.length prefix_lower) (String.length value - String.length prefix_lower))
+  else
+    None
+
+let auth_token_from_request request =
+  match Httpun.Headers.get request.Httpun.Request.headers "authorization" with
+  | Some v -> bearer_token_from_header v
+  | None -> query_param request "token"
+
+let agent_from_request request =
+  match Httpun.Headers.get request.Httpun.Request.headers "x-masc-agent" with
+  | Some v -> Some v
+  | None ->
+      match Httpun.Headers.get request.Httpun.Request.headers "x-masc-agent-name" with
+      | Some v -> Some v
+      | None ->
+          (match query_param request "agent" with
+           | Some v -> Some v
+           | None -> query_param request "agent_name")
+
+let http_status_of_auth_error = function
+  | Types.Unauthorized _ | Types.InvalidToken _ | Types.TokenExpired _ -> `Unauthorized
+  | Types.Forbidden _ -> `Forbidden
+  | _ -> `Internal_server_error
+
+let respond_auth_error request reqd err =
+  let status = http_status_of_auth_error err in
+  let origin = get_origin request in
+  let body = Yojson.Safe.to_string (`Assoc [
+    ("error", `String (Types.masc_error_to_string err));
+  ]) in
+  let headers = Httpun.Headers.of_list (
+    ("content-length", string_of_int (String.length body))
+    :: cors_headers origin
+  ) in
+  let response = Httpun.Response.create ~headers status in
+  Httpun.Reqd.respond_with_string reqd response body
+
+
+let with_read_auth handler request reqd =
+  match !server_state with
+  | None -> Http.Response.json {|{"error":"not initialized"}|} reqd
+  | Some state ->
+      let base_path = state.Mcp_server.room_config.base_path in
+      let auth_cfg = Auth.load_auth_config base_path in
+      let agent_name_opt = agent_from_request request in
+      let token = auth_token_from_request request in
+      let agent_name = Option.value ~default:"dashboard" agent_name_opt in
+      if auth_cfg.enabled && auth_cfg.require_token && agent_name_opt = None then
+        respond_auth_error request reqd (Types.Unauthorized "Agent name required")
+      else
+        match Auth.check_permission base_path ~agent_name ~token ~permission:Types.CanReadState with
+        | Ok () -> handler state request reqd
+        | Error err -> respond_auth_error request reqd err
+
+let parse_host_port host_header default_host default_port =
+  match host_header with
+  | None -> (default_host, default_port)
+  | Some host_value ->
+      (match String.split_on_char ':' host_value with
+       | [host] -> (host, default_port)
+       | host :: port_str :: _ ->
+           let port = try int_of_string port_str with _ -> default_port in
+           (host, port)
+       | _ -> (default_host, default_port))
 
 (** Utility: string prefix check *)
 let starts_with ~prefix s =
@@ -509,6 +594,7 @@ let handle_post_mcp request reqd =
     | Some id -> id
     | None -> Mcp_session.generate ()
   in
+  let auth_token = auth_token_from_request request in
 
   Http.Request.read_body_async reqd (fun body_str ->
     try
@@ -524,7 +610,9 @@ let handle_post_mcp request reqd =
         | Some c -> c
         | None -> failwith "Eio clock not initialized"
       in
-      let response_json = Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:session_id state body_str in
+      let response_json =
+        Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:session_id ?auth_token state body_str
+      in
       (match protocol_version_from_body body_str with
        | Some v -> remember_protocol_version session_id v
        | None -> ());
@@ -778,6 +866,7 @@ let handle_post_messages request reqd =
       Httpun.Reqd.respond_with_string reqd response body
   | Some session_id ->
       let protocol_version = get_protocol_version_for_session ~session_id request in
+      let auth_token = auth_token_from_request request in
       Http.Request.read_body_async reqd (fun body_str ->
         let state = match !server_state with
           | Some s -> s
@@ -791,7 +880,9 @@ let handle_post_messages request reqd =
           | Some c -> c
           | None -> failwith "Eio clock not initialized"
         in
-        let response_json = Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:session_id state body_str in
+        let response_json =
+          Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:session_id ?auth_token state body_str
+        in
         (match response_json with
          | `Null -> ()
          | json -> Sse.send_to session_id json);
@@ -826,15 +917,34 @@ let handle_delete_mcp request reqd =
       Httpun.Reqd.respond_with_string reqd response body
 
 (** Build routes for MCP server *)
-let make_routes () =
+let make_routes ~port ~host =
   Http.Router.empty
   |> Http.Router.get "/health" health_handler
-  |> Http.Router.get "/dashboard" (fun _req reqd ->
-       Http.Response.html (Masc_mcp.Web_dashboard.html ()) reqd)
-  |> Http.Router.get "/dashboard/credits" (fun _req reqd ->
-       Http.Response.html (Masc_mcp.Credits_dashboard.html ()) reqd)
-  |> Http.Router.get "/api/v1/credits" (fun _req reqd ->
-       Http.Response.json (Masc_mcp.Credits_dashboard.json_api ()) reqd)
+  |> Http.Router.get "/metrics" (fun request reqd ->
+       with_read_auth (fun _state _req reqd ->
+         let body = Masc_mcp.Prometheus.to_prometheus_text () in
+         Http.Response.bytes ~content_type:"text/plain; version=0.0.4; charset=utf-8" body reqd
+       ) request reqd)
+  |> Http.Router.get "/.well-known/agent-card.json" (fun request reqd ->
+       with_read_auth (fun _state req reqd ->
+         let host_header = Httpun.Headers.get req.Httpun.Request.headers "host" in
+         let (resolved_host, resolved_port) = parse_host_port host_header host port in
+         let card = Masc_mcp.Agent_card.generate_default ~host:resolved_host ~port:resolved_port () in
+         let json = Masc_mcp.Agent_card.to_json card |> Yojson.Safe.to_string in
+         Http.Response.json json reqd
+       ) request reqd)
+  |> Http.Router.get "/dashboard" (fun request reqd ->
+       with_read_auth (fun _state _req reqd ->
+         Http.Response.html (Masc_mcp.Web_dashboard.html ()) reqd
+       ) request reqd)
+  |> Http.Router.get "/dashboard/credits" (fun request reqd ->
+       with_read_auth (fun _state _req reqd ->
+         Http.Response.html (Masc_mcp.Credits_dashboard.html ()) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/credits" (fun request reqd ->
+       with_read_auth (fun _state _req reqd ->
+         Http.Response.json (Masc_mcp.Credits_dashboard.json_api ()) reqd
+       ) request reqd)
   |> Http.Router.get "/" (fun _req reqd -> Http.Response.text "MASC MCP Server" reqd)
   |> Http.Router.get "/static/css/middleware.css"
        (serve_playground_asset "static/css/middleware.css")
@@ -848,78 +958,144 @@ let make_routes () =
        (serve_graphiql_asset "react.production.min.js")
   |> Http.Router.get "/graphiql/react-dom.production.min.js"
        (serve_graphiql_asset "react-dom.production.min.js")
-  |> Http.Router.get "/mcp" (fun request reqd -> handle_get_mcp request reqd)
+  |> Http.Router.get "/mcp" (fun request reqd ->
+       with_read_auth (fun _state req reqd -> handle_get_mcp req reqd) request reqd)
   |> Http.Router.post "/" handle_post_mcp
   |> Http.Router.post "/mcp" handle_post_mcp
-  |> Http.Router.add ~path:"/graphql" ~methods:[`GET; `POST] ~handler:handle_graphql
+  |> Http.Router.add ~path:"/graphql" ~methods:[`GET; `POST]
+       ~handler:(fun request reqd ->
+         with_read_auth (fun _state req reqd -> handle_graphql req reqd) request reqd)
   |> Http.Router.post "/messages" handle_post_messages
   |> Http.Router.get "/sse"
        (fun request reqd ->
-         handle_get_mcp
-           ~legacy_messages_endpoint:(legacy_messages_endpoint_url request)
-           request reqd)
-  |> Http.Router.get "/sse/simple" sse_simple_handler
+         with_read_auth (fun _state req reqd ->
+           handle_get_mcp
+             ~legacy_messages_endpoint:(legacy_messages_endpoint_url req)
+             req reqd
+         ) request reqd)
+  |> Http.Router.get "/sse/simple" (fun request reqd ->
+       with_read_auth (fun _state req reqd -> sse_simple_handler req reqd) request reqd)
   (* REST API for dashboard - direct Room access *)
-  |> Http.Router.get "/api/v1/status" (fun _req reqd ->
-       match !server_state with
-       | Some state ->
-           let config = state.Mcp_server.room_config in
-           let room_state = Masc_mcp.Room.read_state config in
-           let tempo = Masc_mcp.Tempo.get_tempo config in
-           let json = `Assoc [
-             ("cluster", `String (Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME")));
-             ("project", `String room_state.project);
-             ("tempo_interval_s", `Float tempo.current_interval_s);
-             ("paused", `Bool room_state.paused);
-           ] in
-           Http.Response.json (Yojson.Safe.to_string json) reqd
-       | _ -> Http.Response.json {|{"error":"not initialized"}|} reqd)
-  |> Http.Router.get "/api/v1/tasks" (fun _req reqd ->
-       match !server_state with
-       | Some state ->
-           let config = state.Mcp_server.room_config in
-           let tasks = Masc_mcp.Room.get_tasks_raw config in
-           let tasks_json = List.map (fun (t : Masc_mcp.Types.task) ->
-             `Assoc [
-               ("id", `String t.id);
-               ("title", `String t.title);
-               ("status", `String (Masc_mcp.Types.string_of_task_status t.task_status));
-               ("priority", `Int t.priority);
-               ("assignee", match t.task_status with
-                 | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ } -> `String assignee
-                 | _ -> `Null);
-             ]
-           ) tasks in
-           Http.Response.json (Yojson.Safe.to_string (`Assoc [("tasks", `List tasks_json)])) reqd
-       | _ -> Http.Response.json {|{"error":"not initialized"}|} reqd)
-  |> Http.Router.get "/api/v1/agents" (fun _req reqd ->
-       match !server_state with
-       | Some state ->
-           let config = state.Mcp_server.room_config in
-           let agents = Masc_mcp.Room.get_agents_raw config in
-           let agents_json = List.map (fun (a : Masc_mcp.Types.agent) ->
-             `Assoc [
-               ("name", `String a.name);
-               ("status", `String (Masc_mcp.Types.string_of_agent_status a.status));
-               ("current_task", match a.current_task with Some t -> `String t | None -> `Null);
-             ]
-           ) agents in
-           Http.Response.json (Yojson.Safe.to_string (`Assoc [("agents", `List agents_json)])) reqd
-       | _ -> Http.Response.json {|{"error":"not initialized"}|} reqd)
-  |> Http.Router.get "/api/v1/messages" (fun _req reqd ->
-       match !server_state with
-       | Some state ->
-           let config = state.Mcp_server.room_config in
-           let msgs = Masc_mcp.Room.get_messages_raw config ~since_seq:0 ~limit:20 in
-           let msgs_json = List.map (fun (m : Masc_mcp.Types.message) ->
-             `Assoc [
-               ("from", `String m.from_agent);
-               ("content", `String m.content);
-               ("timestamp", `String m.timestamp);
-             ]
-           ) msgs in
-           Http.Response.json (Yojson.Safe.to_string (`Assoc [("messages", `List msgs_json)])) reqd
-       | _ -> Http.Response.json {|{"error":"not initialized"}|} reqd)
+  |> Http.Router.get "/api/v1/status" (fun request reqd ->
+       with_read_auth (fun state _req reqd ->
+         let config = state.Mcp_server.room_config in
+         let room_state = Masc_mcp.Room.read_state config in
+         let tempo = Masc_mcp.Tempo.get_tempo config in
+         let json = `Assoc [
+           ("cluster", `String (Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME")));
+           ("project", `String room_state.project);
+           ("tempo_interval_s", `Float tempo.current_interval_s);
+           ("paused", `Bool room_state.paused);
+         ] in
+         Http.Response.json (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/tasks" (fun request reqd ->
+       with_read_auth (fun state req reqd ->
+         let config = state.Mcp_server.room_config in
+         let status_filter = query_param req "status" in
+         let limit = int_query_param req "limit" ~default:50 in
+         let offset = int_query_param req "offset" ~default:0 in
+         let tasks = Masc_mcp.Room.get_tasks_raw config in
+         let filtered =
+           match status_filter with
+           | None -> tasks
+           | Some status ->
+               List.filter (fun (t : Masc_mcp.Types.task) ->
+                 String.equal status (Masc_mcp.Types.string_of_task_status t.task_status)
+               ) tasks
+         in
+         let total = List.length filtered in
+         let page =
+           filtered
+           |> List.filteri (fun idx _ -> idx >= offset && idx < offset + limit)
+         in
+         let tasks_json = List.map (fun (t : Masc_mcp.Types.task) ->
+           `Assoc [
+             ("id", `String t.id);
+             ("title", `String t.title);
+             ("status", `String (Masc_mcp.Types.string_of_task_status t.task_status));
+             ("priority", `Int t.priority);
+             ("assignee", match t.task_status with
+               | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ } -> `String assignee
+               | _ -> `Null);
+           ]
+         ) page in
+         let json = `Assoc [
+           ("tasks", `List tasks_json);
+           ("limit", `Int limit);
+           ("offset", `Int offset);
+           ("total", `Int total);
+         ] in
+         Http.Response.json (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/agents" (fun request reqd ->
+       with_read_auth (fun state req reqd ->
+         let config = state.Mcp_server.room_config in
+         let status_filter = query_param req "status" in
+         let limit = int_query_param req "limit" ~default:50 in
+         let offset = int_query_param req "offset" ~default:0 in
+         let agents = Masc_mcp.Room.get_agents_raw config in
+         let filtered =
+           match status_filter with
+           | None -> agents
+           | Some status ->
+               List.filter (fun (a : Masc_mcp.Types.agent) ->
+                 String.equal status (Masc_mcp.Types.string_of_agent_status a.status)
+               ) agents
+         in
+         let total = List.length filtered in
+         let page =
+           filtered
+           |> List.filteri (fun idx _ -> idx >= offset && idx < offset + limit)
+         in
+         let agents_json = List.map (fun (a : Masc_mcp.Types.agent) ->
+           `Assoc [
+             ("name", `String a.name);
+             ("status", `String (Masc_mcp.Types.string_of_agent_status a.status));
+             ("current_task", match a.current_task with Some t -> `String t | None -> `Null);
+           ]
+         ) page in
+         let json = `Assoc [
+           ("agents", `List agents_json);
+           ("limit", `Int limit);
+           ("offset", `Int offset);
+           ("total", `Int total);
+         ] in
+         Http.Response.json (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/messages" (fun request reqd ->
+       with_read_auth (fun state req reqd ->
+         let config = state.Mcp_server.room_config in
+         let since_seq = int_query_param req "since_seq" ~default:0 in
+         let limit = int_query_param req "limit" ~default:20 in
+         let agent_filter = query_param req "agent" in
+         let msgs = Masc_mcp.Room.get_messages_raw config ~since_seq ~limit:500 in
+         let filtered =
+           match agent_filter with
+           | None -> msgs
+           | Some agent ->
+               List.filter (fun (m : Masc_mcp.Types.message) ->
+                 String.equal agent m.from_agent
+               ) msgs
+         in
+         let total = List.length filtered in
+         let page = filtered |> List.filteri (fun idx _ -> idx < limit) in
+         let msgs_json = List.map (fun (m : Masc_mcp.Types.message) ->
+           `Assoc [
+             ("from", `String m.from_agent);
+             ("content", `String m.content);
+             ("timestamp", `String m.timestamp);
+             ("seq", `Int m.seq);
+           ]
+         ) page in
+         let json = `Assoc [
+           ("messages", `List msgs_json);
+           ("limit", `Int limit);
+           ("since_seq", `Int since_seq);
+           ("total", `Int total);
+         ] in
+         Http.Response.json (Yojson.Safe.to_string json) reqd
+       ) request reqd)
 
 (** Extended router to handle OPTIONS *)
 let make_extended_handler routes =
@@ -995,7 +1171,7 @@ let run_server ~sw ~env ~port ~base_path =
   Masc_mcp.Orchestrator.start ~sw ~proc_mgr ~clock ~domain_mgr state.room_config;
 
   let config = { Http.default_config with port; host = "127.0.0.1" } in
-  let routes = make_routes () in
+  let routes = make_routes ~port:config.port ~host:config.host in
   let request_handler = make_extended_handler routes in
 
   let ip = Eio.Net.Ipaddr.V4.loopback in

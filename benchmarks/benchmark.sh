@@ -5,6 +5,8 @@
 set -e
 
 MASC_URL="${MASC_URL:-http://127.0.0.1:8935/mcp}"
+MASC_AGENT="${MASC_AGENT:-bench}"
+MASC_TOKEN="${MASC_TOKEN:-}"
 PATTERN="${1:-all}"
 ITERATIONS="${2:-3}"
 RESULTS_DIR="$(dirname "$0")/results"
@@ -22,6 +24,11 @@ log() { echo -e "${GREEN}[BENCH]${NC} $1"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
+AUTH_HEADER=()
+if [ -n "$MASC_TOKEN" ]; then
+    AUTH_HEADER=(-H "Authorization: Bearer $MASC_TOKEN")
+fi
+
 # Helper: Call MASC tool and measure time
 call_masc() {
     local tool="$1"
@@ -31,6 +38,7 @@ call_masc() {
     local response=$(curl -s -X POST "$MASC_URL" \
         -H "Content-Type: application/json" \
         -H "Accept: application/json, text/event-stream" \
+        "${AUTH_HEADER[@]}" \
         -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"$tool\",\"arguments\":$args}}" 2>/dev/null)
 
     local end=$(date +%s%N)
@@ -46,13 +54,13 @@ bench_coordination() {
 
     for i in $(seq 1 $ITERATIONS); do
         # Measure status call
-        local status_time=$(call_masc "masc_status" "{}")
+        local status_time=$(call_masc "masc_status" "{\"agent_name\":\"$MASC_AGENT\"}")
 
         # Measure broadcast
-        local broadcast_time=$(call_masc "masc_broadcast" "{\"message\":\"bench_$i\",\"priority\":\"low\"}")
+        local broadcast_time=$(call_masc "masc_broadcast" "{\"agent_name\":\"$MASC_AGENT\",\"message\":\"bench_$i\",\"priority\":\"low\"}")
 
         # Measure messages retrieval
-        local messages_time=$(call_masc "masc_messages" "{\"limit\":5}")
+        local messages_time=$(call_masc "masc_messages" "{\"agent_name\":\"$MASC_AGENT\",\"limit\":5}")
 
         results+=("$status_time,$broadcast_time,$messages_time")
         log "  Iteration $i: status=${status_time}ms, broadcast=${broadcast_time}ms, messages=${messages_time}ms"
@@ -83,13 +91,13 @@ bench_task_lifecycle() {
     local start=$(date +%s%N)
 
     # Create task
-    call_masc "masc_add_task" "{\"id\":\"$task_id\",\"title\":\"Benchmark task\"}" > /dev/null
+    call_masc "masc_add_task" "{\"agent_name\":\"$MASC_AGENT\",\"id\":\"$task_id\",\"title\":\"Benchmark task\"}" > /dev/null
 
     # Claim task
-    call_masc "masc_claim" "{\"task_id\":\"$task_id\"}" > /dev/null
+    call_masc "masc_claim" "{\"agent_name\":\"$MASC_AGENT\",\"task_id\":\"$task_id\"}" > /dev/null
 
     # Complete task
-    call_masc "masc_done" "{\"task_id\":\"$task_id\"}" > /dev/null
+    call_masc "masc_done" "{\"agent_name\":\"$MASC_AGENT\",\"task_id\":\"$task_id\"}" > /dev/null
 
     local end=$(date +%s%N)
     local total=$((  (end - start) / 1000000 ))
@@ -106,10 +114,10 @@ bench_lock_contention() {
 
     for i in $(seq 1 $ITERATIONS); do
         # Lock
-        local lock_time=$(call_masc "masc_lock" "{\"agent_name\":\"bench\",\"file\":\"$test_file\"}")
+        local lock_time=$(call_masc "masc_lock" "{\"agent_name\":\"$MASC_AGENT\",\"file\":\"$test_file\"}")
 
         # Unlock
-        local unlock_time=$(call_masc "masc_unlock" "{\"agent_name\":\"bench\",\"file\":\"$test_file\"}")
+        local unlock_time=$(call_masc "masc_unlock" "{\"agent_name\":\"$MASC_AGENT\",\"file\":\"$test_file\"}")
 
         results+=("$lock_time,$unlock_time")
         log "  Iteration $i: lock=${lock_time}ms, unlock=${unlock_time}ms"
@@ -135,10 +143,10 @@ bench_a2a() {
     log "Running: A2A Communication Benchmark"
 
     # Discover agents
-    local discover_time=$(call_masc "masc_a2a_discover" "{}")
+    local discover_time=$(call_masc "masc_a2a_discover" "{\"agent_name\":\"$MASC_AGENT\"}")
 
     # Query skill
-    local query_time=$(call_masc "masc_a2a_query_skill" "{\"skill\":\"code-review\"}")
+    local query_time=$(call_masc "masc_a2a_query_skill" "{\"agent_name\":\"$MASC_AGENT\",\"skill\":\"code-review\"}")
 
     echo "a2a,$discover_time,$query_time" >> "$RESULTS_DIR/results_$TIMESTAMP.csv"
     log "  discover=${discover_time}ms, query_skill=${query_time}ms"
@@ -150,16 +158,16 @@ bench_swarm() {
     local topic="bench_swarm_$TIMESTAMP"
 
     # Init swarm
-    local init_time=$(call_masc "masc_swarm_init" "{\"topic\":\"$topic\"}")
+    local init_time=$(call_masc "masc_swarm_init" "{\"agent_name\":\"$MASC_AGENT\",\"topic\":\"$topic\"}")
 
     # Propose
-    local propose_time=$(call_masc "masc_swarm_propose" "{\"topic\":\"$topic\",\"proposal\":\"test\"}")
+    local propose_time=$(call_masc "masc_swarm_propose" "{\"agent_name\":\"$MASC_AGENT\",\"topic\":\"$topic\",\"proposal\":\"test\"}")
 
     # Vote
-    local vote_time=$(call_masc "masc_swarm_vote" "{\"topic\":\"$topic\",\"choice\":\"test\",\"voter\":\"benchmark\"}")
+    local vote_time=$(call_masc "masc_swarm_vote" "{\"agent_name\":\"$MASC_AGENT\",\"topic\":\"$topic\",\"choice\":\"test\",\"voter\":\"benchmark\"}")
 
     # Status
-    local status_time=$(call_masc "masc_swarm_status" "{\"topic\":\"$topic\"}")
+    local status_time=$(call_masc "masc_swarm_status" "{\"agent_name\":\"$MASC_AGENT\",\"topic\":\"$topic\"}")
 
     echo "swarm,$init_time,$propose_time,$vote_time,$status_time" >> "$RESULTS_DIR/results_$TIMESTAMP.csv"
     log "  init=${init_time}ms, propose=${propose_time}ms, vote=${vote_time}ms, status=${status_time}ms"
@@ -169,6 +177,7 @@ bench_swarm() {
 main() {
     log "MASC Benchmark Suite"
     log "URL: $MASC_URL"
+    log "Agent: $MASC_AGENT"
     log "Pattern: $PATTERN"
     log "Iterations: $ITERATIONS"
     log "Results: $RESULTS_DIR/results_$TIMESTAMP.csv"

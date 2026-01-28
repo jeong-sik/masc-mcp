@@ -421,7 +421,7 @@ masc_handover_create --source claude --reason context_limit
 | Feature | Priority | Status |
 |---------|----------|--------|
 | Python Bindings | High | Planned |
-| Prometheus Metrics | High | Planned |
+| Prometheus Metrics | High | Implemented (/metrics) |
 | WebSocket Transport | Medium | Planned |
 | Distributed Consensus | Medium | Research |
 | Agent Marketplace | Low | Idea |

@@ -74,8 +74,25 @@ module ZeroZombie = struct
       @param interval cleanup interval in seconds (default: 60s)
       @param cleanup_fn function that performs the actual cleanup and returns names *)
   let run_loop ?(interval=60.0) ~clock ~cleanup_fn () =
-    while true do
-      Eio.Time.sleep clock interval;
-      ignore (cleanup ~cleanup_fn)
-    done
+    let is_cancelled exn =
+      match exn with
+      | Eio.Cancel.Cancelled _ -> true
+      | _ -> false
+    in
+    let rec loop () =
+      (try
+         Eio.Time.sleep clock interval
+       with exn ->
+         if is_cancelled exn then raise exn;
+         Printf.eprintf "[ZeroZombie] sleep error: %s\n%!" (Printexc.to_string exn));
+      (try
+         ignore (cleanup ~cleanup_fn)
+       with exn ->
+         if is_cancelled exn then raise exn;
+         Printf.eprintf "[ZeroZombie] cleanup error: %s\n%!" (Printexc.to_string exn));
+      loop ()
+    in
+    try loop () with exn ->
+      if is_cancelled exn then ()
+      else Printf.eprintf "[ZeroZombie] loop error: %s\n%!" (Printexc.to_string exn)
 end

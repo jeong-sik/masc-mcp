@@ -707,14 +707,33 @@ let handle_get_mcp ?legacy_messages_endpoint request reqd =
   (match !current_sw, !current_clock with
    | Some sw, Some clock ->
        Eio.Fiber.fork ~sw (fun () ->
-         while not !(info.stop) do
-           Eio.Time.sleep clock sse_ping_interval_s;
-           if info.closed then
-             stop_sse_session info.session_id
-           else if not !(info.stop) then
-             ignore (send_raw info ": ping\n\n")
-         done;
-         if info.closed then stop_sse_session info.session_id)
+         let is_cancelled exn =
+           match exn with
+           | Eio.Cancel.Cancelled _ -> true
+           | _ -> false
+         in
+         let rec loop () =
+           if not !(info.stop) then begin
+             (try
+                Eio.Time.sleep clock sse_ping_interval_s
+              with exn ->
+                if is_cancelled exn then raise exn;
+                Printf.eprintf "[SSE] ping sleep error: %s\n%!" (Printexc.to_string exn));
+             (try
+                if info.closed then
+                  stop_sse_session info.session_id
+                else if not !(info.stop) then
+                  ignore (send_raw info ": ping\n\n")
+              with exn ->
+                if is_cancelled exn then raise exn;
+                Printf.eprintf "[SSE] ping send error: %s\n%!" (Printexc.to_string exn);
+                stop_sse_session info.session_id);
+             loop ()
+           end
+         in
+         try loop () with exn ->
+           if is_cancelled exn then ()
+           else Printf.eprintf "[SSE] ping loop error: %s\n%!" (Printexc.to_string exn))
    | _ -> ());
 
   Printf.printf "📡 SSE connected: %s (last_event_id: %s)\n%!"

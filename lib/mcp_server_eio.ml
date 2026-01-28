@@ -1533,6 +1533,11 @@ Time: %s
       let hb_id = Heartbeat.start ~agent_name ~interval ~message in
       (* Start background fiber for actual heartbeat *)
       Eio.Fiber.fork ~sw (fun () ->
+        let is_cancelled exn =
+          match exn with
+          | Eio.Cancel.Cancelled _ -> true
+          | _ -> false
+        in
         let rec loop () =
           match Heartbeat.get hb_id with
           | Some hb when hb.Heartbeat.active ->
@@ -1540,14 +1545,22 @@ Time: %s
               (try
                  ignore (Room.broadcast config ~from_agent:agent_name ~content:message)
                with exn ->
+                 if is_cancelled exn then raise exn;
                  Printf.eprintf "[Heartbeat] broadcast error: %s\n%!"
                    (Printexc.to_string exn));
-              Eio.Time.sleep clock (float_of_int interval);
+              (try
+                 Eio.Time.sleep clock (float_of_int interval)
+               with exn ->
+                 if is_cancelled exn then raise exn;
+                 Printf.eprintf "[Heartbeat] sleep error: %s\n%!"
+                   (Printexc.to_string exn));
               loop ()
           | _ -> () (* Heartbeat stopped or not found *)
         in
         try loop () with exn ->
-          Printf.eprintf "[Heartbeat] loop error: %s\n%!" (Printexc.to_string exn)
+          if is_cancelled exn then ()
+          else
+            Printf.eprintf "[Heartbeat] loop error: %s\n%!" (Printexc.to_string exn)
       );
       (true, Printf.sprintf "✅ Heartbeat started: %s (interval: %ds, message: %s)" hb_id interval message)
 

@@ -324,27 +324,43 @@ let run ~sw ~net ~clock config routes =
   let backoff_s = ref initial_backoff_s in
   let reset_backoff () = backoff_s := initial_backoff_s in
   let bump_backoff () = backoff_s := min max_backoff_s (!backoff_s *. 2.0) in
+  let is_cancelled exn =
+    match exn with
+    | Eio.Cancel.Cancelled _ -> true
+    | _ -> false
+  in
   let rec accept_loop () =
-    (try
-       let flow, client_addr = Eio.Net.accept ~sw socket in
-       reset_backoff ();
-       Eio.Fiber.fork ~sw (fun () ->
-         try
-           Httpun_eio.Server.create_connection_handler
-             ~sw
-             ~request_handler
-             ~error_handler
-             client_addr
-             flow
-         with exn ->
-           Printf.eprintf "Connection error: %s\n%!" (Printexc.to_string exn))
-     with exn ->
-       let delay = !backoff_s in
-       Printf.eprintf "Accept error: %s (backoff %.2fs)\n%!"
-         (Printexc.to_string exn) delay;
-       Eio.Time.sleep clock delay;
-       bump_backoff ());
-    accept_loop ()
+    try
+      (try
+         let flow, client_addr = Eio.Net.accept ~sw socket in
+         reset_backoff ();
+         Eio.Fiber.fork ~sw (fun () ->
+           try
+             Httpun_eio.Server.create_connection_handler
+               ~sw
+               ~request_handler
+               ~error_handler
+               client_addr
+               flow
+           with exn ->
+             Printf.eprintf "Connection error: %s\n%!" (Printexc.to_string exn))
+       with exn ->
+         if is_cancelled exn then raise exn;
+         let delay = !backoff_s in
+         Printf.eprintf "Accept error: %s (backoff %.2fs)\n%!"
+           (Printexc.to_string exn) delay;
+         Eio.Time.sleep clock delay;
+         bump_backoff ());
+      accept_loop ()
+    with exn ->
+      if is_cancelled exn then ()
+      else
+        let delay = !backoff_s in
+        Printf.eprintf "Accept loop error: %s (backoff %.2fs)\n%!"
+          (Printexc.to_string exn) delay;
+        Eio.Time.sleep clock delay;
+        bump_backoff ();
+        accept_loop ()
   in
   accept_loop ()
 

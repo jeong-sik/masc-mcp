@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.1] - 2026-01-28
+
+### Fixed
+- `room_enter` 이동 시 이전 방에서 에이전트 중복 제거
+- `masc_room_enter`가 호출자 닉네임을 유지하도록 보정
+
+### Changed
+- `masc_status`에 클러스터명 표시 보강
+- 멀티룸 테스트에 에이전트 이동 케이스 추가
+
 ## [2.3.0] - 2026-01-28
 
 ### Changed

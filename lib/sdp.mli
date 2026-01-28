@@ -23,10 +23,22 @@
 type net_type =
   | IN  (** Internet *)
 
+(** Convert network type to string *)
+val string_of_net_type : net_type -> string
+
+(** Parse network type from string *)
+val net_type_of_string : string -> net_type
+
 (** Address type *)
 type addr_type =
   | IP4
   | IP6
+
+(** Convert address type to string *)
+val string_of_addr_type : addr_type -> string
+
+(** Parse address type from string *)
+val addr_type_of_string : string -> addr_type
 
 (** Media type *)
 type media_type =
@@ -296,14 +308,32 @@ val is_datachannel_session : session -> bool
 (** String representation of media type *)
 val string_of_media_type : media_type -> string
 
+(** Parse media type from string *)
+val media_type_of_string : string -> media_type
+
 (** String representation of transport *)
 val string_of_transport : transport -> string
+
+(** Parse transport from string *)
+val transport_of_string : string -> transport
 
 (** String representation of direction *)
 val string_of_direction : direction -> string
 
+(** Parse direction from string *)
+val direction_of_string : string -> direction
+
 (** String representation of setup role *)
 val string_of_setup : setup_role -> string
+
+(** Parse setup role from string *)
+val setup_of_string : string -> setup_role
+
+(** Split string at first occurrence of a delimiter *)
+val split_first : char -> string -> string * string option
+
+(** Split by spaces, removing empty segments *)
+val split_spaces : string -> string list
 
 (** Pretty-print session *)
 val pp_session : Format.formatter -> session -> unit

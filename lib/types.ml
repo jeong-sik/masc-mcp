@@ -631,7 +631,12 @@ let rate_limit_config_of_yojson json =
   try
     let per_minute = json |> member "per_minute" |> to_int_option |> Option.value ~default:10 in
     let burst_allowed = json |> member "burst_allowed" |> to_int_option |> Option.value ~default:5 in
-    let priority_agents = json |> member "priority_agents" |> to_list |> List.map to_string in
+    let priority_agents =
+      match json |> member "priority_agents" with
+      | `Null -> default_rate_limit.priority_agents
+      | `List items -> List.map to_string items
+      | _ -> failwith "priority_agents must be a list"
+    in
     let reader_multiplier = json |> member "reader_multiplier" |> to_float_option |> Option.value ~default:0.5 in
     let worker_multiplier = json |> member "worker_multiplier" |> to_float_option |> Option.value ~default:1.0 in
     let admin_multiplier = json |> member "admin_multiplier" |> to_float_option |> Option.value ~default:2.0 in

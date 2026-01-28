@@ -16,9 +16,9 @@
    checkpoint_types
    compression_dict
    config
-   credits_dashboard
    dashboard
    web_dashboard
+   credits_dashboard
    datachannel
    datachannel_eio
    dtls
@@ -85,8 +85,10 @@
    udp_socket_eio
    types
    validation
-   voice_bridge_eio
-   voice_stream
+  voice_bridge_eio
+  voice_bridge
+  voice_session_manager
+  voice_stream
    void
    webrtc_bindings
    webrtc_common

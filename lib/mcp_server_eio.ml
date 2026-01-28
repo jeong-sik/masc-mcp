@@ -658,8 +658,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
 
   (* Enforce tool authorization when enabled *)
   let auth_result =
-    if Auth.is_auth_enabled config then
-      match Auth.authorize_tool config ~agent_name ~token ~tool_name:name with
+    if Auth.is_auth_enabled config.base_path then
+      match Auth.authorize_tool config.base_path ~agent_name ~token ~tool_name:name with
       | Ok () -> Ok ()
       | Error err -> Error err
     else

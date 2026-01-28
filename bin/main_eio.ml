@@ -143,6 +143,25 @@ let http_status_of_auth_error = function
   | Types.Forbidden _ -> `Forbidden
   | _ -> `Internal_server_error
 
+(** Server state - initialized at startup *)
+let server_state : Mcp_server.server_state option ref = ref None
+
+(** CORS origin *)
+let get_origin (request : Httpun.Request.t) =
+  match Httpun.Headers.get request.headers "origin" with
+  | Some o -> o
+  | None -> "*"
+
+(** CORS headers *)
+let cors_headers origin = [
+  ("access-control-allow-origin", origin);
+  ("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
+  ("access-control-allow-headers",
+   "Content-Type, Accept, Origin, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id");
+  ("access-control-expose-headers", "Mcp-Session-Id, Mcp-Protocol-Version");
+  ("access-control-allow-credentials", "true");
+]
+
 let respond_auth_error request reqd err =
   let status = http_status_of_auth_error err in
   let origin = get_origin request in
@@ -240,21 +259,6 @@ let get_last_event_id (request : Httpun.Request.t) =
   | Some id -> (try Some (int_of_string id) with _ -> None)
   | None -> None
 
-(** CORS origin *)
-let get_origin (request : Httpun.Request.t) =
-  match Httpun.Headers.get request.headers "origin" with
-  | Some o -> o
-  | None -> "*"
-
-(** CORS headers *)
-let cors_headers origin = [
-  ("access-control-allow-origin", origin);
-  ("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
-  ("access-control-allow-headers",
-   "Content-Type, Accept, Origin, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id");
-  ("access-control-expose-headers", "Mcp-Session-Id, Mcp-Protocol-Version");
-  ("access-control-allow-credentials", "true");
-]
 
 (** Common MCP headers *)
 let mcp_headers session_id protocol_version = [
@@ -499,9 +503,6 @@ let cors_preflight_headers origin =
      "Content-Type, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id, Accept, Origin");
     ("access-control-expose-headers", "Mcp-Session-Id, Mcp-Protocol-Version");
   ]
-
-(** Server state - initialized at startup *)
-let server_state : Mcp_server.server_state option ref = ref None
 
 (** JSON-RPC error response helper *)
 let json_rpc_error code message =

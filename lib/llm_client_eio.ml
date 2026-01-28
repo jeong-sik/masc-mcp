@@ -322,9 +322,44 @@ let call_chain ~net ~goal ?chain_id ?(host=default_host) ?(port=default_port) ?(
     in
     read_all ();
 
-    (* Parse SSE response - extract last data line *)
+    (* Parse HTTP response - prefer SSE data lines, fallback to JSON body *)
     let response_str = Buffer.contents buf in
-    let lines = String.split_on_char '\n' response_str in
+    let body_start =
+      try
+        let idx = Str.search_forward (Str.regexp "\r\n\r\n") response_str 0 in
+        idx + 4
+      with Not_found -> 0
+    in
+    let body =
+      String.sub response_str body_start (String.length response_str - body_start)
+    in
+    let parse_chain_json json_str =
+      try
+        let json = Yojson.Safe.from_string json_str in
+        match json with
+        | `Assoc fields ->
+            (match List.assoc_opt "result" fields with
+             | Some (`Assoc result_fields) ->
+                 (match List.assoc_opt "content" result_fields with
+                  | Some (`List [`Assoc text_fields]) ->
+                      (match List.assoc_opt "text" text_fields with
+                       | Some (`String s) -> Ok s
+                       | _ -> Ok json_str)
+                  | Some (`String s) -> Ok s
+                  | _ -> Ok json_str)
+             | _ ->
+                 (match List.assoc_opt "error" fields with
+                  | Some (`Assoc err) ->
+                      let msg = match List.assoc_opt "message" err with
+                        | Some (`String s) -> s
+                        | _ -> "Unknown chain error"
+                      in
+                      Error (ServerError (500, msg))
+                  | _ -> Ok json_str))
+        | _ -> Ok json_str
+      with _ -> Ok json_str
+    in
+    let lines = String.split_on_char '\n' body in
     let data_lines = List.filter_map (fun line ->
       let line = String.trim line in
       if String.length line > 6 && String.sub line 0 6 = "data: " then
@@ -332,32 +367,11 @@ let call_chain ~net ~goal ?chain_id ?(host=default_host) ?(port=default_port) ?(
       else None
     ) lines in
     match List.rev data_lines with
-    | last_data :: _ ->
-        (try
-          let json = Yojson.Safe.from_string last_data in
-          match json with
-          | `Assoc fields ->
-              (match List.assoc_opt "result" fields with
-               | Some (`Assoc result_fields) ->
-                   (match List.assoc_opt "content" result_fields with
-                    | Some (`List [`Assoc text_fields]) ->
-                        (match List.assoc_opt "text" text_fields with
-                         | Some (`String s) -> Ok s
-                         | _ -> Ok last_data)
-                    | Some (`String s) -> Ok s
-                    | _ -> Ok last_data)
-               | _ ->
-                   (match List.assoc_opt "error" fields with
-                    | Some (`Assoc err) ->
-                        let msg = match List.assoc_opt "message" err with
-                          | Some (`String s) -> s
-                          | _ -> "Unknown chain error"
-                        in
-                        Error (ServerError (500, msg))
-                    | _ -> Ok last_data))
-          | _ -> Ok last_data
-        with _ -> Ok last_data)
-    | [] -> Error (ParseError "No data in response")
+    | last_data :: _ -> parse_chain_json last_data
+    | [] ->
+        let trimmed = String.trim body in
+        if trimmed = "" then Error (ParseError "No data in response")
+        else parse_chain_json trimmed
   with
   | Unix.Unix_error (err, _, _) ->
       Error (ConnectionError (Unix.error_message err))

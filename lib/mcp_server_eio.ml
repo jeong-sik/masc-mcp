@@ -769,6 +769,16 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id state ~name ~arguments =
       (false, Printf.sprintf "❌ Command failed: %s" (Printexc.to_string e))
   in
 
+  (* Delegate to extracted tool modules first *)
+  let swarm_ctx : Tool_swarm.context = {
+    config;
+    fs = state.Mcp_server.fs;
+    agent_name;
+  } in
+  match Tool_swarm.dispatch swarm_ctx ~name ~args:arguments with
+  | Some result -> result
+  | None ->
+
   match name with
   | "masc_set_room" ->
       let path = get_string "path" "" in
@@ -1199,10 +1209,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id state ~name ~arguments =
             (true, Room_walph_eio.walph_loop config ~net ~clock ~agent_name ~preset:"drain" ~max_iterations:10 ())
       end
 
-  | "masc_swarm_walph" ->
-      (* Swarm-level Walph control: manage all Walph instances in the room *)
-      let command = get_string "command" "STATUS" in
-      (true, Room_walph_eio.swarm_walph_control config ~from_agent:agent_name ~command ())
+  (* masc_swarm_walph delegated to Tool_swarm module *)
 
   | "masc_hat_wear" ->
       (* Change agent's hat (persona) *)
@@ -3129,92 +3136,7 @@ Expires: %s
         in
         (success, Yojson.Safe.pretty_to_string result)
 
-  (* Swarm / Level 4 Emergent Intelligence tools - Eio native *)
-  | "masc_swarm_init" ->
-      let behavior = get_string "behavior" "flocking" |> Swarm_eio.behavior_of_string in
-      let selection_pressure = get_float "selection_pressure" 0.3 in
-      let mutation_rate = get_float "mutation_rate" 0.1 in
-      let swarm_cfg = {
-        (Swarm_eio.default_config ()) with
-        behavior;
-        selection_pressure;
-        mutation_rate;
-      } in
-      (match state.Mcp_server.fs with
-       | Some fs ->
-           let swarm = Swarm_eio.create ~fs config ~swarm_config:swarm_cfg () in
-           (true, Printf.sprintf "✅ Swarm %s initialized with %s behavior" swarm.swarm_cfg.name (Swarm_eio.behavior_to_string behavior))
-       | None -> (false, "❌ Filesystem not available"))
-
-  | "masc_swarm_join" ->
-      let join_agent_name = get_string "agent_name" agent_name in
-      (match state.Mcp_server.fs with
-       | Some fs ->
-           (match Swarm_eio.join ~fs config ~agent_id:join_agent_name ~agent_name:join_agent_name with
-            | Some _ -> (true, Printf.sprintf "✅ Agent %s joined the swarm" join_agent_name)
-            | None -> (false, "❌ Failed to join swarm (full or nonexistent)"))
-       | None -> (false, "❌ Filesystem not available"))
-
-  | "masc_swarm_leave" ->
-      let leave_agent_name = get_string "agent_name" agent_name in
-      (match state.Mcp_server.fs with
-       | Some fs ->
-           (match Swarm_eio.leave ~fs config ~agent_id:leave_agent_name with
-            | Some _ -> (true, Printf.sprintf "✅ Agent %s left the swarm" leave_agent_name)
-            | None -> (false, "❌ Failed to leave swarm"))
-       | None -> (false, "❌ Filesystem not available"))
-
-  | "masc_swarm_status" ->
-      (match state.Mcp_server.fs with
-       | Some fs -> (true, Yojson.Safe.pretty_to_string (Swarm_eio.status ~fs config))
-       | None -> (false, "❌ Filesystem not available"))
-
-  | "masc_swarm_evolve" ->
-      (match state.Mcp_server.fs with
-       | Some fs ->
-           (match Swarm_eio.evolve ~fs config with
-            | Some s -> (true, Printf.sprintf "✅ Swarm evolved to generation %d" s.generation)
-            | None -> (false, "❌ Evolution failed"))
-       | None -> (false, "❌ Filesystem not available"))
-
-  | "masc_swarm_propose" ->
-      let description = get_string "description" "" in
-      let threshold = match arguments |> member "threshold" with `Float f -> Some f | _ -> None in
-      (match state.Mcp_server.fs with
-       | Some fs ->
-           (match Swarm_eio.propose ~fs config ~description ~proposed_by:agent_name ?threshold () with
-            | Some p -> (true, Printf.sprintf "✅ Proposal %s created" p.proposal_id)
-            | None -> (false, "❌ Failed to create proposal"))
-       | None -> (false, "❌ Filesystem not available"))
-
-  | "masc_swarm_vote" ->
-      let proposal_id = get_string "proposal_id" "" in
-      let vote_for = get_bool "vote_for" true in
-      (match state.Mcp_server.fs with
-       | Some fs ->
-           (match Swarm_eio.vote ~fs config ~proposal_id ~agent_id:agent_name ~vote_for with
-            | Some p -> (true, Printf.sprintf "✅ Vote recorded. Status: %s" (Swarm_eio.status_to_string p.status))
-            | None -> (false, "❌ Failed to record vote"))
-       | None -> (false, "❌ Filesystem not available"))
-
-  | "masc_swarm_deposit" ->
-      let path_id = get_string "path_id" "" in
-      let strength = get_float "strength" 0.2 in
-      (match state.Mcp_server.fs with
-       | Some fs ->
-           (match Swarm_eio.deposit_pheromone ~fs config ~path_id ~agent_id:agent_name ~strength with
-            | Some _ -> (true, Printf.sprintf "✅ Pheromone deposited on path: %s" path_id)
-            | None -> (false, "❌ Failed to deposit pheromone"))
-       | None -> (false, "❌ Filesystem not available"))
-
-  | "masc_swarm_trails" ->
-      let limit = get_int "limit" 5 in
-      (match state.Mcp_server.fs with
-       | Some fs ->
-           let trails = Swarm_eio.get_strongest_trails ~fs config ~limit in
-           let json = `List (List.map Swarm_eio.pheromone_to_json trails) in
-           (true, Yojson.Safe.pretty_to_string json)
-       | None -> (false, "❌ Filesystem not available"))
+  (* Swarm tools delegated to Tool_swarm module *)
 
   | _ ->
       (false, Printf.sprintf "❌ Unknown tool: %s" name)

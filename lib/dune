@@ -80,6 +80,7 @@
    telemetry_eio
    tempo
    tools
+   tool_swarm
    transport
    transport_grpc_next
    udp_socket_eio

@@ -95,3 +95,6 @@ module Webrtc_bindings = Webrtc_bindings
 module Webrtc_common = Webrtc_common
 module Webrtc_datachannel = Webrtc_datachannel
 module Udp_socket_eio = Udp_socket_eio
+
+(* Tool handler modules (extracted for testability) *)
+module Tool_swarm = Tool_swarm

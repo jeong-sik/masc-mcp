@@ -144,3 +144,58 @@ val make_response : id:Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
 
 (** Make error JSON-RPC response *)
 val make_error : ?data:Yojson.Safe.t -> id:Yojson.Safe.t -> int -> string -> Yojson.Safe.t
+
+(** {1 Protocol Detection} *)
+
+(** Transport mode for stdio transport *)
+type transport_mode = Framed | LineDelimited
+
+(** Detect transport mode from first line of input.
+    If line starts with "Content-Length" (case-insensitive), returns Framed.
+    Otherwise returns LineDelimited. *)
+val detect_mode : string -> transport_mode
+
+(** {1 Governance} *)
+
+(** Governance configuration *)
+type governance_config = {
+  level: string;
+  audit_enabled: bool;
+  anomaly_detection: bool;
+}
+
+(** Get default governance config for a given level.
+    - "development" (default): audit=false, anomaly=false
+    - "production": audit=true, anomaly=false
+    - "enterprise"/"paranoid": audit=true, anomaly=true *)
+val governance_defaults : string -> governance_config
+
+(** {1 Audit Events} *)
+
+(** Audit event record *)
+type audit_event = {
+  timestamp: float;
+  agent: string;
+  event_type: string;
+  success: bool;
+  detail: string option;
+}
+
+(** Serialize audit event to JSON *)
+val audit_event_to_json : audit_event -> Yojson.Safe.t
+
+(** {1 MCP Sessions} *)
+
+(** MCP session record for HTTP session persistence *)
+type mcp_session_record = {
+  id: string;
+  agent_name: string option;
+  created_at: float;
+  last_seen: float;
+}
+
+(** Serialize MCP session to JSON *)
+val mcp_session_to_json : mcp_session_record -> Yojson.Safe.t
+
+(** Deserialize MCP session from JSON *)
+val mcp_session_of_json : Yojson.Safe.t -> mcp_session_record option

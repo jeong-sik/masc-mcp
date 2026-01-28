@@ -306,6 +306,200 @@ let test_jsonrpc_request_of_yojson_minimal () =
   | Error e -> fail ("parse error: " ^ e)
 
 (* ============================================================
+   detect_mode Tests (Mcp_server_eio-specific)
+   ============================================================ *)
+
+let test_detect_mode_framed () =
+  let result = Mcp_server_eio.detect_mode "Content-Length: 123" in
+  check bool "framed mode" true (result = Mcp_server_eio.Framed)
+
+let test_detect_mode_framed_lowercase () =
+  let result = Mcp_server_eio.detect_mode "content-length: 456" in
+  check bool "framed mode lowercase" true (result = Mcp_server_eio.Framed)
+
+let test_detect_mode_framed_mixed_case () =
+  let result = Mcp_server_eio.detect_mode "Content-LENGTH: 789" in
+  check bool "framed mode mixed" true (result = Mcp_server_eio.Framed)
+
+let test_detect_mode_line_delimited () =
+  let result = Mcp_server_eio.detect_mode "{\"jsonrpc\":\"2.0\"}" in
+  check bool "line delimited" true (result = Mcp_server_eio.LineDelimited)
+
+let test_detect_mode_empty () =
+  let result = Mcp_server_eio.detect_mode "" in
+  check bool "empty is line delimited" true (result = Mcp_server_eio.LineDelimited)
+
+let test_detect_mode_partial_content () =
+  let result = Mcp_server_eio.detect_mode "Content" in
+  check bool "partial is line delimited" true (result = Mcp_server_eio.LineDelimited)
+
+(* ============================================================
+   governance_defaults Tests
+   ============================================================ *)
+
+let test_governance_defaults_development () =
+  let g = Mcp_server_eio.governance_defaults "development" in
+  check string "level" "development" g.level;
+  check bool "audit disabled" false g.audit_enabled;
+  check bool "anomaly disabled" false g.anomaly_detection
+
+let test_governance_defaults_production () =
+  let g = Mcp_server_eio.governance_defaults "production" in
+  check string "level" "production" g.level;
+  check bool "audit enabled" true g.audit_enabled;
+  check bool "anomaly disabled" false g.anomaly_detection
+
+let test_governance_defaults_enterprise () =
+  let g = Mcp_server_eio.governance_defaults "enterprise" in
+  check string "level" "enterprise" g.level;
+  check bool "audit enabled" true g.audit_enabled;
+  check bool "anomaly enabled" true g.anomaly_detection
+
+let test_governance_defaults_paranoid () =
+  let g = Mcp_server_eio.governance_defaults "paranoid" in
+  check string "level" "paranoid" g.level;
+  check bool "audit enabled" true g.audit_enabled;
+  check bool "anomaly enabled" true g.anomaly_detection
+
+let test_governance_defaults_unknown () =
+  let g = Mcp_server_eio.governance_defaults "custom" in
+  check string "level lowercase" "custom" g.level;
+  check bool "audit disabled" false g.audit_enabled;
+  check bool "anomaly disabled" false g.anomaly_detection
+
+let test_governance_defaults_mixed_case () =
+  let g = Mcp_server_eio.governance_defaults "PRODUCTION" in
+  check string "level normalized" "production" g.level;
+  check bool "audit enabled" true g.audit_enabled
+
+(* ============================================================
+   audit_event_to_json Tests
+   ============================================================ *)
+
+let test_audit_event_to_json_full () =
+  let event : Mcp_server_eio.audit_event = {
+    timestamp = 1706400000.0;
+    agent = "claude-test";
+    event_type = "tool_call";
+    success = true;
+    detail = Some "masc_status";
+  } in
+  let json = Mcp_server_eio.audit_event_to_json event in
+  let open Yojson.Safe.Util in
+  check (float 0.1) "timestamp" 1706400000.0 (json |> member "timestamp" |> to_float);
+  check string "agent" "claude-test" (json |> member "agent" |> to_string);
+  check string "event_type" "tool_call" (json |> member "event_type" |> to_string);
+  check bool "success" true (json |> member "success" |> to_bool);
+  check string "detail" "masc_status" (json |> member "detail" |> to_string)
+
+let test_audit_event_to_json_no_detail () =
+  let event : Mcp_server_eio.audit_event = {
+    timestamp = 1706400000.0;
+    agent = "gemini";
+    event_type = "join";
+    success = false;
+    detail = None;
+  } in
+  let json = Mcp_server_eio.audit_event_to_json event in
+  let open Yojson.Safe.Util in
+  check bool "success false" false (json |> member "success" |> to_bool);
+  check bool "detail null" true ((json |> member "detail") = `Null)
+
+(* ============================================================
+   mcp_session_to_json Tests
+   ============================================================ *)
+
+let test_mcp_session_to_json_full () =
+  let session : Mcp_server_eio.mcp_session_record = {
+    id = "sess-123";
+    agent_name = Some "claude";
+    created_at = 1706400000.0;
+    last_seen = 1706403600.0;
+  } in
+  let json = Mcp_server_eio.mcp_session_to_json session in
+  let open Yojson.Safe.Util in
+  check string "id" "sess-123" (json |> member "id" |> to_string);
+  check string "agent_name" "claude" (json |> member "agent_name" |> to_string);
+  check (float 0.1) "created_at" 1706400000.0 (json |> member "created_at" |> to_float);
+  check (float 0.1) "last_seen" 1706403600.0 (json |> member "last_seen" |> to_float)
+
+let test_mcp_session_to_json_no_agent () =
+  let session : Mcp_server_eio.mcp_session_record = {
+    id = "sess-456";
+    agent_name = None;
+    created_at = 1706400000.0;
+    last_seen = 1706400000.0;
+  } in
+  let json = Mcp_server_eio.mcp_session_to_json session in
+  let open Yojson.Safe.Util in
+  check string "id" "sess-456" (json |> member "id" |> to_string);
+  check bool "agent_name null" true ((json |> member "agent_name") = `Null)
+
+(* ============================================================
+   mcp_session_of_json Tests
+   ============================================================ *)
+
+let test_mcp_session_of_json_valid () =
+  let json = `Assoc [
+    ("id", `String "sess-789");
+    ("agent_name", `String "codex");
+    ("created_at", `Float 1706400000.0);
+    ("last_seen", `Float 1706407200.0);
+  ] in
+  match Mcp_server_eio.mcp_session_of_json json with
+  | Some s ->
+      check string "id" "sess-789" s.id;
+      check (option string) "agent_name" (Some "codex") s.agent_name;
+      check (float 0.1) "created_at" 1706400000.0 s.created_at;
+      check (float 0.1) "last_seen" 1706407200.0 s.last_seen
+  | None -> fail "expected Some"
+
+let test_mcp_session_of_json_null_agent () =
+  let json = `Assoc [
+    ("id", `String "sess-abc");
+    ("agent_name", `Null);
+    ("created_at", `Float 1706400000.0);
+    ("last_seen", `Float 1706400000.0);
+  ] in
+  match Mcp_server_eio.mcp_session_of_json json with
+  | Some s ->
+      check string "id" "sess-abc" s.id;
+      check (option string) "agent_name" None s.agent_name
+  | None -> fail "expected Some"
+
+let test_mcp_session_of_json_invalid_missing_id () =
+  let json = `Assoc [
+    ("agent_name", `String "test");
+    ("created_at", `Float 1706400000.0);
+    ("last_seen", `Float 1706400000.0);
+  ] in
+  match Mcp_server_eio.mcp_session_of_json json with
+  | None -> check bool "invalid returns None" true true
+  | Some _ -> fail "expected None"
+
+let test_mcp_session_of_json_not_assoc () =
+  let json = `String "not an object" in
+  match Mcp_server_eio.mcp_session_of_json json with
+  | None -> check bool "non-assoc returns None" true true
+  | Some _ -> fail "expected None"
+
+let test_mcp_session_roundtrip () =
+  let session : Mcp_server_eio.mcp_session_record = {
+    id = "roundtrip-test";
+    agent_name = Some "test-agent";
+    created_at = 1706412345.678;
+    last_seen = 1706498765.432;
+  } in
+  let json = Mcp_server_eio.mcp_session_to_json session in
+  match Mcp_server_eio.mcp_session_of_json json with
+  | Some decoded ->
+      check string "id roundtrip" session.id decoded.id;
+      check (option string) "agent roundtrip" session.agent_name decoded.agent_name;
+      check (float 0.001) "created roundtrip" session.created_at decoded.created_at;
+      check (float 0.001) "last_seen roundtrip" session.last_seen decoded.last_seen
+  | None -> fail "roundtrip failed"
+
+(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -377,5 +571,36 @@ let () =
     "jsonrpc_request_of_yojson", [
       test_case "valid" `Quick test_jsonrpc_request_of_yojson_valid;
       test_case "minimal" `Quick test_jsonrpc_request_of_yojson_minimal;
+    ];
+    "detect_mode", [
+      test_case "framed" `Quick test_detect_mode_framed;
+      test_case "framed lowercase" `Quick test_detect_mode_framed_lowercase;
+      test_case "framed mixed case" `Quick test_detect_mode_framed_mixed_case;
+      test_case "line delimited" `Quick test_detect_mode_line_delimited;
+      test_case "empty" `Quick test_detect_mode_empty;
+      test_case "partial content" `Quick test_detect_mode_partial_content;
+    ];
+    "governance_defaults", [
+      test_case "development" `Quick test_governance_defaults_development;
+      test_case "production" `Quick test_governance_defaults_production;
+      test_case "enterprise" `Quick test_governance_defaults_enterprise;
+      test_case "paranoid" `Quick test_governance_defaults_paranoid;
+      test_case "unknown" `Quick test_governance_defaults_unknown;
+      test_case "mixed case" `Quick test_governance_defaults_mixed_case;
+    ];
+    "audit_event_to_json", [
+      test_case "full" `Quick test_audit_event_to_json_full;
+      test_case "no detail" `Quick test_audit_event_to_json_no_detail;
+    ];
+    "mcp_session_to_json", [
+      test_case "full" `Quick test_mcp_session_to_json_full;
+      test_case "no agent" `Quick test_mcp_session_to_json_no_agent;
+    ];
+    "mcp_session_of_json", [
+      test_case "valid" `Quick test_mcp_session_of_json_valid;
+      test_case "null agent" `Quick test_mcp_session_of_json_null_agent;
+      test_case "missing id" `Quick test_mcp_session_of_json_invalid_missing_id;
+      test_case "not assoc" `Quick test_mcp_session_of_json_not_assoc;
+      test_case "roundtrip" `Quick test_mcp_session_roundtrip;
     ];
   ]

@@ -29,6 +29,7 @@
    graphql_api
    handover_eio
    hat
+   heartbeat
    hebbian_eio
    http_server_eio
    institution_eio
@@ -80,6 +81,32 @@
    telemetry_eio
    tempo
    tools
+   tool_swarm
+   tool_plan
+   tool_run
+   tool_cache
+   tool_tempo
+   tool_mitosis
+   tool_portal
+   tool_worktree
+   tool_vote
+   tool_a2a
+   tool_handover
+   tool_relay
+   tool_heartbeat
+   tool_encryption
+   tool_auth
+   tool_hat
+   tool_audit
+   tool_rate_limit
+   tool_cost
+   tool_walph
+   tool_agent
+   tool_lock
+   tool_task
+   tool_room
+   tool_control
+   tool_misc
    transport
    transport_grpc_next
    udp_socket_eio

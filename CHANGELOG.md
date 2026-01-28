@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2026-01-28
+
+### Changed
+- **Major Refactoring**: Extracted 124 handlers from God Function into 26 Tool_* modules
+- `mcp_server_eio.ml` reduced from ~3,400 to ~1,580 lines (-54%)
+- Dispatch chain pattern for clean tool routing
+
+### Added
+- 26 new Tool_* modules:
+  - `Tool_task`: Core task operations (add, claim, done, transition)
+  - `Tool_room`: Room management (status, init, reset)
+  - `Tool_control`: Flow control (pause, resume, switch_mode)
+  - `Tool_agent`: Agent operations (select, fitness, collaboration)
+  - `Tool_a2a`: Agent-to-agent communication
+  - `Tool_walph`: WALPH loop integration
+  - And 20 more specialized modules
+- 21 new test files for Tool_* coverage
+- `test_dispatch_chain_evidence.ml` for routing verification
+
+### Technical
+- Dispatch chain returns `result option` (`None` = try next module)
+- 21 stateful handlers remain in God Function (require state/registry/sw)
+- All 189 tests pass
+
 ## [2.2.1] - 2026-01-19
 
 ### Added

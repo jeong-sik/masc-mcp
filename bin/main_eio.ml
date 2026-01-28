@@ -813,11 +813,9 @@ let make_routes () =
   |> Http.Router.get "/dashboard" (fun _req reqd ->
        Http.Response.html (Masc_mcp.Web_dashboard.html ()) reqd)
   |> Http.Router.get "/dashboard/credits" (fun _req reqd ->
-       Http.Response.html
-         "<html><body><h1>Credits dashboard disabled</h1></body></html>"
-         reqd)
+       Http.Response.html (Masc_mcp.Credits_dashboard.html ()) reqd)
   |> Http.Router.get "/api/v1/credits" (fun _req reqd ->
-       Http.Response.json {|{"status":"disabled"}|} reqd)
+       Http.Response.json (Masc_mcp.Credits_dashboard.json_api ()) reqd)
   |> Http.Router.get "/" (fun _req reqd -> Http.Response.text "MASC MCP Server" reqd)
   |> Http.Router.get "/static/css/middleware.css"
        (serve_playground_asset "static/css/middleware.css")

@@ -14,6 +14,8 @@
     - Tool implementations are direct-style Eio
 *)
 
+[@@@warning "-32"]  (* Suppress unused value warnings for re-exported helpers *)
+
 (** {1 Types} *)
 
 (** Server state - same as Mcp_server.server_state for compatibility *)
@@ -21,6 +23,26 @@ type server_state = Mcp_server.server_state
 
 (** JSON-RPC request (re-exported for convenience) *)
 type jsonrpc_request = Mcp_server.jsonrpc_request
+
+(** {1 JSON-RPC Helpers (re-exported)} *)
+
+val jsonrpc_request_of_yojson : Yojson.Safe.t -> (jsonrpc_request, string) result
+val is_jsonrpc_v2 : Yojson.Safe.t -> bool
+val is_jsonrpc_response : Yojson.Safe.t -> bool
+val is_notification : jsonrpc_request -> bool
+val get_id : jsonrpc_request -> Yojson.Safe.t
+val is_valid_request_id : Yojson.Safe.t -> bool
+val make_response : id:Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
+val make_error : ?data:Yojson.Safe.t -> id:Yojson.Safe.t -> int -> string -> Yojson.Safe.t
+val protocol_version_from_params : Yojson.Safe.t option -> string
+val normalize_protocol_version : string -> string
+val validate_initialize_params : Yojson.Safe.t option -> (unit, string) result
+
+(** JSON helper: field existence check (re-exported) *)
+val has_field : string -> Yojson.Safe.t -> bool
+
+(** JSON helper: get field as Yojson (re-exported) *)
+val get_field : string -> Yojson.Safe.t -> Yojson.Safe.t option
 
 (** {1 Network Context} *)
 

@@ -137,7 +137,8 @@ let () =
   let config = make_test_room () in
   let _ = Room.init config ~agent_name:(Some "evidence-agent") in
   let net = Eio.Stdenv.net env in
-  let ctx : _ Tool_walph.context = { config; agent_name = "evidence-agent"; net } in
+  let clock = Eio.Stdenv.clock env in
+  let ctx : _ Tool_walph.context = { config; agent_name = "evidence-agent"; net; clock } in
   let tool_name = "masc_walph_control" in
   let json_input = `Assoc [("command", `String "STATUS")] in
   match Tool_walph.dispatch ctx ~name:tool_name ~args:json_input with

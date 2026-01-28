@@ -756,7 +756,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id state ~name ~arguments =
   let simple_ctx_audit : Tool_audit.context = { config } in
   let simple_ctx_rate_limit : Tool_rate_limit.context = { config; agent_name; registry } in
   let simple_ctx_cost : Tool_cost.context = { agent_name } in
-  let simple_ctx_walph : _ Tool_walph.context = { config; agent_name; net = get_net () } in
+  let simple_ctx_walph : _ Tool_walph.context = { config; agent_name; net = get_net (); clock } in
   let simple_ctx_agent : Tool_agent.context = { config; agent_name } in
   let simple_ctx_lock : Tool_lock.context = { config; agent_name } in
   let simple_ctx_task : Tool_task.context = { config; agent_name } in

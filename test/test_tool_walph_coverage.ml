@@ -21,7 +21,8 @@ let () = test "dispatch_unknown_tool" (fun () ->
   Unix.mkdir tmp 0o755;
   let config = Room.default_config tmp in
   let net = Eio.Stdenv.net env in
-  let ctx = { Tool_walph.config; agent_name = "test-agent"; net } in
+  let clock = Eio.Stdenv.clock env in
+  let ctx = { Tool_walph.config; agent_name = "test-agent"; net; clock } in
   let args = `Assoc [] in
   assert (Tool_walph.dispatch ctx ~name:"unknown_tool" ~args = None)
 )
@@ -35,7 +36,8 @@ let () = test "dispatch_walph_control" (fun () ->
   let config = Room.default_config tmp in
   let _ = Room.init config ~agent_name:None in
   let net = Eio.Stdenv.net env in
-  let ctx = { Tool_walph.config; agent_name = "test-agent"; net } in
+  let clock = Eio.Stdenv.clock env in
+  let ctx = { Tool_walph.config; agent_name = "test-agent"; net; clock } in
   let args = `Assoc [("command", `String "STATUS")] in
   match Tool_walph.dispatch ctx ~name:"masc_walph_control" ~args with
   | Some (success, _result) -> assert success
@@ -51,7 +53,8 @@ let () = test "walph_natural_stop" (fun () ->
   let config = Room.default_config tmp in
   let _ = Room.init config ~agent_name:None in
   let net = Eio.Stdenv.net env in
-  let ctx = { Tool_walph.config; agent_name = "test-agent"; net } in
+  let clock = Eio.Stdenv.clock env in
+  let ctx = { Tool_walph.config; agent_name = "test-agent"; net; clock } in
   let args = `Assoc [("message", `String "stop the loop")] in
   let (success, _result) = Tool_walph.handle_walph_natural ctx args in
   assert success
@@ -66,7 +69,8 @@ let () = test "walph_natural_pause" (fun () ->
   let config = Room.default_config tmp in
   let _ = Room.init config ~agent_name:None in
   let net = Eio.Stdenv.net env in
-  let ctx = { Tool_walph.config; agent_name = "test-agent"; net } in
+  let clock = Eio.Stdenv.clock env in
+  let ctx = { Tool_walph.config; agent_name = "test-agent"; net; clock } in
   let args = `Assoc [("message", `String "잠깐 일시정지")] in
   let (success, _result) = Tool_walph.handle_walph_natural ctx args in
   assert success
@@ -81,7 +85,8 @@ let () = test "walph_natural_resume" (fun () ->
   let config = Room.default_config tmp in
   let _ = Room.init config ~agent_name:None in
   let net = Eio.Stdenv.net env in
-  let ctx = { Tool_walph.config; agent_name = "test-agent"; net } in
+  let clock = Eio.Stdenv.clock env in
+  let ctx = { Tool_walph.config; agent_name = "test-agent"; net; clock } in
   let args = `Assoc [("message", `String "계속 진행해")] in
   let (success, _result) = Tool_walph.handle_walph_natural ctx args in
   assert success
@@ -96,7 +101,8 @@ let () = test "walph_natural_status" (fun () ->
   let config = Room.default_config tmp in
   let _ = Room.init config ~agent_name:None in
   let net = Eio.Stdenv.net env in
-  let ctx = { Tool_walph.config; agent_name = "test-agent"; net } in
+  let clock = Eio.Stdenv.clock env in
+  let ctx = { Tool_walph.config; agent_name = "test-agent"; net; clock } in
   let args = `Assoc [("message", `String "뭐해? 상태 알려줘")] in
   let (success, _result) = Tool_walph.handle_walph_natural ctx args in
   assert success
@@ -110,7 +116,8 @@ let () = test "walph_natural_ignore" (fun () ->
   Unix.mkdir tmp 0o755;
   let config = Room.default_config tmp in
   let net = Eio.Stdenv.net env in
-  let ctx = { Tool_walph.config; agent_name = "test-agent"; net } in
+  let clock = Eio.Stdenv.clock env in
+  let ctx = { Tool_walph.config; agent_name = "test-agent"; net; clock } in
   let args = `Assoc [("message", `String "random gibberish xyz")] in
   let (success, result) = Tool_walph.handle_walph_natural ctx args in
   assert success;
@@ -125,7 +132,8 @@ let () = test "walph_natural_empty" (fun () ->
   Unix.mkdir tmp 0o755;
   let config = Room.default_config tmp in
   let net = Eio.Stdenv.net env in
-  let ctx = { Tool_walph.config; agent_name = "test-agent"; net } in
+  let clock = Eio.Stdenv.clock env in
+  let ctx = { Tool_walph.config; agent_name = "test-agent"; net; clock } in
   let args = `Assoc [("message", `String "")] in
   let (success, result) = Tool_walph.handle_walph_natural ctx args in
   assert success;

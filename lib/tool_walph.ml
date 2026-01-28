@@ -1,9 +1,10 @@
 (** Tool_walph - Walph loop control handlers *)
 
-type 'a context = {
+type ('a, 'b) context = {
   config: Room.config;
   agent_name: string;
   net: 'a Eio.Net.t;
+  clock: 'b Eio.Time.clock;
 }
 
 (* Helper functions *)
@@ -36,7 +37,7 @@ let handle_walph_loop ctx args =
   let preset = get_string args "preset" "drain" in
   let max_iterations = get_int args "max_iterations" 10 in
   let target = get_string_opt args "target" in
-  (true, Room_walph_eio.walph_loop ctx.config ~net:ctx.net ~agent_name:ctx.agent_name ~preset ~max_iterations ?target ())
+  (true, Room_walph_eio.walph_loop ctx.config ~net:ctx.net ~clock:ctx.clock ~agent_name:ctx.agent_name ~preset ~max_iterations ?target ())
 
 (* Handle masc_walph_control *)
 let handle_walph_control ctx args =
@@ -87,13 +88,13 @@ let handle_walph_natural ctx args =
     | `Status ->
         (true, Room_walph_eio.walph_control ctx.config ~from_agent:ctx.agent_name ~command:"STATUS" ~args:"" ())
     | `Start_coverage ->
-        (true, Room_walph_eio.walph_loop ctx.config ~net:ctx.net ~agent_name:ctx.agent_name ~preset:"coverage" ~max_iterations:10 ())
+        (true, Room_walph_eio.walph_loop ctx.config ~net:ctx.net ~clock:ctx.clock ~agent_name:ctx.agent_name ~preset:"coverage" ~max_iterations:10 ())
     | `Start_refactor ->
-        (true, Room_walph_eio.walph_loop ctx.config ~net:ctx.net ~agent_name:ctx.agent_name ~preset:"refactor" ~max_iterations:10 ())
+        (true, Room_walph_eio.walph_loop ctx.config ~net:ctx.net ~clock:ctx.clock ~agent_name:ctx.agent_name ~preset:"refactor" ~max_iterations:10 ())
     | `Start_docs ->
-        (true, Room_walph_eio.walph_loop ctx.config ~net:ctx.net ~agent_name:ctx.agent_name ~preset:"docs" ~max_iterations:10 ())
+        (true, Room_walph_eio.walph_loop ctx.config ~net:ctx.net ~clock:ctx.clock ~agent_name:ctx.agent_name ~preset:"docs" ~max_iterations:10 ())
     | `Start_drain ->
-        (true, Room_walph_eio.walph_loop ctx.config ~net:ctx.net ~agent_name:ctx.agent_name ~preset:"drain" ~max_iterations:10 ())
+        (true, Room_walph_eio.walph_loop ctx.config ~net:ctx.net ~clock:ctx.clock ~agent_name:ctx.agent_name ~preset:"drain" ~max_iterations:10 ())
   end
 
 (* Dispatch handler *)

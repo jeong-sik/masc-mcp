@@ -570,7 +570,7 @@ let test_append_archive_tasks () =
 (* ============================================================ *)
 
 let () =
-  Random.self_init ();
+  Random.init 42;
   Alcotest.run "Room Coverage" [
     (* === Batch Operations === *)
     "batch", [

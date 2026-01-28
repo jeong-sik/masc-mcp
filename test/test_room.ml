@@ -996,7 +996,7 @@ let test_xss_in_agent_name () =
   )
 
 let () =
-  Random.self_init ();
+  Random.init 42;
   Alcotest.run "Room" [
     (* === Happy Path Tests === *)
     "init", [

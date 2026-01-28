@@ -215,7 +215,7 @@ let test_safe_path_patterns () =
    ======================================== *)
 
 let () =
-  Random.self_init ();
+  Random.init 42;
 
   Printf.printf "\n=== Level 2 MAGI Recommendations Tests ===\n\n";
 

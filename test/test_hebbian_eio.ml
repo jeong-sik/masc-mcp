@@ -5,7 +5,7 @@
 
 open Masc_mcp
 
-let () = Random.self_init ()
+let () = Random.init 42
 
 let rec rm_rf path =
   if Sys.file_exists path then

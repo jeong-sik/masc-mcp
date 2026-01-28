@@ -4,7 +4,7 @@ module Checkpoint_fs = Masc_mcp.Checkpoint_fs
 open Masc_mcp.Checkpoint_types
 open Alcotest
 
-let () = Random.self_init ()
+let () = Random.init 42
 
 let starts_with ~prefix s =
   let plen = String.length prefix in
@@ -131,4 +131,3 @@ let () =
       test_case "auto reject timeout" `Quick test_auto_reject_timeout;
     ];
   ]
-

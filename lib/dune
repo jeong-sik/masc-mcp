@@ -16,6 +16,7 @@
    checkpoint_types
    compression_dict
    config
+   credits_dashboard
    dashboard
    web_dashboard
    datachannel

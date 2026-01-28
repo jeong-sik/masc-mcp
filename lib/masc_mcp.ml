@@ -87,3 +87,10 @@ module Void = Void
 module Webrtc_bindings = Webrtc_bindings
 module Webrtc_common = Webrtc_common
 module Udp_socket_eio = Udp_socket_eio
+
+(* Additional modules for coverage testing *)
+module Rate_limit = Rate_limit
+module Credits_dashboard = Credits_dashboard
+module Auto_responder = Auto_responder
+module Error = Error
+module Prometheus = Prometheus

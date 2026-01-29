@@ -16,6 +16,16 @@ OCaml로 만든 개인용 MCP 서버입니다.
 curl http://127.0.0.1:8935/health
 ```
 
+## 검증
+
+```bash
+# 최소 검증
+make test
+
+# 포맷 + 테스트 (CI 동일)
+make ci
+```
+
 ## MCP 설정
 
 `~/.mcp.json` 예시:

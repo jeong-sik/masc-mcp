@@ -724,6 +724,14 @@ let stop_sse_session session_id =
       Sse.unregister_if_current info.session_id info.client_id;
       Printf.printf "📴 SSE disconnected: %s\n%!" info.session_id
 
+(** Close all SSE connections gracefully - for shutdown *)
+let close_all_sse_connections () =
+  let sessions = Hashtbl.fold (fun k _ acc -> k :: acc) sse_conn_by_session [] in
+  List.iter (fun session_id ->
+    stop_sse_session session_id
+  ) sessions;
+  Printf.eprintf "🚀 MASC MCP: Closed %d SSE connections\n%!" (List.length sessions)
+
 let send_raw info data =
   if info.closed || !(info.stop) || Httpun.Body.Writer.is_closed info.writer then
     (close_sse_conn info; false)
@@ -1257,8 +1265,14 @@ let run_cmd port base_path =
       Sse.broadcast (Yojson.Safe.from_string shutdown_data);
       Printf.eprintf "🚀 MASC MCP: Sent shutdown notification to %d SSE clients\n%!" (Sse.client_count ());
 
-      (* Give clients 500ms to receive the notification before killing connections *)
-      Unix.sleepf 0.5;
+      (* Give clients 200ms to receive the notification *)
+      Unix.sleepf 0.2;
+
+      (* Gracefully close all SSE connections before Switch.fail *)
+      close_all_sse_connections ();
+
+      (* Give connections 200ms to complete close handshake *)
+      Unix.sleepf 0.2;
 
       match !switch_ref with
       | Some sw -> Eio.Switch.fail sw Shutdown

@@ -53,7 +53,7 @@ let build_request ~model ~prompt =
     "name": "%s",
     "arguments": {
       "prompt": %s,
-      "response_format": "compact"
+      "response_format": "verbose"
     }
   }
 }|} model_str (Yojson.Safe.to_string (`String prompt))

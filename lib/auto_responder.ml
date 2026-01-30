@@ -162,7 +162,7 @@ let call_llm_mcp_sync ~agent_type ~prompt =
     |> String.split_on_char '\n' |> String.concat {|\n|}
   in
   let json_body = Printf.sprintf
-    {|{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"%s","arguments":{"prompt":"%s","response_format":"compact"}}}|}
+    {|{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"%s","arguments":{"prompt":"%s","response_format":"verbose"}}}|}
     tool_name escaped_prompt
   in
   (* Use temp file with unique name to avoid race conditions between threads *)
@@ -278,7 +278,7 @@ set -e
 
 # Step 1: Call LLM
 RESPONSE=$(curl -s '%s' -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"%s","arguments":{"prompt":"%s","response_format":"compact"}}}' \
+  -d '{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"%s","arguments":{"prompt":"%s","response_format":"verbose"}}}' \
   | jq -r '.result.content[0].text // "no response"' | head -c 300)
 
 echo "[LLM] Response: $RESPONSE" >> /tmp/auto_debug.log

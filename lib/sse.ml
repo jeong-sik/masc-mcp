@@ -90,10 +90,10 @@ let broadcast json =
   buffer_event current_event_id event;
   Hashtbl.iter (fun session_id client ->
     if current_event_id > client.last_event_id then begin
-      try
-        client.push event;
-        update_last_event_id session_id current_event_id
-      with _ -> ()
+      match client.push event with
+      | () -> update_last_event_id session_id current_event_id
+      | exception e ->
+        Eio.traceln "[SSE] Push failed for session %s: %s" session_id (Printexc.to_string e)
     end
   ) clients
 
@@ -106,10 +106,10 @@ let send_to session_id json =
   match Hashtbl.find_opt clients session_id with
   | None -> ()
   | Some client ->
-      (try
-         client.push event;
-         update_last_event_id session_id current_event_id
-       with _ -> ())
+      (match client.push event with
+       | () -> update_last_event_id session_id current_event_id
+       | exception e ->
+         Eio.traceln "[SSE] Push to %s failed: %s" session_id (Printexc.to_string e))
 
 (** Get client count *)
 let client_count () =

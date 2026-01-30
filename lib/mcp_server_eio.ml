@@ -162,7 +162,12 @@ let handle_read_resource_eio state id params =
           let lines = Mcp_server.read_event_lines config ~limit in
           let events =
             List.filter_map (fun line ->
-              try Some (Yojson.Safe.from_string line) with _ -> None
+              match Yojson.Safe.from_string line with
+              | json -> Some json
+              | exception Yojson.Json_error msg ->
+                let preview = if String.length line > 50 then String.sub line 0 50 ^ "..." else line in
+                Eio.traceln "[WARN] Failed to parse event JSON: %s (line: %s)" msg preview;
+                None
             ) lines
           in
           `List events

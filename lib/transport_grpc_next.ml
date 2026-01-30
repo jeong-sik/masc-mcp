@@ -335,20 +335,22 @@ let get_messages_handler (room_config: Room.config) (data: string) : string =
           if !count >= req.limit then None
           else begin
             let path = Filename.concat msgs_path name in
-            try
-              let json = Yojson.Safe.from_file path in
-              match Types.message_of_yojson json with
-              | Ok msg when msg.seq > req.since_seq ->
-                incr count;
-                Some (Pb.Message.make
-                  ~id:(string_of_int msg.seq)
-                  ~from:msg.from_agent
-                  ~content:msg.content
-                  ~timestamp:msg.timestamp
-                  ~seq:msg.seq
-                  ())
-              | _ -> None
-            with _ -> None
+            match Yojson.Safe.from_file path with
+            | json ->
+              (match Types.message_of_yojson json with
+               | Ok msg when msg.seq > req.since_seq ->
+                 incr count;
+                 Some (Pb.Message.make
+                   ~id:(string_of_int msg.seq)
+                   ~from:msg.from_agent
+                   ~content:msg.content
+                   ~timestamp:msg.timestamp
+                   ~seq:msg.seq
+                   ())
+               | _ -> None)
+            | exception e ->
+              Eio.traceln "[WARN] Failed to read message %s: %s" path (Printexc.to_string e);
+              None
           end
         ) files
       end else []
@@ -399,7 +401,11 @@ let plan_path config task_id =
 let read_plan config task_id =
   let path = plan_path config task_id in
   if Sys.file_exists path then
-    try Some (Yojson.Safe.from_file path) with _ -> None
+    match Yojson.Safe.from_file path with
+    | json -> Some json
+    | exception e ->
+      Eio.traceln "[WARN] Failed to read plan %s: %s" path (Printexc.to_string e);
+      None
   else None
 
 let write_plan config task_id json =

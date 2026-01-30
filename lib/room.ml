@@ -1560,12 +1560,14 @@ let get_messages_raw config ~since_seq ~limit =
     |> List.sort (fun a b -> compare (extract_seq_from_filename b) (extract_seq_from_filename a))
     |> List.filter_map (fun name ->
         let path = Filename.concat msgs_path name in
-        try
-          let json = read_json config path in
-          match message_of_yojson json with
-          | Ok msg when msg.seq > since_seq -> Some msg
-          | _ -> None
-        with _ -> None  (* Skip files that fail to read *)
+        match read_json config path with
+        | json ->
+          (match message_of_yojson json with
+           | Ok msg when msg.seq > since_seq -> Some msg
+           | _ -> None)
+        | exception e ->
+          Eio.traceln "[WARN] Failed to read message %s: %s" name (Printexc.to_string e);
+          None
       )
     |> (fun msgs -> List.filteri (fun i _ -> i < limit) msgs)
 

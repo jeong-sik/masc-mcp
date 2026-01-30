@@ -166,9 +166,6 @@ module Rest = struct
     (* Messaging *)
     | "masc_broadcast" -> (POST, "/api/v1/messages")
     | "masc_messages" -> (GET, "/api/v1/messages")
-    (* Locking *)
-    | "masc_lock" -> (POST, "/api/v1/locks")
-    | "masc_unlock" -> (DELETE, "/api/v1/locks/{file_path}")
     (* Voting *)
     | "masc_vote_create" -> (POST, "/api/v1/votes")
     | "masc_vote_cast" -> (POST, "/api/v1/votes/{vote_id}/cast")
@@ -215,7 +212,7 @@ module Rest = struct
       "masc_status"; "masc_tasks"; "masc_add_task"; "masc_claim"; "masc_done";
       "masc_transition"; "masc_release"; "masc_task_history"; "masc_cancel_task";
       "masc_join"; "masc_leave"; "masc_who"; "masc_agents"; "masc_agent_update";
-      "masc_broadcast"; "masc_messages"; "masc_lock"; "masc_unlock";
+      "masc_broadcast"; "masc_messages";
       "masc_vote_create"; "masc_vote_cast"; "masc_vote_status"; "masc_votes";
       "masc_plan_init"; "masc_plan_update"; "masc_note_add"; "masc_deliver"; "masc_plan_get";
       "masc_agent_card"; "masc_worktree_create"; "masc_worktree_remove"; "masc_worktree_list";

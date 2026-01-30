@@ -154,9 +154,7 @@ let test_tool_category_core () =
 
 let test_tool_category_comm () =
   check bool "broadcast" true (Mode.tool_category "masc_broadcast" = Mode.Comm);
-  check bool "messages" true (Mode.tool_category "masc_messages" = Mode.Comm);
-  check bool "lock" true (Mode.tool_category "masc_lock" = Mode.Comm);
-  check bool "unlock" true (Mode.tool_category "masc_unlock" = Mode.Comm)
+  check bool "messages" true (Mode.tool_category "masc_messages" = Mode.Comm)
 
 let test_tool_category_portal () =
   check bool "portal_open" true (Mode.tool_category "masc_portal_open" = Mode.Portal);

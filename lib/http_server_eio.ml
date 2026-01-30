@@ -172,20 +172,96 @@ end
 (** Request helpers *)
 module Request = struct
   (** Read request body - loops until EOF (httpun requires repeated schedule_read) *)
-  let read_body_async reqd callback =
-    let body = Httpun.Reqd.request_body reqd in
-    let chunks = ref [] in
-    let rec read_loop () =
-      Httpun.Body.Reader.schedule_read body
-        ~on_eof:(fun () ->
-          callback (String.concat "" (List.rev !chunks)))
-        ~on_read:(fun buffer ~off ~len ->
-          let chunk = Bigstringaf.substring buffer ~off ~len in
-          chunks := chunk :: !chunks;
-          (* Continue reading until EOF *)
-          read_loop ())
+  let default_max_body_bytes = 20 * 1024 * 1024
+
+  let parse_positive_int value =
+    try
+      let v = int_of_string value in
+      if v > 0 then Some v else None
+    with _ -> None
+
+  let max_body_bytes =
+    let from_env name =
+      match Sys.getenv_opt name with
+      | Some v -> parse_positive_int v
+      | None -> None
     in
-    read_loop ()
+    match from_env "MASC_MCP_MAX_BODY_BYTES" with
+    | Some v -> v
+    | None ->
+        (match from_env "MCP_MAX_BODY_BYTES" with
+         | Some v -> v
+         | None -> default_max_body_bytes)
+
+  let respond_error reqd status body =
+    let headers = Httpun.Headers.of_list [
+      ("content-type", "text/plain; charset=utf-8");
+      ("content-length", string_of_int (String.length body));
+      ("access-control-allow-origin", "*");
+      ("access-control-allow-methods", "GET, POST, OPTIONS");
+      ("access-control-allow-headers", "Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id");
+      ("access-control-expose-headers", "Mcp-Session-Id, Mcp-Protocol-Version");
+      ("connection", "close");
+    ] in
+    let response = Httpun.Response.create ~headers status in
+    Httpun.Reqd.respond_with_string reqd response body
+
+  let respond_too_large reqd max_bytes =
+    let body = Printf.sprintf
+      "413 Request Entity Too Large (max %d bytes)" max_bytes
+    in
+    respond_error reqd `Payload_too_large body
+
+  let respond_internal_error reqd exn =
+    let body = Printf.sprintf
+      "500 Internal Server Error: %s" (Printexc.to_string exn)
+    in
+    respond_error reqd `Internal_server_error body
+
+  let read_body_async_with_limit reqd ~on_body ~on_error =
+    let request = Httpun.Reqd.request reqd in
+    let content_length =
+      match Httpun.Headers.get request.headers "content-length" with
+      | Some v -> parse_positive_int v
+      | None -> None
+    in
+    (match content_length with
+     | Some len when len > max_body_bytes ->
+         on_error (`Too_large max_body_bytes)
+     | _ ->
+         let body = Httpun.Reqd.request_body reqd in
+         let initial_capacity =
+           match content_length with
+           | Some len when len > 0 && len < max_body_bytes -> len
+           | _ -> 1024
+         in
+         let buf = Buffer.create initial_capacity in
+         let seen_bytes = ref 0 in
+         let rec read_loop () =
+           Httpun.Body.Reader.schedule_read body
+             ~on_eof:(fun () ->
+               let body_str = Buffer.contents buf in
+               try on_body body_str with exn ->
+                 on_error (`Internal exn))
+             ~on_read:(fun buffer ~off ~len ->
+               let next_bytes = !seen_bytes + len in
+               if next_bytes > max_body_bytes then begin
+                 on_error (`Too_large max_body_bytes)
+               end else begin
+                 seen_bytes := next_bytes;
+                 let chunk = Bigstringaf.substring buffer ~off ~len in
+                 Buffer.add_string buf chunk;
+                 read_loop ()
+               end)
+         in
+         read_loop ())
+
+  let read_body_async reqd callback =
+    read_body_async_with_limit reqd
+      ~on_body:callback
+      ~on_error:(function
+        | `Too_large max_bytes -> respond_too_large reqd max_bytes
+        | `Internal exn -> respond_internal_error reqd exn)
 
   (** Read request body synchronously - uses Condition for proper synchronization *)
   let read_body_sync reqd =
@@ -193,10 +269,20 @@ module Request = struct
     let mutex = Eio.Mutex.create () in
     let cond = Eio.Condition.create () in
 
-    read_body_async reqd (fun body_str ->
-      Eio.Mutex.use_rw ~protect:false mutex (fun () ->
-        result := Some body_str;
-        Eio.Condition.broadcast cond));
+    read_body_async_with_limit reqd
+      ~on_body:(fun body_str ->
+        Eio.Mutex.use_rw ~protect:false mutex (fun () ->
+          result := Some (Ok body_str);
+          Eio.Condition.broadcast cond))
+      ~on_error:(function
+        | `Too_large max_bytes ->
+            Eio.Mutex.use_rw ~protect:false mutex (fun () ->
+              result := Some (Error (Printf.sprintf "Request too large (max %d bytes)" max_bytes));
+              Eio.Condition.broadcast cond)
+        | `Internal exn ->
+            Eio.Mutex.use_rw ~protect:false mutex (fun () ->
+              result := Some (Error (Printexc.to_string exn));
+              Eio.Condition.broadcast cond));
 
     Eio.Mutex.use_rw ~protect:false mutex (fun () ->
       while !result = None do
@@ -204,7 +290,8 @@ module Request = struct
       done);
 
     match !result with
-    | Some s -> s
+    | Some (Ok s) -> s
+    | Some (Error msg) -> failwith msg
     | None -> failwith "read_body_sync: impossible state"
 
   (** Get path from request target *)

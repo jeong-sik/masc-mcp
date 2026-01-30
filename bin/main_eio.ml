@@ -1111,39 +1111,43 @@ let make_extended_handler routes =
   fun _client_addr gluten_reqd ->
     let reqd = gluten_reqd.Gluten.Reqd.reqd in
     let request = Httpun.Reqd.request reqd in
-    let path = Http.Request.path request in
-    let is_mcp_like =
-      String.equal path "/mcp"
-      || String.equal path "/sse"
-      || String.equal path "/messages"
-    in
-    let session_id_for_version = get_session_id_any request in
-    let protocol_version =
-      get_protocol_version_for_session ?session_id:session_id_for_version request
-    in
-    let origin = get_origin request in
-    if is_mcp_like && not (validate_origin request) then
-      let body = json_rpc_error (-32600) "Invalid origin" in
-      let headers = Httpun.Headers.of_list (
-        ("content-length", string_of_int (String.length body))
-        :: json_headers "-" protocol_version origin
-      ) in
-      let response = Httpun.Response.create ~headers `Forbidden in
-      Httpun.Reqd.respond_with_string reqd response body
-    else if is_mcp_like && request.meth <> `OPTIONS &&
-            not (is_valid_protocol_version protocol_version) then
-      let body = json_rpc_error (-32600) "Unsupported protocol version" in
-      let headers = Httpun.Headers.of_list (
-        ("content-length", string_of_int (String.length body))
-        :: json_headers "-" protocol_version origin
-      ) in
-      let response = Httpun.Response.create ~headers `Bad_request in
-      Httpun.Reqd.respond_with_string reqd response body
-    else
-      match request.meth, path with
-      | `OPTIONS, _ -> options_handler request reqd
-      | `DELETE, "/mcp" -> handle_delete_mcp request reqd
-      | _ -> Http.Router.dispatch routes request reqd
+    try
+      let path = Http.Request.path request in
+      let is_mcp_like =
+        String.equal path "/mcp"
+        || String.equal path "/sse"
+        || String.equal path "/messages"
+      in
+      let session_id_for_version = get_session_id_any request in
+      let protocol_version =
+        get_protocol_version_for_session ?session_id:session_id_for_version request
+      in
+      let origin = get_origin request in
+      if is_mcp_like && not (validate_origin request) then
+        let body = json_rpc_error (-32600) "Invalid origin" in
+        let headers = Httpun.Headers.of_list (
+          ("content-length", string_of_int (String.length body))
+          :: json_headers "-" protocol_version origin
+        ) in
+        let response = Httpun.Response.create ~headers `Forbidden in
+        Httpun.Reqd.respond_with_string reqd response body
+      else if is_mcp_like && request.meth <> `OPTIONS &&
+              not (is_valid_protocol_version protocol_version) then
+        let body = json_rpc_error (-32600) "Unsupported protocol version" in
+        let headers = Httpun.Headers.of_list (
+          ("content-length", string_of_int (String.length body))
+          :: json_headers "-" protocol_version origin
+        ) in
+        let response = Httpun.Response.create ~headers `Bad_request in
+        Httpun.Reqd.respond_with_string reqd response body
+      else
+        match request.meth, path with
+        | `OPTIONS, _ -> options_handler request reqd
+        | `DELETE, "/mcp" -> handle_delete_mcp request reqd
+        | _ -> Http.Router.dispatch routes request reqd
+    with exn ->
+      let msg = Printexc.to_string exn in
+      Http.Response.internal_error msg reqd
 
 (** Main server loop *)
 let run_server ~sw ~env ~port ~base_path =
@@ -1206,6 +1210,11 @@ let run_server ~sw ~env ~port ~base_path =
   Printf.printf "   POST /messages → legacy client->server messages\n%!";
   Printf.printf "   GET  /health → Health check\n%!";
 
+  let is_cancelled exn =
+    match exn with
+    | Eio.Cancel.Cancelled _ -> true
+    | _ -> false
+  in
   let rec accept_loop backoff_s =
     try
       let flow, client_addr = Eio.Net.accept ~sw socket in
@@ -1222,10 +1231,13 @@ let run_server ~sw ~env ~port ~base_path =
       );
       accept_loop 0.05
     with exn ->
-      Printf.eprintf "Accept error: %s\n%!" (Printexc.to_string exn);
-      (try Eio.Time.sleep clock backoff_s with _ -> ());
-      let next_backoff = Float.min 2.0 (backoff_s *. 1.5) in
-      accept_loop next_backoff
+      if is_cancelled exn then ()
+      else begin
+        Printf.eprintf "Accept error: %s\n%!" (Printexc.to_string exn);
+        (try Eio.Time.sleep clock backoff_s with _ -> ());
+        let next_backoff = Float.min 2.0 (backoff_s *. 1.5) in
+        accept_loop next_backoff
+      end
   in
   accept_loop 0.05
 

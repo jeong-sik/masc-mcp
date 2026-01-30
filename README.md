@@ -88,4 +88,6 @@ masc_leave(agent_name: "codex")
 
 - 기본 HTTP 엔드포인트는 `/mcp`, `/health`, `/sse`입니다.
 - 시작 스크립트는 `start-masc-mcp.sh`이며, Eio 런타임을 기준으로 동작합니다.
+- 요청 바디 최대 크기는 기본 20MB입니다. `MASC_MCP_MAX_BODY_BYTES` 또는 `MCP_MAX_BODY_BYTES`로 조정하세요.
+  - `Content-Length`가 없으면 스트리밍 누적 바이트로 제한하며, 초과 시 413을 반환합니다.
 - 여러 에이전트를 동시에 사용할 때는 SSE를 별도 터미널에서 모니터링하면 디버깅이 쉽습니다.

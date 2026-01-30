@@ -38,8 +38,6 @@ let masc_mcp_tools = [
   "mcp__masc__masc_leave";
   "mcp__masc__masc_who";
   "mcp__masc__masc_agent_update";
-  "mcp__masc__masc_lock";
-  "mcp__masc__masc_unlock";
   "mcp__masc__masc_add_task";
   "mcp__masc__masc_heartbeat";
   "mcp__masc__masc_messages";

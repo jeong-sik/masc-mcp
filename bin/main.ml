@@ -801,19 +801,7 @@ let run_http ~port ~base_path =
           ("Content-Type", "application/json");
           ("Access-Control-Allow-Origin", "*");
         ] in
-        let* rsp = Server.respond_string ~status:`Created ~headers
-          ~body:(Yojson.Safe.to_string result) () in
-        Lwt.return (`Response rsp)
-
-    | `POST, "/api/v1/locks" ->
-        let* body_str = Cohttp_lwt.Body.to_string body in
-        let params = try Yojson.Safe.from_string body_str with _ -> `Assoc [] in
-        let* result = Masc_mcp.Mcp_server.rest_execute state ~name:"masc_lock" ~arguments:params in
-        let headers = Cohttp.Header.of_list [
-          ("Content-Type", "application/json");
-          ("Access-Control-Allow-Origin", "*");
-        ] in
-        let* rsp = Server.respond_string ~status:`Created ~headers
+        let* rsp = Server.respond_string ~status:`OK ~headers
           ~body:(Yojson.Safe.to_string result) () in
         Lwt.return (`Response rsp)
 

@@ -106,7 +106,7 @@ let tool_category tool_name =
   | "masc_task_history" -> Core
 
   (* Communication tools *)
-  | "masc_broadcast" | "masc_messages" | "masc_lock" | "masc_unlock"
+  | "masc_broadcast" | "masc_messages"
   | "masc_listen" | "masc_who" | "masc_reset"
   | "masc_subscription" | "masc_progress" -> Comm
 
@@ -186,7 +186,7 @@ let mode_description = function
 (** Category descriptions *)
 let category_description = function
   | Core -> "Task management: init, join, status, tasks, claim, done"
-  | Comm -> "Communication: broadcast, messages, lock, unlock, listen"
+  | Comm -> "Communication: broadcast, messages, listen"
   | Portal -> "A2A direct messaging: portal_open, portal_send"
   | Worktree -> "Git worktrees: worktree_create, worktree_list"
   | Health -> "Maintenance: heartbeat, cache, tempo, relay/mitosis, gc"

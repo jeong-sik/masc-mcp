@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] - 2026-01-30
+
+### Changed
+- **Protocol Standardisation**: Updated client logic to always request standard JSON (Verbose) from llm-mcp.
+
+### Removed
+- **Manual Locking**: Removed `masc_lock` and `masc_unlock` tools.
+- **Legacy API**: Removed `/api/v1/locks` REST endpoints.
+
+## [2.5.0] - 2026-01-29
+
+### Added
+- **Cellular Mitosis Protocol**: 2-phase context handoff system.
+- **Relay System**: Seamless context compression and agent replacement.
+
 ## [2.3.1] - 2026-01-28
 
 ### Fixed

@@ -492,6 +492,18 @@ let test_rest_parse_request_with_body () =
   let req = Transport.Rest.parse_request ~http_method:"POST" ~path:"/api/v1/status" ~query_params:[] ~body:"{\"key\":\"value\"}" in
   check bool "has params" true (req.params <> `Null)
 
+let test_rest_parse_request_broadcast () =
+  (* Test /broadcast endpoint for autocov compatibility *)
+  let req = Transport.Rest.parse_request ~http_method:"POST" ~path:"/broadcast" ~query_params:[] ~body:"{\"agent_name\":\"test\",\"message\":\"hello\"}" in
+  check bool "parsed" true (req.method_name <> "");
+  check bool "has params" true (req.params <> `Null)
+
+let test_rest_parse_request_api_broadcast () =
+  (* Test /api/v1/broadcast RESTful endpoint *)
+  let req = Transport.Rest.parse_request ~http_method:"POST" ~path:"/api/v1/broadcast" ~query_params:[] ~body:"{\"agent_name\":\"test\",\"message\":\"hello\"}" in
+  check bool "parsed" true (req.method_name <> "");
+  check bool "has params" true (req.params <> `Null)
+
 let test_rest_parse_request_root () =
   let req = Transport.Rest.parse_request ~http_method:"GET" ~path:"/" ~query_params:[] ~body:"" in
   check string "method_name" "masc_status" req.method_name
@@ -781,6 +793,8 @@ let () =
       test_case "unknown" `Quick test_rest_parse_request_unknown;
       test_case "with body" `Quick test_rest_parse_request_with_body;
       test_case "root" `Quick test_rest_parse_request_root;
+      test_case "broadcast" `Quick test_rest_parse_request_broadcast;
+      test_case "api_broadcast" `Quick test_rest_parse_request_api_broadcast;
     ];
     "rest.generate_openapi_paths", [
       test_case "paths" `Quick test_rest_generate_openapi_paths;

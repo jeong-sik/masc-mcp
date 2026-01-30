@@ -388,7 +388,7 @@ Tip: Look for status='todo' tasks to claim.";
 
   {
     name = "masc_broadcast";
-    description = "Send a message visible to ALL agents via SSE push. Use for: status updates ('Starting task X'), help requests ('@gemini can you review this?'), completions ('✅ Done!'). Use @agent_name to ping specific agent. Default: compact format (64% token savings).";
+    description = "Send a message visible to ALL agents via SSE push. Use for: status updates ('Starting task X'), help requests ('@gemini can you review this?'), completions ('✅ Done!'). Use @agent_name to ping specific agent. Default: verbose format.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -403,8 +403,8 @@ Tip: Look for status='todo' tasks to claim.";
         ("format", `Assoc [
           ("type", `String "string");
           ("enum", `List [`String "compact"; `String "verbose"]);
-          ("description", `String "Output format: 'compact' (default, 64% savings) or 'verbose' (JSON for debugging)");
-          ("default", `String "compact");
+          ("description", `String "Output format: 'compact' or 'verbose' (default, JSON)");
+          ("default", `String "verbose");
         ]);
       ]);
       ("required", `List [`String "agent_name"; `String "message"]);
@@ -512,7 +512,7 @@ Requires confirm=true to execute. Example: masc_reset({confirm: true})";
 
   {
     name = "masc_portal_send";
-    description = "Send a task/request through your open portal. The connected agent will receive this as a pending A2A task. Good for: code review requests, parallel subtasks, expert consultations. Check portal_status to see if they've responded. Default: compact format (64% token savings).";
+    description = "Send a task/request through your open portal. The connected agent will receive this as a pending A2A task. Good for: code review requests, parallel subtasks, expert consultations. Check portal_status to see if they've responded. Default: verbose format.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -527,8 +527,8 @@ Requires confirm=true to execute. Example: masc_reset({confirm: true})";
         ("format", `Assoc [
           ("type", `String "string");
           ("enum", `List [`String "compact"; `String "verbose"]);
-          ("description", `String "Output format: 'compact' (default, 64% savings) or 'verbose' (JSON)");
-          ("default", `String "compact");
+          ("description", `String "Output format: 'compact' or 'verbose' (default, JSON)");
+          ("default", `String "verbose");
         ]);
       ]);
       ("required", `List [`String "agent_name"; `String "message"]);

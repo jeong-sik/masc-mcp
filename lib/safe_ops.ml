@@ -83,10 +83,10 @@ let list_dir_safe path : (string list, string) result =
       Error (Printf.sprintf "Failed to list %s: %s" path (Printexc.to_string e))
 
 (** Remove file with logging on failure (for cleanup operations) *)
-let remove_file_logged path =
+let remove_file_logged ?(context = "cleanup") path =
   try Sys.remove path
   with e ->
-    Eio.traceln "[WARN] Failed to remove %s: %s" path (Printexc.to_string e)
+    Eio.traceln "[WARN] [%s] Failed to remove %s: %s" context path (Printexc.to_string e)
 
 (** Close channel with logging on failure *)
 let close_in_logged ic =

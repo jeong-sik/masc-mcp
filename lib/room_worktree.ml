@@ -253,7 +253,7 @@ let worktree_list config =
               ("branch", `String !branch);
               ("is_masc", `Bool (String.length !path > 11 &&
                 try String.sub !path (String.length !path - 11) 11 = ".worktrees/"
-                with _ -> false));
+                with Invalid_argument _ -> false));
             ])
           else None
         in

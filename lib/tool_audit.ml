@@ -79,7 +79,7 @@ let read_audit_events (config : Room.config) ~since : audit_event list =
           let success = json |> member "success" |> to_bool in
           let detail = json |> member "detail" |> to_string_option in
           Some { timestamp; agent; event_type; success; detail }
-      with _ -> None
+      with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
     ) lines
 
 (* Handle masc_audit_query *)

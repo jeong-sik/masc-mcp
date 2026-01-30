@@ -13,12 +13,12 @@
 (** Get environment variable with default *)
 let get_env_float name default =
   match Sys.getenv_opt name with
-  | Some s -> (try float_of_string s with _ -> default)
+  | Some s -> Safe_ops.float_of_string_with_default ~default s
   | None -> default
 
 let get_env_int name default =
   match Sys.getenv_opt name with
-  | Some s -> (try int_of_string s with _ -> default)
+  | Some s -> Safe_ops.int_of_string_with_default ~default s
   | None -> default
 
 (** Metrics cache configuration *)

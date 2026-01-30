@@ -83,7 +83,7 @@ let parse_client_message s =
       Subscribe agent_id
     | Some "unsubscribe" -> Unsubscribe
     | _ -> Unknown s
-  with _ -> Unknown s
+  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> Unknown s
 
 (** {1 Creation} *)
 
@@ -119,7 +119,7 @@ let safe_close_client t ic =
   (try
      if not (Ws.Wsd.is_closed ic.wsd) then
        Ws.Wsd.close ic.wsd
-   with _ -> ());
+   with exn -> Eio.traceln "[WARN] ws close: %s" (Printexc.to_string exn));
   remove_client t ic.client.id
 
 let mark_client_error t ic message =
@@ -279,7 +279,8 @@ let start ~sw ~net ~clock t =
             ()
           else begin
             Log.error ~ctx:"voice_stream" "Accept error: %s" (Printexc.to_string exn);
-            (try Eio.Time.sleep clock backoff_s with _ -> ());
+            (try Eio.Time.sleep clock backoff_s
+             with exn -> Eio.traceln "[WARN] sleep interrupted: %s" (Printexc.to_string exn));
             let next_backoff = Float.min 2.0 (backoff_s *. 1.5) in
             accept_loop next_backoff
           end
@@ -294,7 +295,8 @@ let stop t =
   (match t.server_socket with
    | Some (Listening_socket socket) ->
      t.server_socket <- None;
-     (try Eio.Resource.close socket with _ -> ())
+     (try Eio.Resource.close socket
+      with exn -> Eio.traceln "[WARN] socket close: %s" (Printexc.to_string exn))
    | None -> ());
   let clients = Hashtbl.fold (fun _ ic acc -> ic :: acc) t.clients [] in
   List.iter (fun ic -> safe_close_client t ic) clients;

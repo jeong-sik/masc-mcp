@@ -232,7 +232,7 @@ let load_swarm ~fs (config : config) : swarm option =
     let content = Eio.Path.load path in
     let json = Yojson.Safe.from_string content in
     Some (swarm_of_json json)
-  with _ -> None
+  with Eio.Io _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
 
 let save_swarm ~fs (config : config) (swarm : swarm) : unit =
   let file = swarm_file config in
@@ -432,7 +432,7 @@ let leave ~fs (config : config) ~agent_id : swarm option =
 let dissolve ~fs (config : config) : unit =
   let file = swarm_file config in
   let path = Eio.Path.(fs / file) in
-  try Eio.Path.unlink path with _ -> ()
+  try Eio.Path.unlink path with Eio.Io _ -> ()
 
 let update_fitness ~fs (config : config) ~agent_id ~fitness : swarm option =
   match load_swarm ~fs config with

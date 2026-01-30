@@ -178,7 +178,7 @@ let call_llm_mcp_sync ~agent_type ~prompt =
   let ic = Unix.open_process_in cmd in
   let response = try input_line ic with End_of_file -> "no response" in
   ignore (Unix.close_process_in ic);
-  (try Unix.unlink tmp_file with _ -> ());
+  Safe_ops.remove_file_logged ~context:"auto_responder" tmp_file;
   response
 
 (** MASC HTTP helper - call MASC tool via HTTP (using temp file to avoid escaping issues) *)
@@ -204,7 +204,7 @@ let masc_call ~tool_name ~args =
   let buf = Buffer.create 256 in
   (try while true do Buffer.add_string buf (input_line ic); Buffer.add_char buf '\n' done with End_of_file -> ());
   ignore (Unix.close_process_in ic);
-  (try Unix.unlink tmp_file with _ -> ());
+  Safe_ops.remove_file_logged ~context:"auto_responder" tmp_file;
   Buffer.contents buf
 
 (** Extract nickname from MASC join response *)

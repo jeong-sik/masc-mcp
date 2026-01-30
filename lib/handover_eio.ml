@@ -130,7 +130,7 @@ let handover_of_json (json : Yojson.Safe.t) : handover_record option =
       context_usage_percent = int_val "context_usage_percent";
       handover_reason = str "handover_reason";
     }
-  with _ -> None
+  with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None
 
 (** Storage paths *)
 let handover_dir_path (config : Room_utils.config) =
@@ -188,7 +188,7 @@ let list_handovers ~fs config : handover_record list =
       match load_handover ~fs config id with Ok h -> Some h | Error _ -> None
     ) json_files in
     List.sort (fun a b -> compare b.created_at a.created_at) handovers
-  with _ -> []
+  with Eio.Io _ | Yojson.Json_error _ -> []
 
 (** Get pending handovers *)
 let get_pending_handovers ~fs config : handover_record list =

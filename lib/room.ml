@@ -1100,7 +1100,7 @@ let claim_next config ~agent_name =
                          tm_mday = d; tm_mon = mo - 1; tm_year = y - 1900;
                          tm_wday = 0; tm_yday = 0; tm_isdst = false } in
               Some (fst (Unix.mktime tm)))
-        with _ -> None
+        with Scanf.Scan_failure _ | Failure _ | End_of_file -> None
       in
       let effective_priority (task : Types.task) =
         let age_hours =
@@ -2203,7 +2203,7 @@ let read_tempo config : tempo_config =
       match tempo_config_of_yojson (read_json config path) with
       | Ok t -> t
       | Error _ -> default_tempo_config
-    with _ -> default_tempo_config
+    with Sys_error _ | Yojson.Json_error _ -> default_tempo_config
   else
     default_tempo_config
 
@@ -2518,7 +2518,7 @@ let room_enter config ~room_id ?(agent_name="") ~agent_type () : Yojson.Safe.t =
           in
           let end_idx = String.index_from join_result start_idx '\n' in
           String.sub join_result start_idx (end_idx - start_idx)
-        with _ -> agent_type ^ "-unknown"
+        with Not_found | Invalid_argument _ -> agent_type ^ "-unknown"
       in
 
       `Assoc [

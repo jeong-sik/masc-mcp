@@ -81,9 +81,9 @@ let read_all_events ~fs config : event_record list =
         match event_record_of_yojson json with
         | Ok record -> Some record
         | Error _ -> None
-      with _ -> None
+      with Yojson.Json_error _ -> None
     ) lines
-  with _ -> []
+  with Sys_error _ | Eio.Io _ -> []
 
 (** Read events since a timestamp *)
 let read_events_since ~fs config ~since : event_record list =

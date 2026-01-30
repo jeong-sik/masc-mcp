@@ -251,7 +251,7 @@ let load_noosphere ~fs (config : config) : noosphere option =
   try
     let content = Eio.Path.load path in
     Some (noosphere_of_json (Yojson.Safe.from_string content))
-  with _ -> None
+  with Eio.Io _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
 
 let save_noosphere ~fs (config : config) (n : noosphere) : unit =
   let file = noosphere_file config in

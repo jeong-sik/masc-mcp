@@ -548,6 +548,6 @@ let get_all_statuses ~room_config =
           let status = Yojson.Safe.Util.(json |> member "status" |> to_string) in
           let ratio = Yojson.Safe.Util.(json |> member "estimated_ratio" |> to_float) in
           Some (node_id, status, ratio)
-        with _ -> None
+        with Yojson.Safe.Util.Type_error _ -> None
       ) pairs
   | Error _ -> []

@@ -62,7 +62,7 @@ let is_macos () =
     let os = try input_line ic with End_of_file -> "" in
     let _ = Unix.close_process_in ic in
     os = "Darwin"
-  with _ -> false
+  with End_of_file | Unix.Unix_error _ -> false
 
 (** Check if terminal-notifier is available *)
 let has_terminal_notifier =

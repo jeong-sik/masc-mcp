@@ -31,7 +31,7 @@ let handle_encryption_enable ctx args =
           Bytes.set bytes i (Char.chr (int_of_string ("0x" ^ hex_pair)))
         done;
         Ok (Bytes.to_string bytes)
-      with _ -> Error "Failed to decode hex key"
+      with Invalid_argument _ | Failure _ -> Error "Failed to decode hex key"
   in
   let (key_source_variant, generated_key_opt) =
     if key_source = "env" then

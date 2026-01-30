@@ -115,11 +115,9 @@ let normalize_protocol_version version =
   else default_protocol_version
 
 let protocol_version_from_params params =
-  let open Yojson.Safe.Util in
   match params with
   | Some (`Assoc _ as p) ->
-      (try p |> member "protocolVersion" |> to_string
-       with _ -> default_protocol_version)
+      Safe_ops.json_string ~default:default_protocol_version "protocolVersion" p
   | _ -> default_protocol_version
 
 (** Server info *)
@@ -320,7 +318,7 @@ let parse_masc_resource_uri uri_str =
 let int_query_param uri key ~default =
   match Uri.get_query_param uri key with
   | None -> default
-  | Some s -> (try int_of_string s with _ -> default)
+  | Some s -> Safe_ops.int_of_string_with_default ~default s
 
 (** Read recent event log lines from .masc/events *)
 let read_event_lines config ~limit =

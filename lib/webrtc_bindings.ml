@@ -110,7 +110,7 @@ let lib_path =
 
 let lib =
   try Some (Dl.dlopen ~filename:lib_path ~flags:[Dl.RTLD_NOW; Dl.RTLD_GLOBAL])
-  with _ -> None
+  with Dl.DL_error _ -> None
 
 let is_available () = Option.is_some lib
 

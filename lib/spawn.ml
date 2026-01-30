@@ -102,7 +102,7 @@ let parse_claude_json output =
     let cost_usd = json |> member "total_cost_usd" |> to_float_option in
     let result_text = json |> member "result" |> to_string_option in
     (result_text, input_tokens, output_tokens, cache_creation, cache_read, cost_usd)
-  with _ ->
+  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
     (* If JSON parsing fails, return raw output with no token info *)
     (Some output, None, None, None, None, None)
 

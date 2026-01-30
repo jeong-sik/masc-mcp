@@ -239,7 +239,7 @@ let handle_task_history ctx args =
   let lines = Mcp_server.read_event_lines ctx.config ~limit:scan_limit in
   let parsed =
     List.filter_map (fun line ->
-      try Some (Yojson.Safe.from_string line) with _ -> None
+      try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None
     ) lines
   in
   let matches_task json =

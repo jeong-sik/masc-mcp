@@ -31,7 +31,7 @@ module Http_negotiation = struct
               if String.length param >= 2 && param.[0] = 'q' && param.[1] = '=' then
                 let q_str = String.sub param 2 (String.length param - 2) in
                 try Some (float_of_string q_str)
-                with _ -> None
+                with Failure _ -> None
               else None
             ) params
             |> Option.value ~default:1.0

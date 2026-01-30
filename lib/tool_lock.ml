@@ -23,7 +23,7 @@ let lock_owner_of_value value =
     match Yojson.Safe.from_string value |> member "owner" with
     | `String s -> Some s
     | _ -> None
-  with _ -> None
+  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
 
 (** Handle masc_lock *)
 let handle_lock ctx args =

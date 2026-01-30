@@ -56,22 +56,22 @@ let load_config () =
       let open Yojson.Safe.Util in
       let get_float key default =
         try json |> member "server" |> member key |> to_float
-        with _ -> try json |> member "retry" |> member key |> to_float
-        with _ -> default
+        with Type_error _ -> try json |> member "retry" |> member key |> to_float
+        with Type_error _ -> default
       in
       let get_int key default =
         try json |> member "server" |> member key |> to_int
-        with _ -> try json |> member "retry" |> member key |> to_int
-        with _ -> default
+        with Type_error _ -> try json |> member "retry" |> member key |> to_int
+        with Type_error _ -> default
       in
       let voices =
         try json |> member "agent_voices" |> to_assoc
             |> List.map (fun (agent, voice) -> (agent, to_string voice))
-        with _ -> default_config.agent_voices
+        with Type_error _ -> default_config.agent_voices
       in
       {
         host = (try json |> member "server" |> member "host" |> to_string
-                with _ -> default_config.host);
+                with Type_error _ -> default_config.host);
         port = get_int "port" default_config.port;
         timeout_seconds = get_float "timeout_seconds" default_config.timeout_seconds;
         max_retries = get_int "max_retries" default_config.max_retries;
@@ -175,7 +175,7 @@ let is_retryable_error error =
     starts_with ~prefix:"timeout" s ||
     (try
       Scanf.sscanf s "http %d" (fun code -> code >= 500 && code < 600)
-    with _ -> false)
+    with Scanf.Scan_failure _ | Failure _ | End_of_file -> false)
 
 (** Timeout helper using Eio.Fiber.first - returns Error after specified seconds *)
 let with_timeout ~clock ?timeout operation =
@@ -278,7 +278,7 @@ let extract_mcp_result json =
         (match text with
         | Some t ->
           (try Ok (Yojson.Safe.from_string t)
-           with _ -> Ok (`String t))
+           with Yojson.Json_error _ -> Ok (`String t))
         | None -> Ok result)
   with e ->
     Error (Printf.sprintf "Parse error: %s" (Printexc.to_string e))
@@ -320,7 +320,8 @@ let is_voice_server_available ~sw ~clock ~net =
         let available = Cohttp.Code.is_success (Cohttp.Code.code_of_status status) in
         voice_server_available := Some available;
         Ok available
-      with _ ->
+      with exn ->
+        Eio.traceln "[WARN] voice server check failed: %s" (Printexc.to_string exn);
         voice_server_available := Some false;
         Ok false
     in
@@ -524,7 +525,7 @@ let health_check ~sw ~clock:_ ~net () =
       Ok (`Assoc [
         ("status", `String "healthy");
         ("server", `String (Printf.sprintf "%s:%d" (voice_mcp_host ()) (voice_mcp_port ())));
-        ("response", (try Yojson.Safe.from_string body_str with _ -> `String body_str));
+        ("response", (try Yojson.Safe.from_string body_str with Yojson.Json_error _ -> `String body_str));
       ])
     else
       Error (Printf.sprintf "Unhealthy: HTTP %d" (Cohttp.Code.code_of_status status))

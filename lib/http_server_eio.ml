@@ -225,11 +225,19 @@ module Request = struct
       | Some v -> parse_positive_int v
       | None -> None
     in
+    let body = Httpun.Reqd.request_body reqd in
+    let stopped = ref false in
+    let stop () =
+      if not !stopped then begin
+        stopped := true;
+        (try Httpun.Body.Reader.close body with _ -> ())
+      end
+    in
     (match content_length with
      | Some len when len > max_body_bytes ->
+         stop ();
          on_error (`Too_large max_body_bytes)
      | _ ->
-         let body = Httpun.Reqd.request_body reqd in
          let initial_capacity =
            match content_length with
            | Some len when len > 0 && len < max_body_bytes -> len
@@ -244,15 +252,18 @@ module Request = struct
                try on_body body_str with exn ->
                  on_error (`Internal exn))
              ~on_read:(fun buffer ~off ~len ->
-               let next_bytes = !seen_bytes + len in
-               if next_bytes > max_body_bytes then begin
-                 on_error (`Too_large max_body_bytes)
-               end else begin
-                 seen_bytes := next_bytes;
-                 let chunk = Bigstringaf.substring buffer ~off ~len in
-                 Buffer.add_string buf chunk;
-                 read_loop ()
-               end)
+               if !stopped then ()
+               else
+                 let next_bytes = !seen_bytes + len in
+                 if next_bytes > max_body_bytes then begin
+                   stop ();
+                   on_error (`Too_large max_body_bytes)
+                 end else begin
+                   seen_bytes := next_bytes;
+                   let chunk = Bigstringaf.substring buffer ~off ~len in
+                   Buffer.add_string buf chunk;
+                   read_loop ()
+                 end)
          in
          read_loop ())
 
@@ -276,10 +287,12 @@ module Request = struct
           Eio.Condition.broadcast cond))
       ~on_error:(function
         | `Too_large max_bytes ->
+            respond_too_large reqd max_bytes;
             Eio.Mutex.use_rw ~protect:false mutex (fun () ->
               result := Some (Error (Printf.sprintf "Request too large (max %d bytes)" max_bytes));
               Eio.Condition.broadcast cond)
         | `Internal exn ->
+            respond_internal_error reqd exn;
             Eio.Mutex.use_rw ~protect:false mutex (fun () ->
               result := Some (Error (Printexc.to_string exn));
               Eio.Condition.broadcast cond));

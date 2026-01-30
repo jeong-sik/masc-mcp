@@ -387,7 +387,7 @@ let load_mind ~fs (config : config) : mind option =
   try
     let content = Eio.Path.load path in
     Some (mind_of_json (Yojson.Safe.from_string content))
-  with _ -> None
+  with Eio.Io _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
 
 let save_mind ~fs (config : config) (m : mind) : unit =
   let file = mind_file config in

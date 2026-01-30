@@ -314,7 +314,7 @@ let parse_bandwidth line =
   match split_first ':' line with
   | (bw_type, Some bw) ->
     (try Ok { bw_type; bandwidth = int_of_string bw }
-     with _ -> Error "Invalid bandwidth value")
+     with Failure _ -> Error "Invalid bandwidth value")
   | _ -> Error "Invalid bandwidth line"
 
 let parse_media_line line =
@@ -457,7 +457,7 @@ let parse sdp =
       (match typ with
        | 'v' ->
          (try parse_session rest { session with version = int_of_string value }
-          with _ -> Error "Invalid version")
+          with Failure _ -> Error "Invalid version")
        | 'o' ->
          (match parse_origin value with
           | Ok o -> parse_session rest { session with origin = o }
@@ -479,7 +479,7 @@ let parse sdp =
          (match split_spaces value with
           | [start; stop] ->
             (try parse_session rest { session with timing = (int_of_string start, int_of_string stop) }
-             with _ -> Error "Invalid timing")
+             with Failure _ -> Error "Invalid timing")
           | _ -> Error "Invalid timing line")
        | 'a' ->
          let (name, value_opt) = parse_attribute value in

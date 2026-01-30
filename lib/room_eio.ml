@@ -226,7 +226,7 @@ let room_state_of_json json =
       active_agents = json |> member "active_agents" |> to_list |> List.map to_string;
       message_seq = json |> member "message_seq" |> to_int;
       (* Backward compat: default to 0 if event_seq missing from old state files *)
-      event_seq = (try json |> member "event_seq" |> to_int with _ -> 0);
+      event_seq = Safe_ops.json_int ~default:0 "event_seq" json;
       mode = json |> member "mode" |> to_string;
       paused = json |> member "paused" |> to_bool;
       paused_by = json |> member "paused_by" |> to_string_option;
@@ -275,7 +275,7 @@ let atomic_update_state config ~f =
             match room_state_of_json json with
             | Ok s -> s
             | Error _ -> default_room_state ()
-          with _ -> default_room_state ())
+          with Eio.Io _ | Yojson.Json_error _ -> default_room_state ())
     in
     let new_state = f current_state in
     let new_state = { new_state with last_updated = Unix.gettimeofday () } in

@@ -122,7 +122,7 @@ let decrypt_envelope ~key envelope : (Yojson.Safe.t, encryption_error) result =
         | None -> Error DecryptionFailed
         | Some plaintext ->
             try Ok (Yojson.Safe.from_string plaintext)
-            with _ -> Error (InvalidEnvelope "decrypted data is not valid JSON")
+            with Yojson.Json_error _ -> Error (InvalidEnvelope "decrypted data is not valid JSON")
 
 (** Convert envelope to JSON for storage *)
 let envelope_to_json envelope =
@@ -144,14 +144,14 @@ let envelope_of_json json : envelope option =
     let ciphertext = json |> member "ct" |> to_string in
     let adata = json |> member "adata" |> to_string in
     Some { encrypted; version; nonce; ciphertext; adata }
-  with _ -> None
+  with Yojson.Safe.Util.Type_error _ -> None
 
 (** Check if JSON is an encrypted envelope *)
 let is_encrypted_json json =
   let open Yojson.Safe.Util in
   try
     json |> member "_encrypted" |> to_bool
-  with _ -> false
+  with Yojson.Safe.Util.Type_error _ -> false
 
 (** Smart read: transparently decrypt if encrypted, pass through if plain *)
 let smart_read_json ~config ~adata path : (Yojson.Safe.t, encryption_error) result =

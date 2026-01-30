@@ -51,27 +51,20 @@ let state_of_json (json : Yojson.Safe.t) : tempo_state option =
     let last_adjusted = json |> member "last_adjusted" |> to_float in
     let reason = json |> member "reason" |> to_string in
     Some { current_interval_s; last_adjusted; reason }
-  with _ -> None
+  with Yojson.Safe.Util.Type_error (msg, _) ->
+    Printf.eprintf "[WARN] state_of_json: %s\n%!" msg;
+    None
 
 (** Load current tempo state *)
 let load_state (config : Room_utils.config) : tempo_state =
+  let default_state = { current_interval_s = default_config.default_interval_s;
+                        last_adjusted = 0.0; reason = "default" } in
   let path = tempo_file config in
   if Sys.file_exists path then
-    try
-      let ic = open_in path in
-      let content = really_input_string ic (in_channel_length ic) in
-      close_in ic;
-      let json = Yojson.Safe.from_string content in
-      match state_of_json json with
-      | Some state -> state
-      | None ->
-        { current_interval_s = default_config.default_interval_s;
-          last_adjusted = 0.0;
-          reason = "default" }
-    with _ ->
-      { current_interval_s = default_config.default_interval_s;
-        last_adjusted = 0.0;
-        reason = "default" }
+    match Safe_ops.read_json_file_safe path with
+    | Ok json ->
+      (match state_of_json json with Some state -> state | None -> default_state)
+    | Error _ -> default_state
   else
     { current_interval_s = default_config.default_interval_s;
       last_adjusted = 0.0;

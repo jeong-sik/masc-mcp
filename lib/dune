@@ -70,6 +70,7 @@
    sctp
    sctp_eio
    sctp_transport
+   safe_ops
    sdp
    session
    spawn
@@ -116,6 +117,7 @@
   voice_bridge
   voice_session_manager
   voice_stream
+   version
    void
    webrtc_bindings
    webrtc_common
@@ -165,6 +167,8 @@
    uuidm
    ;; Zstd compression
    zstd
+   ;; Version auto-sync from dune-project
+   dune-build-info
    )
  (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq))
  (instrumentation (backend bisect_ppx)))

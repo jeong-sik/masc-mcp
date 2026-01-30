@@ -52,18 +52,16 @@ let of_json json =
       | _ -> categories_for_mode mode
     in
     { mode; enabled_categories }
-  with _ -> default
+  with e ->
+    Printf.eprintf "[WARN] config of_json failed: %s\n%!" (Printexc.to_string e);
+    default
 
 (** Load config from file *)
 let load room_path =
   let path = config_path room_path in
-  if Sys.file_exists path then
-    try
-      let json = Yojson.Safe.from_file path in
-      of_json json
-    with _ -> default
-  else
-    default
+  match Safe_ops.read_json_file_safe path with
+  | Ok json -> of_json json
+  | Error _ -> default
 
 (** Save config to file *)
 let save room_path config =

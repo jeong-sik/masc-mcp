@@ -49,6 +49,12 @@
  (modules test_planning_eio)
  (libraries masc_mcp alcotest str yojson))
 
+; Safe_ops module tests (safe exception handling)
+(test
+ (name test_safe_ops)
+ (modules test_safe_ops)
+ (libraries masc_mcp alcotest str yojson))
+
 ; Dispatch chain evidence test
 (test
  (name test_dispatch_chain_evidence)

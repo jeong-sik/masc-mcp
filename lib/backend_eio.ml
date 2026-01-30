@@ -104,7 +104,9 @@ module Compression = struct
   (** Decompress with known original size and dict flag *)
   let decompress ~(orig_size : int) ~(used_dict : bool) (compressed : string) : string option =
     try Some (Compression_dict.decompress ~orig_size ~used_dict compressed)
-    with _ -> None
+    with e ->
+      Printf.eprintf "[WARN] decompress failed: %s\n%!" (Printexc.to_string e);
+      None
 
   (** Auto-decompress if ZSTD/ZSTDD header present *)
   let decompress_auto (data : string) : string =
@@ -169,7 +171,7 @@ module FileSystem = struct
     let path = Eio.Path.(fs / config.base_path) in
     (* Ensure base directory exists *)
     (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 path
-     with _ -> ());
+     with e -> Eio.traceln "[WARN] mkdirs base failed: %s" (Printexc.to_string e));
     {
       config;
       fs = path;
@@ -255,7 +257,7 @@ module FileSystem = struct
             (match Eio.Path.split path with
              | Some (parent, _) ->
                  (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
-                  with _ -> ())
+                  with e -> Eio.traceln "[WARN] mkdirs failed: %s" (Printexc.to_string e))
              | None -> ());
             (* Compact Protocol v4: Compress before saving (if beneficial) *)
             let compressed = Compression.compress_with_header value in
@@ -275,7 +277,7 @@ module FileSystem = struct
           match Eio.Path.kind ~follow:true path with
           | `Regular_file -> true
           | _ -> false
-        with _ -> false
+        with Eio.Io _ -> false
 
   (** Delete key *)
   let delete t key =
@@ -330,7 +332,7 @@ module FileSystem = struct
                 (match Eio.Path.split path with
                  | Some (parent, _) ->
                      (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
-                      with _ -> ())
+                      with e -> Eio.traceln "[WARN] mkdirs failed: %s" (Printexc.to_string e))
                  | None -> ());
                 (* Write with exclusive create *)
                 Eio.Path.save ~create:(`Exclusive 0o644) path compressed;
@@ -388,7 +390,9 @@ module FileSystem = struct
       | Some owner, Some acquired_at, Some expires_at ->
           Some { owner; acquired_at; expires_at }
       | _ -> None
-    with _ -> None
+    with e ->
+      Printf.eprintf "[WARN] parse_lock_info failed: %s\n%!" (Printexc.to_string e);
+      None
 
   let acquire_lock t ~key ~owner ~ttl_seconds =
     let lock_key = "locks:" ^ key in
@@ -465,7 +469,7 @@ module FileSystem = struct
           (match Eio.Path.split path with
            | Some (parent, _) ->
                (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
-                with _ -> ())
+                with e -> Eio.traceln "[WARN] mkdirs failed: %s" (Printexc.to_string e))
            | None -> ());
 
           (* Get the actual filesystem path string *)
@@ -500,8 +504,7 @@ module FileSystem = struct
           let current =
             if n = 0 then 0
             else
-              try int_of_string (String.trim (Bytes.sub_string buf 0 n))
-              with _ -> 0
+              Safe_ops.int_of_string_with_default ~default:0 (String.trim (Bytes.sub_string buf 0 n))
           in
 
           (* Increment and write back *)
@@ -532,7 +535,7 @@ module FileSystem = struct
             let buf = Bytes.create 32 in
             let n = Unix.read fd buf 0 32 in
             if n = 0 then Ok 0
-            else Ok (try int_of_string (String.trim (Bytes.sub_string buf 0 n)) with _ -> 0)
+            else Ok (Safe_ops.int_of_string_with_default ~default:0 (String.trim (Bytes.sub_string buf 0 n)))
         with exn ->
           Error (IOError (Printf.sprintf "atomic_get failed: %s" (Printexc.to_string exn)))
 
@@ -552,7 +555,7 @@ module FileSystem = struct
           (match Eio.Path.split path with
            | Some (parent, _) ->
                (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
-                with _ -> ())
+                with e -> Eio.traceln "[WARN] mkdirs failed: %s" (Printexc.to_string e))
            | None -> ());
 
           let path_str = Eio.Path.native_exn path in

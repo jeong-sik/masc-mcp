@@ -1,5 +1,6 @@
 (** MASC MCP - Main Library Entry Point (Eio-only) *)
 
+module Version = Version
 module Log = Log
 module Types = Types
 module Nickname = Nickname
@@ -30,6 +31,7 @@ module Mcp_server_eio = Mcp_server_eio
 module Mcp_session = Mcp_session
 module Http_server_eio = Http_server_eio
 module Graphql_api = Graphql_api
+module Safe_ops = Safe_ops
 module Sse = Sse
 module Web_dashboard = Web_dashboard
 module Credits_dashboard = Credits_dashboard

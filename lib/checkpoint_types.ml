@@ -92,8 +92,9 @@ let is_timed_out ~created_at ~timeout_minutes =
 
 (** Parse JSON safely *)
 let parse_json_string s =
-  try Some (Yojson.Safe.from_string s)
-  with _ -> None
+  match Safe_ops.parse_json_safe ~context:"checkpoint" s with
+  | Ok json -> Some json
+  | Error _ -> None
 
 (** Validate JSON state string *)
 let is_valid_json_state state =

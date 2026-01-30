@@ -140,7 +140,7 @@ let generate_session_id () =
 
 (** Get hostname *)
 let get_hostname () =
-  try Some (Unix.gethostname ()) with _ -> None
+  try Some (Unix.gethostname ()) with Unix.Unix_error _ -> None
 
 (** Get current TTY - uses TTY environment variable or /dev/tty check *)
 let get_tty () =
@@ -150,10 +150,12 @@ let get_tty () =
     | None ->
         (* Try to read from /dev/tty symlink *)
         let ic = Unix.open_process_in "tty 2>/dev/null" in
-        let result = try Some (input_line ic) with _ -> None in
+        let result = try Some (input_line ic) with End_of_file -> None in
         ignore (Unix.close_process_in ic);
         result
-  with _ -> None
+  with e ->
+    Printf.eprintf "[WARN] get_tty failed: %s\n%!" (Printexc.to_string e);
+    None
 
 (** Resolve agent name - supports both exact nickname and agent_type prefix match.
     Returns the actual agent name (nickname) if found, otherwise original name. *)
@@ -1098,7 +1100,7 @@ let claim_next config ~agent_name =
                          tm_mday = d; tm_mon = mo - 1; tm_year = y - 1900;
                          tm_wday = 0; tm_yday = 0; tm_isdst = false } in
               Some (fst (Unix.mktime tm)))
-        with _ -> None
+        with Scanf.Scan_failure _ | Failure _ | End_of_file -> None
       in
       let effective_priority (task : Types.task) =
         let age_hours =
@@ -1543,10 +1545,9 @@ let is_valid_filename name =
 
 (** Extract seq number from filename like "000001885_unknown_broadcast.json" or "1664_codex_broadcast.json" *)
 let extract_seq_from_filename name =
-  try
-    let idx = String.index name '_' in
-    int_of_string (String.sub name 0 idx)
-  with _ -> 0
+  match String.index_opt name '_' with
+  | None -> 0
+  | Some idx -> Safe_ops.int_of_string_with_default ~default:0 (String.sub name 0 idx)
 
 (** Get raw message list (for dashboard) *)
 let get_messages_raw config ~since_seq ~limit =
@@ -2202,7 +2203,7 @@ let read_tempo config : tempo_config =
       match tempo_config_of_yojson (read_json config path) with
       | Ok t -> t
       | Error _ -> default_tempo_config
-    with _ -> default_tempo_config
+    with Sys_error _ | Yojson.Json_error _ -> default_tempo_config
   else
     default_tempo_config
 
@@ -2292,15 +2293,11 @@ let current_room_path config = current_room_root_path config
 (** Read current room ID *)
 let read_current_room config =
   let read_from path =
-    if Sys.file_exists path then
-      try
-        let ic = open_in path in
-        let room_id = input_line ic in
-        close_in ic;
-        Some (String.trim room_id)
-      with _ -> None
-    else
-      None
+    match Safe_ops.read_file_safe path with
+    | Ok content ->
+      let trimmed = String.trim content in
+      if trimmed = "" then None else Some trimmed
+    | Error _ -> None
   in
   match read_from (current_room_path config) with
   | Some room_id -> Some room_id
@@ -2521,7 +2518,7 @@ let room_enter config ~room_id ?(agent_name="") ~agent_type () : Yojson.Safe.t =
           in
           let end_idx = String.index_from join_result start_idx '\n' in
           String.sub join_result start_idx (end_idx - start_idx)
-        with _ -> agent_type ^ "-unknown"
+        with Not_found | Invalid_argument _ -> agent_type ^ "-unknown"
       in
 
       `Assoc [

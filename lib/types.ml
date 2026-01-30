@@ -69,7 +69,7 @@ let parse_iso8601 ?(default_time = Unix.gettimeofday () -. 60.0) timestamp =
           tm_mday=d; tm_mon=m-1; tm_year=y-1900;
           tm_wday=0; tm_yday=0; tm_isdst=false } in
         fst (Unix.mktime tm))
-  with _ -> default_time
+  with Scanf.Scan_failure _ | Failure _ | End_of_file -> default_time
 
 (** Agent status - compile-time state machine *)
 type agent_status =

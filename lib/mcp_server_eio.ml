@@ -103,7 +103,8 @@ let wait_for_message_eio ~clock (registry : Session.registry) ~agent_name ~timeo
   in
 
   try wait_loop ()
-  with _ ->
+  with exn ->
+    Eio.traceln "[WARN] listen wait_loop interrupted: %s" (Printexc.to_string exn);
     Session.update_activity registry ~agent_name ~is_listening:(Some false) ();
     None
 
@@ -113,14 +114,10 @@ let wait_for_message_eio ~clock (registry : Session.registry) ~agent_name ~timeo
     All underlying operations are already synchronous.
 *)
 let handle_read_resource_eio state id params =
-  let open Yojson.Safe.Util in
   match params with
   | None -> make_error ~id (-32602) "Missing params"
   | Some (`Assoc _ as p) ->
-      let uri_str =
-        try p |> member "uri" |> to_string
-        with _ -> ""
-      in
+      let uri_str = Safe_ops.json_string "uri" p in
       if uri_str = "" then
         make_error ~id (-32602) "Missing uri"
       else begin
@@ -133,10 +130,10 @@ let handle_read_resource_eio state id params =
           if Sys.file_exists msgs_path then
             (* Extract seq number from filename like "000001885_unknown_broadcast.json" or "1664_codex_broadcast.json" *)
             let extract_seq name =
-              try
-                let idx = String.index name '_' in
-                int_of_string (String.sub name 0 idx)
-              with _ -> 0
+              match String.index_opt name '_' with
+              | None -> 0
+              | Some idx ->
+                Safe_ops.int_of_string_with_default ~default:0 (String.sub name 0 idx)
             in
             let files = Sys.readdir msgs_path |> Array.to_list
               |> List.sort (fun a b -> compare (extract_seq b) (extract_seq a)) in
@@ -429,7 +426,7 @@ let read_audit_events (config : Room.config) ~since : audit_event list =
           let success = json |> member "success" |> to_bool in
           let detail = json |> member "detail" |> to_string_option in
           Some { timestamp; agent; event_type; success; detail }
-      with _ -> None
+      with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
     ) lines
 
 (* ============================================ *)
@@ -462,7 +459,7 @@ let mcp_session_of_json (json : Yojson.Safe.t) : mcp_session_record option =
     let created_at = json |> member "created_at" |> to_float in
     let last_seen = json |> member "last_seen" |> to_float in
     Some { id; agent_name; created_at; last_seen }
-  with _ -> None
+  with Yojson.Safe.Util.Type_error _ -> None
 
 let load_mcp_sessions (config : Room.config) : mcp_session_record list =
   let path = mcp_sessions_path config in
@@ -572,7 +569,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           let name = input_line ic in
           close_in ic;
           if name = "" then None else Some name
-        with _ -> None
+        with Sys_error _ | End_of_file -> None
   in
 
   (* Helper: Write agent_name to MCP session file *)
@@ -585,39 +582,33 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           let oc = open_out file in
           output_string oc agent_name;
           close_out oc
-        with _ -> ()
+        with Sys_error msg ->
+          Printf.eprintf "[WARN] write_mcp_session_agent: %s\n%!" msg
   in
 
-  (* Helper to get string with default *)
+  (* Helper to get values from JSON arguments - delegates to Safe_ops *)
   let get_string key default =
-    try arguments |> member key |> to_string
-    with _ -> default
+    Safe_ops.json_string ~default key arguments
   in
   let get_int key default =
-    try arguments |> member key |> to_int
-    with _ -> default
+    Safe_ops.json_int ~default key arguments
   in
   let get_float key default =
-    try arguments |> member key |> to_float
-    with _ -> default
+    Safe_ops.json_float ~default key arguments
   in
   let get_bool key default =
-    try arguments |> member key |> to_bool
-    with _ -> default
+    Safe_ops.json_bool ~default key arguments
   in
   let get_string_list key =
-    try arguments |> member key |> to_list |> List.map to_string
-    with _ -> []
+    Safe_ops.json_string_list key arguments
   in
   let get_string_opt key =
-    try
-      let v = arguments |> member key |> to_string in
-      if v = "" then None else Some v
-    with _ -> None
+    match Safe_ops.json_string_opt key arguments with
+    | Some "" -> None
+    | other -> other
   in
   let _get_int_opt key =
-    try Some (arguments |> member key |> to_int)
-    with _ -> None
+    Safe_ops.json_int_opt key arguments
   in
 
   (* Resolve agent_name with MCP session persistence:
@@ -646,7 +637,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
               Printf.eprintf "[DEBUG] agent_name from TERM session: %s\n%!" name;
               name
             end else raise Not_found
-          with _ ->
+          with Sys_error _ | End_of_file | Not_found ->
             (* Generate new UUID only as last resort *)
             let uuid = Uuidm.v4_gen (Random.State.make_self_init ()) () in
             let short = String.sub (Uuidm.to_string uuid) 0 8 in
@@ -723,7 +714,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     if room_initialized then
       (* Some tools (e.g., masc_init) must run before initialization.
          Guard the join check to avoid raising and crashing the server. *)
-      try Room.is_agent_joined config ~agent_name with _ -> false
+      try Room.is_agent_joined config ~agent_name
+      with Sys_error _ | Yojson.Json_error _ -> false
     else
       false
   in
@@ -905,7 +897,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           in
           let end_idx = String.index_from result start_idx '\n' in
           String.sub result start_idx (end_idx - start_idx)
-        with _ -> agent_name (* Fallback to original if parsing fails *)
+        with Not_found | Invalid_argument _ -> agent_name (* Fallback to original if parsing fails *)
       in
       let _ = Session.register registry ~agent_name:nickname in
       (* Save nickname to MCP session file (HTTP persistence) *)
@@ -918,7 +910,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         let oc = open_out agent_file in
         output_string oc nickname;
         close_out oc
-      with _ -> ());
+      with e ->
+        Eio.traceln "[WARN] Failed to write agent file %s: %s" agent_file (Printexc.to_string e));
       (true, result)
 
   | "masc_leave" ->
@@ -927,7 +920,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       (* Clean up self-echo filter file *)
       let session_id = try Sys.getenv "TERM_SESSION_ID" with Not_found -> "default" in
       let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" session_id in
-      (try Sys.remove agent_file with _ -> ());
+      Safe_ops.remove_file_logged ~context:"masc_leave" agent_file;
       (true, result)
 
 
@@ -1404,8 +1397,7 @@ let handle_call_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state id params 
 
   (* Audit log (tool_call) if enabled *)
   let agent_name =
-    try arguments |> member "agent_name" |> to_string
-    with _ -> "unknown"
+    Safe_ops.json_string ~default:"unknown" "agent_name" arguments
   in
   append_audit_event state.Mcp_server.room_config {
     timestamp = Unix.gettimeofday ();
@@ -1426,7 +1418,8 @@ let handle_call_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state id params 
      | Some fs ->
          (try Telemetry_eio.track_tool_called ~fs state.Mcp_server.room_config
                 ~tool_name:name ~success ~duration_ms ()
-          with _ -> ())
+          with exn ->
+            Printf.eprintf "[WARN] telemetry tracking failed: %s\n%!" (Printexc.to_string exn))
      | None -> ());
 
   let result = make_response ~id (`Assoc [

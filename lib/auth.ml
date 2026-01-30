@@ -50,7 +50,7 @@ let load_auth_config config : auth_config =
       match auth_config_of_yojson json with
       | Ok cfg -> cfg
       | Error _ -> default_auth_config
-    with _ -> default_auth_config
+    with Sys_error _ | Yojson.Json_error _ -> default_auth_config
   else
     default_auth_config
 
@@ -81,7 +81,7 @@ let load_credential config agent_name : agent_credential option =
       match agent_credential_of_yojson json with
       | Ok cred -> Some cred
       | Error _ -> None
-    with _ -> None
+    with Sys_error _ | Yojson.Json_error _ -> None
   else
     None
 

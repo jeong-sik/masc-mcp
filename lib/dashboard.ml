@@ -74,7 +74,7 @@ let parse_iso_timestamp (s : string) : float option =
       let tz_offset = local_t -. utc_as_local in
       Some (local_t -. tz_offset)
     )
-  with _ -> None
+  with Scanf.Scan_failure _ | Failure _ | End_of_file -> None
 
 (** Get agents section *)
 let agents_section (config : Room_utils.config) : section =

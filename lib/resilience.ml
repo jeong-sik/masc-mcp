@@ -28,7 +28,7 @@ module Time = struct
           let utc_time, _ = Unix.mktime utc_tm in
           let offset = local_time -. utc_time in
           Some (local_time +. offset))
-    with _ -> None
+    with Scanf.Scan_failure _ | Failure _ | End_of_file -> None
 
   (** Check if a timestamp is older than threshold *)
   let is_stale ?(threshold=default_zombie_threshold) timestamp_str =

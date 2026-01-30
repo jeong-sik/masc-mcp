@@ -72,7 +72,13 @@ let entry_of_json (json : Yojson.Safe.t) : cache_entry option =
     in
     let tags = json |> member "tags" |> to_list |> List.map to_string in
     Some { key; value; created_at; expires_at; tags }
-  with _ -> None
+  with
+  | Yojson.Safe.Util.Type_error (msg, _) ->
+    Printf.eprintf "[cache] JSON type error in entry_of_json: %s\n%!" msg;
+    None
+  | e ->
+    Printf.eprintf "[cache] Unexpected error in entry_of_json: %s\n%!" (Printexc.to_string e);
+    None
 
 (** Check if entry is expired *)
 let is_expired entry =
@@ -145,25 +151,27 @@ let list config ?(tag : string option) () : cache_entry list =
         None
       else
         let path = Filename.concat dir filename in
-        try
-          let ic = open_in path in
-          let content = really_input_string ic (in_channel_length ic) in
-          close_in ic;
-          let json = Yojson.Safe.from_string content in
-          match entry_of_json json with
-          | Some entry ->
-            if is_expired entry then begin
-              Sys.remove path;
-              None
-            end else begin
-              match tag with
-              | None -> Some entry
-              | Some t ->
-                if List.mem t entry.tags then Some entry
-                else None
-            end
-          | None -> None
-        with _ -> None
+        match Safe_ops.read_file_safe path with
+        | Error _ -> None  (* File read error - skip this entry *)
+        | Ok content ->
+          match Safe_ops.parse_json_safe ~context:"cache_get_all" content with
+          | Error msg ->
+            Printf.eprintf "[cache] %s\n%!" msg;
+            None
+          | Ok json ->
+            match entry_of_json json with
+            | Some entry ->
+              if is_expired entry then begin
+                Safe_ops.remove_file_logged ~context:"cache_expire" path;
+                None
+              end else begin
+                match tag with
+                | None -> Some entry
+                | Some t ->
+                  if List.mem t entry.tags then Some entry
+                  else None
+              end
+            | None -> None
     ) entries
 
 (** Clear all cache entries - synchronous *)
@@ -177,7 +185,7 @@ let clear config : (int, string) result =
       let count = List.fold_left (fun acc filename ->
         if Filename.check_suffix filename ".json" then begin
           let path = Filename.concat dir filename in
-          (try Sys.remove path with _ -> ());
+          Safe_ops.remove_file_logged ~context:"cache_clear" path;
           acc + 1
         end else acc
       ) 0 entries in
@@ -199,15 +207,15 @@ let stats config : (int * int * float, string) result =
           let path = Filename.concat dir filename in
           let file_size = (Unix.stat path).st_size in
           let is_exp =
-            try
-              let ic = open_in path in
-              let content = really_input_string ic (in_channel_length ic) in
-              close_in ic;
-              let json = Yojson.Safe.from_string content in
-              match entry_of_json json with
-              | Some entry -> is_expired entry
-              | None -> false
-            with _ -> false
+            match Safe_ops.read_file_safe path with
+            | Error _ -> false
+            | Ok content ->
+              match Safe_ops.parse_json_safe ~context:"cache_stats" content with
+              | Error _ -> false
+              | Ok json ->
+                match entry_of_json json with
+                | Some entry -> is_expired entry
+                | None -> false
           in
           (t + 1, e + (if is_exp then 1 else 0), s +. float_of_int file_size)
         else (t, e, s)

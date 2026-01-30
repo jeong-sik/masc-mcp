@@ -194,7 +194,7 @@ let resolve_path json path =
 let json_to_float = function
   | `Int i -> Some (float_of_int i)
   | `Float f -> Some f
-  | `String s -> (try Some (float_of_string s) with _ -> None)
+  | `String s -> (try Some (float_of_string s) with Failure _ -> None)
   | _ -> None
 
 (** Check goal condition against result *)
@@ -352,7 +352,7 @@ let bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn =
               (* 6. Parse output as JSON for goal check *)
               let output_json =
                 try Yojson.Safe.from_string spawn_result.output
-                with _ -> `Assoc [("raw", `String spawn_result.output)]
+                with Yojson.Json_error _ -> `Assoc [("raw", `String spawn_result.output)]
               in
 
               let goal_met = check_goal output_json goal in
@@ -446,29 +446,22 @@ let retry_config_of_json json =
   else
     {
       max_retries =
-        (try retry |> member "max_retries" |> to_int
-         with _ -> default_retry_config.max_retries);
+        Safe_ops.json_int ~default:default_retry_config.max_retries "max_retries" retry;
       base_delay_ms =
-        (try retry |> member "base_delay_ms" |> to_int
-         with _ -> default_retry_config.base_delay_ms);
+        Safe_ops.json_int ~default:default_retry_config.base_delay_ms "base_delay_ms" retry;
       max_delay_ms =
-        (try retry |> member "max_delay_ms" |> to_int
-         with _ -> default_retry_config.max_delay_ms);
+        Safe_ops.json_int ~default:default_retry_config.max_delay_ms "max_delay_ms" retry;
       jitter_factor =
-        (try retry |> member "jitter_factor" |> to_float
-         with _ -> default_retry_config.jitter_factor);
+        Safe_ops.json_float ~default:default_retry_config.jitter_factor "jitter_factor" retry;
     }
 
 (** Parse constraints from JSON *)
 let constraints_of_json json =
   let open Yojson.Safe.Util in
-  let get_int_opt key =
-    try Some (json |> member key |> to_int)
-    with _ -> None
-  in
+  let get_int_opt key = Safe_ops.json_int_opt key json in
   let get_float_opt key =
     try Some (json |> member key |> to_float)
-    with _ -> None
+    with Yojson.Safe.Util.Type_error _ -> None
   in
   {
     max_turns = get_int_opt "max_turns";
@@ -476,11 +469,9 @@ let constraints_of_json json =
     max_cost_usd = get_float_opt "max_cost_usd";
     max_time_seconds = get_float_opt "max_time_seconds";
     token_buffer =
-      (try json |> member "token_buffer" |> to_int
-       with _ -> default_constraints.token_buffer);
+      Safe_ops.json_int ~default:default_constraints.token_buffer "token_buffer" json;
     hard_max_iterations =
-      (try json |> member "hard_max_iterations" |> to_int
-       with _ -> default_constraints.hard_max_iterations);
+      Safe_ops.json_int ~default:default_constraints.hard_max_iterations "hard_max_iterations" json;
     retry = retry_config_of_json json;
   }
 

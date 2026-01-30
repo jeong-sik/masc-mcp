@@ -300,7 +300,7 @@ let walph_loop config ~net ~clock ~agent_name ?(preset="drain") ?(max_iterations
                       else if Str.search_forward re claim_result 0 >= 0 then
                         Some (Str.matched_group 1 claim_result)
                       else None
-                    with _ -> None
+                    with Not_found | Invalid_argument _ -> None
                   in
 
                   (* Execute chain if preset has one (not drain) *)

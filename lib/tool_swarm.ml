@@ -14,21 +14,10 @@ type context = {
 }
 
 (** Argument extraction helpers *)
-let get_string args key default =
-  try args |> member key |> to_string
-  with _ -> default
-
-let get_float args key default =
-  try args |> member key |> to_float
-  with _ -> default
-
-let get_int args key default =
-  try args |> member key |> to_int
-  with _ -> default
-
-let get_bool args key default =
-  try args |> member key |> to_bool
-  with _ -> default
+let get_string args key default = Safe_ops.json_string ~default key args
+let get_float args key default = Safe_ops.json_float ~default key args
+let get_int args key default = Safe_ops.json_int ~default key args
+let get_bool args key default = Safe_ops.json_bool ~default key args
 
 (** Tool result type *)
 type result = bool * string

@@ -113,7 +113,7 @@ let load_session t agent_id =
     try
       let json = Yojson.Safe.from_string content in
       Some (session_of_json json)
-    with _ -> None
+    with Sys_error _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
   end else
     None
 

@@ -299,7 +299,10 @@ let wait_for_message registry ~agent_name ~timeout =
   in
 
   let result =
-    try wait_loop () with _ -> None
+    try wait_loop ()
+    with exn ->
+      Printf.eprintf "[WARN] session listen interrupted: %s\n%!" (Printexc.to_string exn);
+      None
   in
   update_activity registry ~agent_name ~is_listening:(Some false) ();
   result

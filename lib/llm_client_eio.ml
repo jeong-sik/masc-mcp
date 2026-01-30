@@ -249,7 +249,7 @@ Output JSON only (no markdown):
             if confidence >= 0.7 then Ok intent
             else Ok Ignore
         | _ -> Ok Ignore
-      with _ -> Ok Ignore
+      with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> Ok Ignore
 
 (** {1 Chain Orchestration} *)
 
@@ -370,7 +370,7 @@ let call_chain ~net ~clock ~goal ?chain_id ?(host=default_host) ?(port=default_p
                           Error (ServerError (500, msg))
                       | _ -> Ok json_str))
             | _ -> Ok json_str
-          with _ -> Ok json_str
+          with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> Ok json_str
         in
         let lines = String.split_on_char '\n' body in
         let data_lines = List.filter_map (fun line ->

@@ -310,14 +310,15 @@ let load_institution ~fs (config : config) : institution option =
     let content = Eio.Path.load path in
     let json = Yojson.Safe.from_string content in
     Some (institution_of_json json)
-  with _ -> None
+  with Eio.Io _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
 
 let save_institution ~fs (config : config) (inst : institution) =
   let file = institution_file config in
   let path = Eio.Path.(fs / file) in
   let dir = Filename.dirname file in
   let dir_path = Eio.Path.(fs / dir) in
-  (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 dir_path with _ -> ());
+  (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 dir_path
+   with Eio.Io _ as e -> Eio.traceln "[WARN] mkdirs %s: %s" dir (Printexc.to_string e));
   let json = institution_to_json inst in
   let content = Yojson.Safe.pretty_to_string json in
   Eio.Path.save ~create:(`Or_truncate 0o644) path content

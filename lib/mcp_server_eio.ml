@@ -701,7 +701,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     "masc_claim"; "masc_claim_next"; "masc_done"; "masc_transition";
     "masc_broadcast"; "masc_add_task"; "masc_batch_add_tasks";
     "masc_worktree_create"; "masc_worktree_remove";
-    "masc_lock"; "masc_unlock"; "masc_release"; "masc_cancel_task";
+    "masc_release"; "masc_cancel_task";
     "masc_vote_create"; "masc_vote_cast"; "masc_interrupt"; "masc_approve"; "masc_reject";
     "masc_portal_open"; "masc_portal_send"; "masc_portal_close";
     "masc_deliver"; "masc_note_add"; "masc_error_add"; "masc_error_resolve";
@@ -774,7 +774,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let simple_ctx_cost : Tool_cost.context = { agent_name } in
   let simple_ctx_walph : _ Tool_walph.context = { config; agent_name; net = get_net (); clock } in
   let simple_ctx_agent : Tool_agent.context = { config; agent_name } in
-  let simple_ctx_lock : Tool_lock.context = { config; agent_name } in
   let simple_ctx_task : Tool_task.context = { config; agent_name } in
   let simple_ctx_room : Tool_room.context = { config; agent_name } in
   let simple_ctx_control : Tool_control.context = { config; agent_name } in
@@ -842,9 +841,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   | Some result -> result
   | None ->
   match Tool_agent.dispatch simple_ctx_agent ~name ~args:arguments with
-  | Some result -> result
-  | None ->
-  match Tool_lock.dispatch simple_ctx_lock ~name ~args:arguments with
   | Some result -> result
   | None ->
   match Tool_task.dispatch simple_ctx_task ~name ~args:arguments with
@@ -1462,7 +1458,7 @@ let handle_initialize_eio id params =
           WRITE: prefer masc_transition (claim/start/done/cancel/release) with expected_version for CAS. \
           WORKFLOW: masc_status → masc_transition(claim) → masc_worktree_create (isolation) → work → masc_transition(done). \
           Use masc_heartbeat periodically; use @agent mentions in masc_broadcast. \
-          Prefer worktrees over file locks for parallel work.");
+          Prefer worktrees for parallel work.");
       ])
 
 let handle_list_tools_eio state id =

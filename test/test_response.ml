@@ -328,56 +328,6 @@ let test_handoff_verified () =
     with Not_found -> false);
   Printf.printf "  test_handoff_verified passed\n"
 
-let test_lock_acquired () =
-  let before_time = Unix.gettimeofday () in
-  let resp = Response.lock_acquired ~file_path:"src/main.ml" ~agent:"claude" () in
-  let after_time = Unix.gettimeofday () in
-
-  assert_true "success is true" resp.success;
-  (* Verify ACTUAL values, not just presence *)
-  assert_equal_string "file_path value" "src/main.ml" (json_get_string resp.data "file_path");
-  assert_equal_string "locked_by value" "claude" (json_get_string resp.data "locked_by");
-
-  (* Verify expires_at is approximately now + 1800 seconds (default timeout) *)
-  let expires_at = json_get_float resp.data "expires_at" in
-  let expected_min = before_time +. 1800.0 in
-  let expected_max = after_time +. 1800.0 +. 1.0 in (* 1 sec tolerance *)
-  assert_true "expires_at in expected range"
-    (expires_at >= expected_min && expires_at <= expected_max);
-
-  (* Test custom timeout - verify it actually changes the expiry *)
-  let before2 = Unix.gettimeofday () in
-  let resp2 = Response.lock_acquired ~file_path:"test.ml" ~agent:"gemini" ~timeout_seconds:600.0 () in
-  let after2 = Unix.gettimeofday () in
-
-  assert_true "custom timeout success" resp2.success;
-  assert_equal_string "custom file_path" "test.ml" (json_get_string resp2.data "file_path");
-  assert_equal_string "custom locked_by" "gemini" (json_get_string resp2.data "locked_by");
-
-  let expires_at2 = json_get_float resp2.data "expires_at" in
-  let expected_min2 = before2 +. 600.0 in
-  let expected_max2 = after2 +. 600.0 +. 1.0 in
-  assert_true "custom expires_at uses 600s timeout"
-    (expires_at2 >= expected_min2 && expires_at2 <= expected_max2);
-  (* Verify it's NOT using default 1800s *)
-  assert_true "custom timeout is shorter than default"
-    (expires_at2 < before2 +. 1800.0);
-
-  Printf.printf "  test_lock_acquired passed\n"
-
-let test_lock_denied () =
-  let resp = Response.lock_denied ~file_path:"src/main.ml" ~held_by:"gemini" in
-  assert_true "success is false" (not resp.success);
-  let err = List.hd resp.errors in
-  assert_equal_string "code" "LOCK_DENIED" err.code;
-  assert_true "has recovery hints" (List.length err.recovery_hints >= 2);
-  (* Should mention held_by agent in hints *)
-  let hints_concat = String.concat " " err.recovery_hints in
-  assert_true "hints mention holder 'gemini'" (
-    try Str.search_forward (Str.regexp "gemini") hints_concat 0 >= 0
-    with Not_found -> false);
-  Printf.printf "  test_lock_denied passed\n"
-
 let test_task_claimed () =
   let resp = Response.task_claimed ~task_id:"task-001" ~agent:"claude" in
   assert_true "success is true" resp.success;
@@ -536,8 +486,6 @@ let () =
   test_drift_detected ();
   test_drift_detected_semantic ();
   test_handoff_verified ();
-  test_lock_acquired ();
-  test_lock_denied ();
   test_task_claimed ();
   test_task_already_claimed ();
   test_task_completed ();

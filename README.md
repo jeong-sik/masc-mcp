@@ -66,7 +66,7 @@ masc_leave(agent_name: "codex")
 - 상태/헬스: `masc_status`, `masc_agents`, `masc_heartbeat`, `masc_cleanup_zombies`
 - 커뮤니케이션: `masc_broadcast`, `masc_messages`, `masc_portal_*`, SSE 이벤트(`/sse`)
 - 안전장치: `masc_interrupt`, `masc_approve`, `masc_reject`
-- 워크스페이스 도우미: `masc_worktree_*`, `masc_lock`/`masc_unlock`, `masc_set_room`
+- 워크스페이스 도우미: `masc_worktree_*`, `masc_set_room`
 - 표면적 줄이기: `masc_switch_mode`, `masc_get_config`
 
 ## 저장소와 백엔드

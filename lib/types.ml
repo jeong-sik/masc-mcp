@@ -684,8 +684,6 @@ type masc_error =
   | TaskAlreadyClaimed of { task_id: string; by: string }
   | TaskNotClaimed of string
   | TaskInvalidState of string  (* For cancelled tasks or invalid state transitions *)
-  | FileLocked of { file: string; by: string }
-  | FileNotLocked of string
   | PortalNotOpen of string
   | PortalAlreadyOpen of { agent: string; target: string }
   | PortalClosed of string
@@ -713,8 +711,6 @@ let masc_error_to_string = function
   | TaskAlreadyClaimed { task_id; by } -> Printf.sprintf "❌ Task %s already claimed by %s" task_id by
   | TaskNotClaimed id -> Printf.sprintf "❌ Task %s is not claimed" id
   | TaskInvalidState msg -> Printf.sprintf "❌ Invalid task state: %s" msg
-  | FileLocked { file; by } -> Printf.sprintf "🔒 File %s is locked by %s" file by
-  | FileNotLocked file -> Printf.sprintf "⚠ File %s is not locked" file
   | PortalNotOpen agent -> Printf.sprintf "❌ No portal open for %s. Use masc_portal_open first." agent
   | PortalAlreadyOpen { agent; target } -> Printf.sprintf "⚠ Portal already open: %s ↔ %s" agent target
   | PortalClosed agent -> Printf.sprintf "❌ Portal is closed for %s. Use masc_portal_open to reopen." agent
@@ -845,8 +841,6 @@ type permission =
   | CanClaimTask
   | CanCompleteTask
   | CanBroadcast
-  | CanLockFile
-  | CanUnlockFile
   | CanOpenPortal
   | CanSendPortal
   | CanCreateWorktree
@@ -862,7 +856,7 @@ let permissions_for_role = function
   | Worker -> [
       CanReadState; CanJoin; CanLeave;
       CanAddTask; CanClaimTask; CanCompleteTask;
-      CanBroadcast; CanLockFile; CanUnlockFile;
+      CanBroadcast;
       CanOpenPortal; CanSendPortal;
       CanCreateWorktree; CanRemoveWorktree;
       CanVote;
@@ -871,7 +865,7 @@ let permissions_for_role = function
       CanInit; CanReset;
       CanReadState; CanJoin; CanLeave;
       CanAddTask; CanClaimTask; CanCompleteTask;
-      CanBroadcast; CanLockFile; CanUnlockFile;
+      CanBroadcast;
       CanOpenPortal; CanSendPortal;
       CanCreateWorktree; CanRemoveWorktree;
       CanVote; CanInterrupt; CanApprove;

@@ -752,10 +752,6 @@ let test_masc_error_task_already_claimed () =
   let s = Types.masc_error_to_string (Types.TaskAlreadyClaimed { task_id = "t1"; by = "agent" }) in
   check bool "contains both" true (String.length s > 0)
 
-let test_masc_error_file_locked () =
-  let s = Types.masc_error_to_string (Types.FileLocked { file = "f.txt"; by = "agent" }) in
-  check bool "contains file" true (String.length s > 0)
-
 let test_masc_error_rate_limit () =
   let s = Types.masc_error_to_string
     (Types.RateLimitExceeded { limit = 100; current = 101; wait_seconds = 5; category = Types.GeneralLimit }) in
@@ -1033,10 +1029,6 @@ let test_masc_error_task_not_claimed () =
 
 let test_masc_error_task_invalid_state () =
   let s = Types.masc_error_to_string (Types.TaskInvalidState "cancelled") in
-  check bool "nonempty" true (String.length s > 0)
-
-let test_masc_error_file_not_locked () =
-  let s = Types.masc_error_to_string (Types.FileNotLocked "file.txt") in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_portal_not_open () =
@@ -1600,7 +1592,6 @@ let () =
       test_case "agent not found" `Quick test_masc_error_agent_not_found;
       test_case "task not found" `Quick test_masc_error_task_not_found;
       test_case "task already claimed" `Quick test_masc_error_task_already_claimed;
-      test_case "file locked" `Quick test_masc_error_file_locked;
       test_case "rate limit" `Quick test_masc_error_rate_limit;
     ];
     "agent_role_to_string", [
@@ -1656,7 +1647,6 @@ let () =
       test_case "agent already joined" `Quick test_masc_error_agent_already_joined;
       test_case "task not claimed" `Quick test_masc_error_task_not_claimed;
       test_case "task invalid state" `Quick test_masc_error_task_invalid_state;
-      test_case "file not locked" `Quick test_masc_error_file_not_locked;
       test_case "portal not open" `Quick test_masc_error_portal_not_open;
       test_case "portal already open" `Quick test_masc_error_portal_already_open;
       test_case "portal closed" `Quick test_masc_error_portal_closed;

@@ -121,7 +121,6 @@ module Tool_rate_limit = Tool_rate_limit
 module Tool_cost = Tool_cost
 module Tool_walph = Tool_walph
 module Tool_agent = Tool_agent
-module Tool_lock = Tool_lock
 module Tool_task = Tool_task
 module Tool_room = Tool_room
 module Tool_control = Tool_control

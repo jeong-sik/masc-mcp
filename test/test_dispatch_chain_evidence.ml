@@ -63,32 +63,6 @@ let () =
   | None ->
       failwith "Tool_agent dispatch returned None for masc_select_agent"
 
-(* Test Tool_lock dispatch *)
-let () =
-  let config = make_test_room () in
-  let ctx : Tool_lock.context = { config; agent_name = "evidence-agent" } in
-  let tool_name = "masc_lock" in
-  let json_input = `Assoc [("file", `String "evidence-test.txt")] in
-  match Tool_lock.dispatch ctx ~name:tool_name ~args:json_input with
-  | Some result ->
-      print_evidence ~tool_name ~json_input ~result ~routed_to:"Tool_lock.handle_lock"
-  | None ->
-      failwith "Tool_lock dispatch returned None for masc_lock"
-
-(* Test Tool_lock unlock dispatch *)
-let () =
-  let config = make_test_room () in
-  let ctx : Tool_lock.context = { config; agent_name = "evidence-agent" } in
-  (* First lock *)
-  let _ = Tool_lock.handle_lock ctx (`Assoc [("file", `String "unlock-evidence.txt")]) in
-  let tool_name = "masc_unlock" in
-  let json_input = `Assoc [("file", `String "unlock-evidence.txt")] in
-  match Tool_lock.dispatch ctx ~name:tool_name ~args:json_input with
-  | Some result ->
-      print_evidence ~tool_name ~json_input ~result ~routed_to:"Tool_lock.handle_unlock"
-  | None ->
-      failwith "Tool_lock dispatch returned None for masc_unlock"
-
 (* Test Tool_audit dispatch *)
 let () =
   let config = make_test_room () in

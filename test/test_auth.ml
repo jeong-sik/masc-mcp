@@ -151,8 +151,6 @@ let test_worker_permissions () =
     (Types.has_permission Types.Worker Types.CanReadState);
   check bool "worker can claim" true
     (Types.has_permission Types.Worker Types.CanClaimTask);
-  check bool "worker can lock" true
-    (Types.has_permission Types.Worker Types.CanLockFile);
   check bool "worker cannot init" false
     (Types.has_permission Types.Worker Types.CanInit)
 

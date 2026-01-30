@@ -182,7 +182,6 @@ let permission_denied ~action ~resource : t =
     ~message:(Printf.sprintf "Permission denied: cannot %s %s" action resource)
     ~hints:[
       "Check if you have the required permissions";
-      "The resource may be locked by another agent";
     ]
     ()
 
@@ -261,40 +260,6 @@ let handoff_verified ~similarity : t =
       ("similarity", `Float similarity);
       ("verified", `Bool true);
     ])
-
-(* ========================================
-   Lock-Specific Responses
-   ======================================== *)
-
-(** Default lock timeout in seconds - from Env_config *)
-let default_lock_timeout_seconds = Env_config.Lock.timeout_seconds
-
-(** Lock acquired
-    @param timeout_seconds Optional lock timeout, defaults to 30 minutes *)
-let lock_acquired ~file_path ~agent ?(timeout_seconds=default_lock_timeout_seconds) () : t =
-  ok
-    ~message:(Printf.sprintf "Lock acquired on '%s'" file_path)
-    (`Assoc [
-      ("file_path", `String file_path);
-      ("locked_by", `String agent);
-      ("expires_at", `Float (Unix.gettimeofday () +. timeout_seconds));
-    ])
-
-(** Lock denied (held by another) *)
-let lock_denied ~file_path ~held_by : t =
-  error
-    ~code:"LOCK_DENIED"
-    ~message:(Printf.sprintf "Cannot acquire lock on '%s'" file_path)
-    ~data:(`Assoc [
-      ("file_path", `String file_path);
-      ("held_by", `String held_by);
-    ])
-    ~hints:[
-      Printf.sprintf "Wait for '%s' to release the lock" held_by;
-      Printf.sprintf "Ask '%s' via broadcast if they still need the lock" held_by;
-      "Consider using a worktree instead for better isolation";
-    ]
-    ()
 
 (* ========================================
    Task-Specific Responses

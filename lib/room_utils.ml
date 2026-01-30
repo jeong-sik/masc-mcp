@@ -389,23 +389,6 @@ let backend_get_all config ~prefix =
   | FileSystem t -> Backend.FileSystemBackend.get_all t ~prefix
   | PostgresNative t -> Backend.PostgresNative.get_all t ~prefix
 
-let lock_count config =
-  let is_active now value =
-    match Safe_ops.parse_json_safe ~context:"lock_is_active" value with
-    | Error _ -> true  (* If we can't parse, assume active (safe default) *)
-    | Ok json ->
-      let open Yojson.Safe.Util in
-      match json |> member "expires_at" |> to_float_option with
-      | Some expires_at -> expires_at > now
-      | None -> true
-  in
-  let now = Unix.gettimeofday () in
-  match backend_get_all config ~prefix:"locks:" with
-  | Ok pairs ->
-      List.fold_left (fun acc (_key, value) ->
-        if is_active now value then acc + 1 else acc
-      ) 0 pairs
-  | Error _ -> 0
 
 let backend_set_if_not_exists config ~key ~value =
   match config.backend with
@@ -839,7 +822,7 @@ let with_file_lock_r config path f : ('a, masc_error) result =
           ~finally:(fun () -> ignore (backend_release_lock config ~key ~owner))
           (fun () -> Ok (f ()))
       else
-        Error (FileLocked { file = path; by = "distributed lock timeout" })
+        Error (IoError (Printf.sprintf "Failed to acquire distributed lock for %s" path))
 
 (* ============================================ *)
 (* Event logging                                *)

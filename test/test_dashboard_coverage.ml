@@ -181,32 +181,6 @@ let test_truncate_message_preserves_prefix () =
      String.sub result 0 (String.length prefix) = prefix)
 
 (* ============================================================
-   ends_with Tests
-   ============================================================ *)
-
-let test_ends_with_true () =
-  check bool "ends with .txt" true (Dashboard.ends_with ~suffix:".txt" "file.txt")
-
-let test_ends_with_false () =
-  check bool "not ends with .txt" false (Dashboard.ends_with ~suffix:".txt" "file.json")
-
-let test_ends_with_empty_suffix () =
-  check bool "empty suffix" true (Dashboard.ends_with ~suffix:"" "anything")
-
-let test_ends_with_empty_string () =
-  check bool "empty string, non-empty suffix" false (Dashboard.ends_with ~suffix:".txt" "")
-
-let test_ends_with_equal () =
-  check bool "equal strings" true (Dashboard.ends_with ~suffix:"test" "test")
-
-let test_ends_with_longer_suffix () =
-  check bool "suffix longer than string" false
-    (Dashboard.ends_with ~suffix:"verylongsuffix" "short")
-
-let test_ends_with_flock () =
-  check bool "ends with .flock" true (Dashboard.ends_with ~suffix:".flock" "agent.flock")
-
-(* ============================================================
    parse_worktrees Tests
    ============================================================ *)
 
@@ -286,14 +260,6 @@ let test_parse_worktrees_unexpected_structure () =
   | _ -> fail "unexpected exception"
 
 (* ============================================================
-   count_lock_files Tests (pure recursive function)
-   ============================================================ *)
-
-let test_count_lock_files_nonexistent () =
-  let count = Dashboard.count_lock_files "/nonexistent/path/xyz" in
-  check int "zero for nonexistent" 0 count
-
-(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -334,15 +300,6 @@ let () =
       test_case "long" `Quick test_truncate_message_long;
       test_case "preserves prefix" `Quick test_truncate_message_preserves_prefix;
     ];
-    "ends_with", [
-      test_case "true" `Quick test_ends_with_true;
-      test_case "false" `Quick test_ends_with_false;
-      test_case "empty suffix" `Quick test_ends_with_empty_suffix;
-      test_case "empty string" `Quick test_ends_with_empty_string;
-      test_case "equal" `Quick test_ends_with_equal;
-      test_case "longer suffix" `Quick test_ends_with_longer_suffix;
-      test_case "flock" `Quick test_ends_with_flock;
-    ];
     "parse_worktrees", [
       test_case "empty list" `Quick test_parse_worktrees_empty_list;
       test_case "null" `Quick test_parse_worktrees_null;
@@ -353,8 +310,5 @@ let () =
       test_case "malformed item" `Quick test_parse_worktrees_malformed_item;
       test_case "missing branch" `Quick test_parse_worktrees_missing_branch;
       test_case "unexpected structure" `Quick test_parse_worktrees_unexpected_structure;
-    ];
-    "count_lock_files", [
-      test_case "nonexistent" `Quick test_count_lock_files_nonexistent;
     ];
   ]

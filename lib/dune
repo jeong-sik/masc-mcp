@@ -103,7 +103,6 @@
    tool_cost
    tool_walph
    tool_agent
-   tool_lock
    tool_task
    tool_room
    tool_control

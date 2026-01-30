@@ -436,50 +436,6 @@ Tip: Search for '@your-name' in results to find mentions.";
   };
 
   {
-    name = "masc_lock";
-    description = "Acquire exclusive lock on a file before editing. Prevents other agents from modifying same file. \
-IMPORTANT: Always unlock after editing! Locks auto-release on masc_leave. \
-Prefer git worktrees for larger changes (masc_worktree_create). \
-Example: masc_lock({agent_name: 'claude', file: 'src/utils.ts'}) → edit → masc_unlock";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Your agent name");
-        ]);
-        ("file", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Relative file path or resource key to lock");
-        ]);
-      ]);
-      ("required", `List [`String "agent_name"; `String "file"]);
-    ];
-  };
-
-  {
-    name = "masc_unlock";
-    description = "Release a file lock after editing is complete. \
-ALWAYS call after masc_lock to allow other agents to edit. \
-Fails silently if you don't hold the lock. \
-Example: masc_unlock({agent_name: 'claude', file: 'src/utils.ts'})";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Your agent name");
-        ]);
-        ("file", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Relative file path or resource key to unlock");
-        ]);
-      ]);
-      ("required", `List [`String "agent_name"; `String "file"]);
-    ];
-  };
-
-  {
     name = "masc_listen";
     description = "Listen for incoming messages (blocking). Returns after message arrives or timeout.";
     input_schema = `Assoc [

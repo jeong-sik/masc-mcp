@@ -219,8 +219,6 @@ let permission_for_tool = function
   | "masc_broadcast" | "masc_listen" | "masc_heartbeat"
   | "masc_register_capabilities" | "masc_find_by_capability"
   | "masc_agent_update" -> Some CanBroadcast
-  | "masc_lock" -> Some CanLockFile
-  | "masc_unlock" -> Some CanUnlockFile
   | "masc_portal_open" | "masc_portal_close" -> Some CanOpenPortal
   | "masc_portal_send" -> Some CanSendPortal
   | "masc_worktree_create" -> Some CanCreateWorktree

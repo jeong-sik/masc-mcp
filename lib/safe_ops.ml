@@ -114,3 +114,50 @@ let get_env_float_logged name ~default =
     | None ->
       Eio.traceln "[WARN] Invalid float for %s=%s, using default %f" name v default;
       default
+
+(** {2 JSON Value Extraction Helpers}
+
+    Safe extraction from Yojson.Safe.t values with proper error handling.
+    These replace `with _ -> default` patterns in JSON parsing code.
+*)
+
+let json_string ?(default = "") key json =
+  let open Yojson.Safe.Util in
+  try json |> member key |> to_string
+  with Type_error _ -> default
+
+let json_int ?(default = 0) key json =
+  let open Yojson.Safe.Util in
+  try json |> member key |> to_int
+  with Type_error _ -> default
+
+let json_float ?(default = 0.0) key json =
+  let open Yojson.Safe.Util in
+  try json |> member key |> to_float
+  with Type_error _ -> default
+
+let json_bool ?(default = false) key json =
+  let open Yojson.Safe.Util in
+  try json |> member key |> to_bool
+  with Type_error _ -> default
+
+let json_string_list key json =
+  let open Yojson.Safe.Util in
+  try json |> member key |> to_list |> List.map to_string
+  with Type_error _ -> []
+
+let json_string_opt key json =
+  let open Yojson.Safe.Util in
+  try
+    match json |> member key with
+    | `Null -> None
+    | j -> Some (to_string j)
+  with Type_error _ -> None
+
+let json_int_opt key json =
+  let open Yojson.Safe.Util in
+  try
+    match json |> member key with
+    | `Null -> None
+    | j -> Some (to_int j)
+  with Type_error _ -> None

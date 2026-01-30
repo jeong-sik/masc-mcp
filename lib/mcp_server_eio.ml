@@ -113,14 +113,10 @@ let wait_for_message_eio ~clock (registry : Session.registry) ~agent_name ~timeo
     All underlying operations are already synchronous.
 *)
 let handle_read_resource_eio state id params =
-  let open Yojson.Safe.Util in
   match params with
   | None -> make_error ~id (-32602) "Missing params"
   | Some (`Assoc _ as p) ->
-      let uri_str =
-        try p |> member "uri" |> to_string
-        with _ -> ""
-      in
+      let uri_str = Safe_ops.json_string "uri" p in
       if uri_str = "" then
         make_error ~id (-32602) "Missing uri"
       else begin
@@ -133,10 +129,10 @@ let handle_read_resource_eio state id params =
           if Sys.file_exists msgs_path then
             (* Extract seq number from filename like "000001885_unknown_broadcast.json" or "1664_codex_broadcast.json" *)
             let extract_seq name =
-              try
-                let idx = String.index name '_' in
-                int_of_string (String.sub name 0 idx)
-              with _ -> 0
+              match String.index_opt name '_' with
+              | None -> 0
+              | Some idx ->
+                Safe_ops.int_of_string_with_default ~default:0 (String.sub name 0 idx)
             in
             let files = Sys.readdir msgs_path |> Array.to_list
               |> List.sort (fun a b -> compare (extract_seq b) (extract_seq a)) in
@@ -588,36 +584,29 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         with _ -> ()
   in
 
-  (* Helper to get string with default *)
+  (* Helper to get values from JSON arguments - delegates to Safe_ops *)
   let get_string key default =
-    try arguments |> member key |> to_string
-    with _ -> default
+    Safe_ops.json_string ~default key arguments
   in
   let get_int key default =
-    try arguments |> member key |> to_int
-    with _ -> default
+    Safe_ops.json_int ~default key arguments
   in
   let get_float key default =
-    try arguments |> member key |> to_float
-    with _ -> default
+    Safe_ops.json_float ~default key arguments
   in
   let get_bool key default =
-    try arguments |> member key |> to_bool
-    with _ -> default
+    Safe_ops.json_bool ~default key arguments
   in
   let get_string_list key =
-    try arguments |> member key |> to_list |> List.map to_string
-    with _ -> []
+    Safe_ops.json_string_list key arguments
   in
   let get_string_opt key =
-    try
-      let v = arguments |> member key |> to_string in
-      if v = "" then None else Some v
-    with _ -> None
+    match Safe_ops.json_string_opt key arguments with
+    | Some "" -> None
+    | other -> other
   in
   let _get_int_opt key =
-    try Some (arguments |> member key |> to_int)
-    with _ -> None
+    Safe_ops.json_int_opt key arguments
   in
 
   (* Resolve agent_name with MCP session persistence:
@@ -918,7 +907,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         let oc = open_out agent_file in
         output_string oc nickname;
         close_out oc
-      with _ -> ());
+      with e ->
+        Eio.traceln "[WARN] Failed to write agent file %s: %s" agent_file (Printexc.to_string e));
       (true, result)
 
   | "masc_leave" ->
@@ -927,7 +917,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       (* Clean up self-echo filter file *)
       let session_id = try Sys.getenv "TERM_SESSION_ID" with Not_found -> "default" in
       let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" session_id in
-      (try Sys.remove agent_file with _ -> ());
+      Safe_ops.remove_file_logged ~context:"masc_leave" agent_file;
       (true, result)
 
 
@@ -1404,8 +1394,7 @@ let handle_call_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state id params 
 
   (* Audit log (tool_call) if enabled *)
   let agent_name =
-    try arguments |> member "agent_name" |> to_string
-    with _ -> "unknown"
+    Safe_ops.json_string ~default:"unknown" "agent_name" arguments
   in
   append_audit_event state.Mcp_server.room_config {
     timestamp = Unix.gettimeofday ();

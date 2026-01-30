@@ -70,6 +70,7 @@
    sctp
    sctp_eio
    sctp_transport
+   safe_ops
    sdp
    session
    spawn

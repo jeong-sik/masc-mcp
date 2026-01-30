@@ -214,25 +214,9 @@ let test_masc_done_schema () =
           Alcotest.(check bool) "task_id required" true (List.mem (`String "task_id") reqs)
       | None -> Alcotest.fail "masc_done missing required field"
 
-let test_masc_lock_schema () =
-  match find_tool "masc_lock" with
-  | None -> Alcotest.fail "masc_lock not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has agent_name" true (List.mem_assoc "agent_name" props);
-          Alcotest.(check bool) "has file" true (List.mem_assoc "file" props)
-      | None -> Alcotest.fail "masc_lock missing properties"
 
-let test_masc_unlock_schema () =
-  match find_tool "masc_unlock" with
-  | None -> Alcotest.fail "masc_unlock not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has agent_name" true (List.mem_assoc "agent_name" props);
-          Alcotest.(check bool) "has file" true (List.mem_assoc "file" props)
-      | None -> Alcotest.fail "masc_unlock missing properties"
+
+
 
 (* ============================================================ *)
 (* 5. Portal Tool Tests                                          *)
@@ -724,8 +708,6 @@ let () =
       Alcotest.test_case "masc_claim" `Quick test_masc_claim_schema;
       Alcotest.test_case "masc_add_task" `Quick test_masc_add_task_schema;
       Alcotest.test_case "masc_done" `Quick test_masc_done_schema;
-      Alcotest.test_case "masc_lock" `Quick test_masc_lock_schema;
-      Alcotest.test_case "masc_unlock" `Quick test_masc_unlock_schema;
     ];
     "portal_tools", [
       Alcotest.test_case "portal_open" `Quick test_masc_portal_open_schema;

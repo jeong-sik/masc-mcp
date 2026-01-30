@@ -22,12 +22,12 @@ type config = {
 
 (** Read .git file content (for worktrees) *)
 let read_git_file path =
-  try
-    let ic = open_in path in
-    let content = input_line ic in
-    close_in ic;
-    Some content
-  with _ -> None
+  match Safe_ops.read_file_safe path with
+  | Ok content ->
+    (match String.split_on_char '\n' content with
+     | line :: _ -> Some (String.trim line)
+     | [] -> None)
+  | Error _ -> None
 
 (** Parse gitdir from .git file
     Format: "gitdir: /path/to/main/.git/worktrees/branch-name"
@@ -310,15 +310,15 @@ let legacy_current_room_path config = Filename.concat config.base_path "current_
 (** Read current room ID from .masc/current_room with legacy fallback. *)
 let read_current_room config =
   let read_from path =
-    if Sys.file_exists path then
-      try
-        let ic = open_in path in
-        let room_id = input_line ic in
-        close_in ic;
-        Some (String.trim room_id)
-      with _ -> None
-    else
-      None
+    match Safe_ops.read_file_safe path with
+    | Ok content ->
+      let trimmed = String.trim content in
+      if trimmed = "" then None
+      else
+        (match String.split_on_char '\n' trimmed with
+         | line :: _ -> Some (String.trim line)
+         | [] -> None)
+    | Error _ -> None
   in
   match read_from (current_room_root_path config) with
   | Some room_id -> Some room_id
@@ -391,13 +391,13 @@ let backend_get_all config ~prefix =
 
 let lock_count config =
   let is_active now value =
-    try
+    match Safe_ops.parse_json_safe ~context:"lock_is_active" value with
+    | Error _ -> true  (* If we can't parse, assume active (safe default) *)
+    | Ok json ->
       let open Yojson.Safe.Util in
-      let json = Yojson.Safe.from_string value in
       match json |> member "expires_at" |> to_float_option with
       | Some expires_at -> expires_at > now
       | None -> true
-    with _ -> true
   in
   let now = Unix.gettimeofday () in
   match backend_get_all config ~prefix:"locks:" with
@@ -684,14 +684,9 @@ let rec mkdir_p path =
   end
 
 let read_json_local path =
-  if Sys.file_exists path then
-    try
-      let content = In_channel.with_open_text path In_channel.input_all in
-      if String.trim content = "" then `Assoc []
-      else Yojson.Safe.from_string content
-    with _ -> `Assoc []
-  else
-    `Assoc []
+  match Safe_ops.read_json_file_safe path with
+  | Ok json -> json
+  | Error _ -> `Assoc []
 
 let write_json_local path json =
   mkdir_p (Filename.dirname path);
@@ -709,10 +704,11 @@ let read_json_root config path =
   | Some key -> begin
       match backend_get config ~key with
       | Ok (Some content) ->
-          (try
-             if String.trim content = "" then `Assoc []
-             else Yojson.Safe.from_string content
-           with _ -> `Assoc [])
+          (let trimmed = String.trim content in
+           if trimmed = "" then `Assoc []
+           else match Safe_ops.parse_json_safe ~context:"read_json_root" trimmed with
+           | Ok json -> json
+           | Error _ -> `Assoc [])
       | Ok None -> `Assoc []
       | Error _ -> `Assoc []
     end
@@ -741,10 +737,11 @@ let read_json config path =
   | Some key -> begin
       match backend_get config ~key with
       | Ok (Some content) ->
-          (try
-             if String.trim content = "" then `Assoc []
-             else Yojson.Safe.from_string content
-           with _ -> `Assoc [])
+          (let trimmed = String.trim content in
+           if trimmed = "" then `Assoc []
+           else match Safe_ops.parse_json_safe ~context:"read_json_root" trimmed with
+           | Ok json -> json
+           | Error _ -> `Assoc [])
       | Ok None -> `Assoc []
       | Error _ -> `Assoc []
     end
@@ -786,7 +783,9 @@ let with_file_lock config path f =
       let fd = Unix.openfile lock_path [Unix.O_CREAT; Unix.O_WRONLY] 0o644 in
       Fun.protect
         ~finally:(fun () ->
-          (try Unix.lockf fd Unix.F_ULOCK 0 with _ -> ());
+          (try Unix.lockf fd Unix.F_ULOCK 0
+           with Unix.Unix_error (err, _, _) ->
+             Printf.eprintf "[WARN] Failed to release flock: %s\n%!" (Unix.error_message err));
           Unix.close fd)
         (fun () ->
           Unix.lockf fd Unix.F_LOCK 0;
@@ -818,7 +817,9 @@ let with_file_lock_r config path f : ('a, masc_error) result =
       let fd = Unix.openfile lock_path [Unix.O_CREAT; Unix.O_WRONLY] 0o644 in
       Fun.protect
         ~finally:(fun () ->
-          (try Unix.lockf fd Unix.F_ULOCK 0 with _ -> ());
+          (try Unix.lockf fd Unix.F_ULOCK 0
+           with Unix.Unix_error (err, _, _) ->
+             Printf.eprintf "[WARN] Failed to release flock: %s\n%!" (Unix.error_message err));
           Unix.close fd)
         (fun () ->
           Unix.lockf fd Unix.F_LOCK 0;

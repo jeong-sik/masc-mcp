@@ -30,11 +30,11 @@ type config = {
 (** Get pubsub max messages from env or default *)
 let pubsub_max_messages_from_env () =
   match Sys.getenv_opt "MASC_PUBSUB_MAX_MESSAGES" with
-  | Some s -> (try int_of_string s with _ -> 1000)
+  | Some s -> Safe_ops.int_of_string_with_default ~default:1000 s
   | None -> 1000
 
 let generate_node_id () =
-  let hostname = try Unix.gethostname () with _ -> "unknown" in
+  let hostname = try Unix.gethostname () with Unix.Unix_error _ -> "unknown" in
   let pid = Unix.getpid () in
   let rand = Random.int 10000 in
   Printf.sprintf "%s-%d-%04d" hostname pid rand
@@ -121,7 +121,7 @@ let safe_parse_lock_json file_path =
       let content = In_channel.with_open_text file_path In_channel.input_all in
       if String.length content = 0 then begin
         (* Empty file is corrupted - remove it *)
-        (try Sys.remove file_path with _ -> ());
+        Safe_ops.remove_file_logged ~context:"backend_lock" file_path;
         None
       end else
         let json = Yojson.Safe.from_string content in
@@ -142,12 +142,12 @@ let safe_parse_lock_json file_path =
         match parse_string_field "owner", parse_float_field "expires_at" with
         | Some own, Some exp -> Some (own, exp)
         | _ ->
-            (try Sys.remove file_path with _ -> ());
+            Safe_ops.remove_file_logged ~context:"backend_lock" file_path;
             None
     with
     | _ ->
         (* Corrupted JSON file - remove it to allow recovery *)
-        (try Sys.remove file_path with _ -> ());
+        Safe_ops.remove_file_logged ~context:"backend_lock" file_path;
         None
 
 (** Acquire exclusive file lock using Unix.lockf.
@@ -163,7 +163,9 @@ let acquire_flock fd =
 
 (** Release file lock *)
 let release_flock fd =
-  try Unix.lockf fd Unix.F_ULOCK 0 with _ -> ()
+  try Unix.lockf fd Unix.F_ULOCK 0
+  with Unix.Unix_error (err, _, _) ->
+    Printf.eprintf "[WARN] Failed to release flock: %s\n%!" (Unix.error_message err)
 
 (* ============================================ *)
 (* Memory Backend (In-Process)                  *)
@@ -404,7 +406,8 @@ module FileSystemBackend : BACKEND = struct
     (try
       if not (Sys.file_exists path) then
         Unix.mkdir path 0o755
-    with _ -> ());
+    with Unix.Unix_error (err, _, _) ->
+      Printf.eprintf "[WARN] Failed to mkdir %s: %s\n%!" path (Unix.error_message err));
     Ok { base_path = path; mutex = Mutex.create () }
 
   let close _t = ()
@@ -415,10 +418,9 @@ module FileSystemBackend : BACKEND = struct
       | Error e -> Error e
       | Ok path ->
           if Sys.file_exists path then
-            try
-              let content = In_channel.with_open_text path In_channel.input_all in
-              Ok (Some content)
-            with _ -> Ok None
+            match Safe_ops.read_file_safe path with
+            | Ok content -> Ok (Some content)
+            | Error _ -> Ok None
           else
             Ok None
     )
@@ -593,11 +595,13 @@ module FileSystemBackend : BACKEND = struct
                 (* Check ownership using safe parser *)
                 match safe_parse_lock_json file_path with
                 | Some (own, _) when own = owner ->
-                    (try Sys.remove file_path with _ -> ());
+                    Safe_ops.remove_file_logged ~context:"backend_lock" file_path;
                     Ok true
                 | Some _ -> Ok false  (* Different owner *)
                 | None -> Ok false    (* No valid lock *)
-              with _ -> Ok false
+              with e ->
+                Printf.eprintf "[WARN] Lock operation failed: %s\n%!" (Printexc.to_string e);
+                Ok false
             in
             release_flock fd;
             Unix.close fd;
@@ -649,7 +653,9 @@ module FileSystemBackend : BACKEND = struct
                   Ok true
                 end else
                   Ok false
-              with _ -> Ok false
+              with e ->
+                Printf.eprintf "[WARN] Lock operation failed: %s\n%!" (Printexc.to_string e);
+                Ok false
             in
             release_flock fd;
             Unix.close fd;
@@ -675,7 +681,9 @@ module FileSystemBackend : BACKEND = struct
       );
       Sys.remove test_path;
       Ok true
-    with _ -> Ok false
+    with e ->
+      Printf.eprintf "[WARN] Health check failed: %s\n%!" (Printexc.to_string e);
+      Ok false
 end
 
 (* ============================================ *)

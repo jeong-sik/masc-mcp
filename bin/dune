@@ -4,7 +4,7 @@
  (modules main_eio)
  (public_name masc-mcp)
  (package masc_mcp)
- (libraries masc_mcp cmdliner eio eio_main httpun-eio gluten-eio caqti-eio))
+ (libraries masc_mcp cmdliner eio eio_main httpun-eio gluten-eio caqti-eio dune-build-info))
 
 (executable
  (name masc_cost)

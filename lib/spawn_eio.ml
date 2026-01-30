@@ -85,7 +85,8 @@ let parse_claude_json output =
     let cost_usd = json |> member "total_cost_usd" |> to_float_option in
     let result_text = json |> member "result" |> to_string_option in
     (result_text, input_tokens, output_tokens, cache_creation, cache_read, cost_usd)
-  with _ ->
+  with
+  | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
     (Some output, None, None, None, None, None)
 
 (** Parse Gemini output for token tracking
@@ -111,7 +112,7 @@ let parse_gemini_output output =
       | _ -> None
     in
     (input_tokens, output_tokens, cached_tokens, cost)
-  with _ ->
+  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
     (None, None, None, None)
 
 (** Parse Ollama output for token tracking
@@ -124,7 +125,7 @@ let parse_ollama_output output =
     let output_tokens = json |> member "eval_count" |> to_int_option in
     (* Local ollama has no cost *)
     (input_tokens, output_tokens, Some 0.0)
-  with _ ->
+  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
     (None, None, None)
 
 (** Parse Codex JSONL output for token tracking
@@ -135,11 +136,10 @@ let parse_codex_output output =
     let lines = String.split_on_char '\n' output in
     let turn_completed = List.find_opt (fun line ->
       String.length line > 0 &&
-      try
-        let json = Yojson.Safe.from_string line in
-        let open Yojson.Safe.Util in
-        json |> member "type" |> to_string = "turn.completed"
-      with _ -> false
+      match Safe_ops.parse_json_safe ~context:"codex_parse" line with
+      | Error _ -> false
+      | Ok json ->
+        Safe_ops.json_string "type" json = "turn.completed"
     ) (List.rev lines) in
     match turn_completed with
     | Some line ->
@@ -157,7 +157,7 @@ let parse_codex_output output =
         in
         (input_tokens, output_tokens, cached, cost)
     | None -> (None, None, None, None)
-  with _ ->
+  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
     (None, None, None, None)
 
 (** Parse GLM (Z.ai) output for token tracking - OpenAI-compatible format
@@ -172,7 +172,7 @@ let parse_glm_output output =
     (* GLM-4.7: Z.ai Coding Plan pricing is subscription-based, estimate $0 per token *)
     let cost = Some 0.0 in
     (input_tokens, output_tokens, cost)
-  with _ ->
+  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
     (None, None, None)
 
 let default_configs = [
@@ -314,7 +314,8 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir () =
                 in
                 let (inp, out, cost) = parse_glm_output raw_output in
                 (text, inp, out, cost)
-              with _ -> (raw_output, None, None, None)
+              with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
+                (raw_output, None, None, None)
             in
             (response_text, inp, out, None, None, cost)
         | _ ->

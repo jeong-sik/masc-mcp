@@ -26,10 +26,9 @@ let credits_json_path () =
 (** Read credits.json *)
 let read_credits_json () : Yojson.Safe.t option =
   let path = credits_json_path () in
-  if Sys.file_exists path then
-    try Some (Yojson.Safe.from_file path)
-    with _ -> None
-  else None
+  match Safe_ops.read_json_file_safe path with
+  | Ok json -> Some json
+  | Error _ -> None
 
 (** Get credits JSON as string *)
 let json_api () : string =

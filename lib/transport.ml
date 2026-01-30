@@ -204,7 +204,8 @@ module Rest = struct
     in
     let params = match body with
       | "" -> `Assoc query_params
-      | s -> (try Yojson.Safe.from_string s with _ -> `Assoc query_params)
+      | s -> (match Safe_ops.parse_json_safe ~context:"http_transport" s with
+              | Ok json -> json | Error _ -> `Assoc query_params)
     in
     { id = None; method_name; params; headers = [] }
 

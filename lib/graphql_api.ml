@@ -663,10 +663,7 @@ let schema =
   ]
 
 let handle_request ~config body_str =
-  let json =
-    try Ok (Yojson.Safe.from_string body_str)
-    with _ -> Error "Invalid JSON payload"
-  in
+  let json = Safe_ops.parse_json_safe ~context:"graphql" body_str in
   match json with
   | Error msg ->
       { status = `Bad_request; body = graphql_error msg }

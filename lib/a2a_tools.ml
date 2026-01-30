@@ -105,7 +105,9 @@ let subscription_of_json (json : Yojson.Safe.t) : subscription option =
     in
     let created_at = json |> member "created_at" |> to_string in
     Some { id; agent_filter; event_types; created_at }
-  with _ -> None
+  with Yojson.Safe.Util.Type_error (msg, _) ->
+    Printf.eprintf "[WARN] subscription_of_json: %s\n%!" msg;
+    None
 
 (** Save subscriptions to file *)
 let save_subscriptions () =
@@ -118,25 +120,24 @@ let save_subscriptions () =
       let oc = open_out !subscriptions_file in
       output_string oc content;
       close_out oc
-    with _ -> ()
+    with e ->
+      Printf.eprintf "[WARN] save_subscriptions failed: %s\n%!" (Printexc.to_string e)
 
 (** Load subscriptions from file *)
 let load_subscriptions () =
   if !subscriptions_file = "" || not (Sys.file_exists !subscriptions_file) then ()
   else
-    try
-      let ic = open_in !subscriptions_file in
-      let content = In_channel.input_all ic in
-      close_in ic;
-      let json = Yojson.Safe.from_string content in
+    match Safe_ops.read_json_file_safe !subscriptions_file with
+    | Error msg -> Printf.eprintf "[WARN] load_subscriptions: %s\n%!" msg
+    | Ok json ->
       let open Yojson.Safe.Util in
-      let subs = json |> member "subscriptions" |> to_list in
+      let subs = try json |> member "subscriptions" |> to_list
+                 with Type_error _ -> [] in
       List.iter (fun j ->
         match subscription_of_json j with
         | Some sub -> Hashtbl.replace subscriptions sub.id sub
         | None -> ()
       ) subs
-    with _ -> ()
 
 (** Initialize A2A tools with MASC directory *)
 let init ~masc_dir =

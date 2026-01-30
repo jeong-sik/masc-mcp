@@ -46,7 +46,9 @@ let run_record_of_json (json : Yojson.Safe.t) : run_record option =
     let created_at = json |> member "created_at" |> to_string in
     let updated_at = json |> member "updated_at" |> to_string in
     Some { task_id; agent_name; plan; deliverable; created_at; updated_at }
-  with _ -> None
+  with Yojson.Safe.Util.Type_error (msg, _) ->
+    Printf.eprintf "[WARN] run_of_json type error: %s\n%!" msg;
+    None
 
 let log_entry_to_json (e : log_entry) : Yojson.Safe.t =
   `Assoc [
@@ -60,7 +62,9 @@ let log_entry_of_json (json : Yojson.Safe.t) : log_entry option =
     let timestamp = json |> member "timestamp" |> to_string in
     let note = json |> member "note" |> to_string in
     Some { timestamp; note }
-  with _ -> None
+  with Yojson.Safe.Util.Type_error (msg, _) ->
+    Printf.eprintf "[WARN] log_entry_of_json type error: %s\n%!" msg;
+    None
 
 let runs_dir (config : config) =
   Filename.concat config.base_path ".masc/runs"
@@ -191,10 +195,9 @@ let read_logs config ~task_id ?limit () : log_entry list =
     let content = In_channel.with_open_text file In_channel.input_all in
     let lines = String.split_on_char '\n' content |> List.filter (fun s -> String.trim s <> "") in
     let entries = List.filter_map (fun line ->
-      try
-        let json = Yojson.Safe.from_string line in
-        log_entry_of_json json
-      with _ -> None
+      match Safe_ops.parse_json_safe ~context:"run_log" line with
+      | Ok json -> log_entry_of_json json
+      | Error _ -> None
     ) lines in
     match limit with
     | None -> entries

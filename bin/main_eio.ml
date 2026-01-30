@@ -1105,6 +1105,40 @@ let make_routes ~port ~host =
          ] in
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.post "/api/v1/broadcast" (fun request reqd ->
+       (* POST /api/v1/broadcast - HTTP API for external tools like autocov *)
+       with_read_auth (fun state _req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let json = Yojson.Safe.from_string body_str in
+             let agent_name = json |> Yojson.Safe.Util.member "agent_name" |> Yojson.Safe.Util.to_string in
+             let message = json |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string in
+             let config = state.Mcp_server.room_config in
+             let _ = Masc_mcp.Room.broadcast config ~from_agent:agent_name ~content:message in
+             Http.Response.json {|{"ok":true}|} reqd
+           with e ->
+             Http.Response.json
+               (Printf.sprintf {|{"ok":false,"error":"%s"}|} (Printexc.to_string e))
+               reqd
+         )
+       ) request reqd)
+  |> Http.Router.post "/broadcast" (fun request reqd ->
+       (* POST /broadcast - Alias for autocov compatibility *)
+       with_read_auth (fun state _req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let json = Yojson.Safe.from_string body_str in
+             let agent_name = json |> Yojson.Safe.Util.member "agent_name" |> Yojson.Safe.Util.to_string in
+             let message = json |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string in
+             let config = state.Mcp_server.room_config in
+             let _ = Masc_mcp.Room.broadcast config ~from_agent:agent_name ~content:message in
+             Http.Response.json {|{"ok":true}|} reqd
+           with e ->
+             Http.Response.json
+               (Printf.sprintf {|{"ok":false,"error":"%s"}|} (Printexc.to_string e))
+               reqd
+         )
+       ) request reqd)
 
 (** Extended router to handle OPTIONS *)
 let make_extended_handler routes =

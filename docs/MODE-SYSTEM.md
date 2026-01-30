@@ -64,7 +64,7 @@ masc_claim_next, masc_update_priority
 Real-time messaging between agents.
 
 ```
-masc_broadcast, masc_messages, masc_lock, masc_unlock, masc_listen, masc_who, masc_reset
+masc_broadcast, masc_messages, masc_listen, masc_who, masc_reset
 ```
 
 ### Portal (4 tools)

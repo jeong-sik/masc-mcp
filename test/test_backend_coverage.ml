@@ -213,7 +213,7 @@ let test_filesystem_pubsub_not_supported () =
 (* ============================================================ *)
 
 let test_lock_nonowner_release () =
-  let cfg = { Backend.default_config with base_path = make_test_dir "masc_lock1" } in
+  let cfg = { Backend.default_config with base_path = make_test_dir "test_backend1" } in
   match Backend.FileSystemBackend.create cfg with
   | Error _ -> fail "Failed to create"
   | Ok backend ->
@@ -226,7 +226,7 @@ let test_lock_nonowner_release () =
       | _ -> fail "non-owner release should fail"
 
 let test_lock_nonowner_extend () =
-  let cfg = { Backend.default_config with base_path = make_test_dir "masc_lock2" } in
+  let cfg = { Backend.default_config with base_path = make_test_dir "test_backend2" } in
   match Backend.FileSystemBackend.create cfg with
   | Error _ -> fail "Failed to create"
   | Ok backend ->
@@ -239,7 +239,7 @@ let test_lock_nonowner_extend () =
       | _ -> fail "non-owner extend should fail"
 
 let test_lock_extend_success () =
-  let cfg = { Backend.default_config with base_path = make_test_dir "masc_lock3" } in
+  let cfg = { Backend.default_config with base_path = make_test_dir "test_backend3" } in
   match Backend.FileSystemBackend.create cfg with
   | Error _ -> fail "Failed to create"
   | Ok backend ->
@@ -252,7 +252,7 @@ let test_lock_extend_success () =
       | _ -> fail "owner extend should succeed"
 
 let test_lock_release_nonexistent () =
-  let cfg = { Backend.default_config with base_path = make_test_dir "masc_lock4" } in
+  let cfg = { Backend.default_config with base_path = make_test_dir "test_backend4" } in
   match Backend.FileSystemBackend.create cfg with
   | Error _ -> fail "Failed to create"
   | Ok backend ->
@@ -263,7 +263,7 @@ let test_lock_release_nonexistent () =
       | _ -> fail "release nonexistent should return false"
 
 let test_lock_extend_nonexistent () =
-  let cfg = { Backend.default_config with base_path = make_test_dir "masc_lock5" } in
+  let cfg = { Backend.default_config with base_path = make_test_dir "test_backend5" } in
   match Backend.FileSystemBackend.create cfg with
   | Error _ -> fail "Failed to create"
   | Ok backend ->
@@ -274,7 +274,7 @@ let test_lock_extend_nonexistent () =
       | _ -> fail "extend nonexistent should return false"
 
 let test_lock_reacquire_same_owner () =
-  let cfg = { Backend.default_config with base_path = make_test_dir "masc_lock6" } in
+  let cfg = { Backend.default_config with base_path = make_test_dir "test_backend6" } in
   match Backend.FileSystemBackend.create cfg with
   | Error _ -> fail "Failed to create"
   | Ok backend ->

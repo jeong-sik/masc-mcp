@@ -101,6 +101,7 @@ end
 
 module Agent_id : sig
   type t
+  val parse : string -> (t, board_error) result
   val of_string : string -> (t, board_error) result
   val to_string : t -> string
 end = struct
@@ -111,10 +112,15 @@ end = struct
      match, #8633 re-widened the pattern by hand to match -- each time catching
      up after the fact. It now delegates, so the two cannot disagree again, and
      board inherits the path-separator and traversal checks it never had. *)
-  let of_string s =
-    match Validation.Id_shape.validate (String.trim s) with
+  let from_shape = function
     | Ok id -> Ok (Validation.Id_shape.to_string id)
     | Error reason -> Error (Validation_error (Printf.sprintf "Invalid agent_id: %s" reason))
+
+  let parse s =
+    Validation.Id_shape.parse (String.trim s) |> from_shape
+
+  let of_string s =
+    Validation.Id_shape.validate (String.trim s) |> from_shape
 
   let to_string t = t
 end

@@ -3,9 +3,9 @@ include Board_types
 (* The tokenization grammar (edge trimming, whitespace splitting, [@@]
    selectors, [@] target candidates) is shared with the Keeper write
    boundary through [Board_addressing] (issue #25601).  This module owns
-   only the Board identity policy: candidates are validated through
-   [Agent_id.of_string], which is case-sensitive, and a candidate it rejects is
-   read as prose rather than as a failed address. *)
+   only the Board identity policy: candidates are parsed through
+   [Agent_id.parse], which is case-sensitive and has no diagnostic effects.
+   A candidate it rejects is read as prose rather than as a failed address. *)
 
 type explicit_address =
   | No_explicit_address
@@ -18,7 +18,7 @@ let compare_agent_id left right =
 ;;
 
 (* A token an [Agent_id] could never be is prose, not a mention that went
-   wrong. [Agent_id.of_string] checks shape only -- 1..64 of [a-zA-Z0-9._-]
+   wrong. [Agent_id.parse] checks shape only -- 1..64 of [a-zA-Z0-9._-]
    with one optional colon -- so every candidate it rejects fails on a
    character or a length no keeper name can have. Treating those as malformed
    addresses rejected the whole post, and the live log shows what was being
@@ -48,7 +48,7 @@ let explicit_address_of_text content =
     let targets =
       List.filter_map
         (fun candidate ->
-           match Agent_id.of_string candidate with
+           match Agent_id.parse candidate with
            | Ok target -> Some target
            | Error _ -> None)
         candidates

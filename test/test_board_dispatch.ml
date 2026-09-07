@@ -1887,6 +1887,44 @@ let test_malformed_target_is_read_as_prose () =
      | Error error -> Board.show_board_error error)
 ;;
 
+let test_prose_mentions_do_not_record_validation_rejections () =
+  (* Reading an old comment must not replay security diagnostics for text
+     which is not an identity. This token was observed in live Board prose. *)
+  let content = "please inspect @check·lint and @internals/libs/errors" in
+  let before = Validation.get_rejection_stats () in
+  List.iter
+    (fun _ ->
+       (match Board.audience_for_comment ~content with
+        | Ok Board.Thread_participants -> ()
+        | Ok _ -> Alcotest.fail "prose unexpectedly addressed a keeper"
+        | Error error -> Alcotest.fail (Board.show_board_error error));
+       Alcotest.(check (pair int (float 0.0)))
+         "repeated prose reads preserve rejection count and timestamp"
+         before (Validation.get_rejection_stats ()))
+    [ (); (); () ];
+  (match
+     Board.audience_for_comment
+       ~content:"@check·lint @edgar.a.poe @keeper:MiXeD.Agent"
+   with
+   | Ok (Board.Targets targets) ->
+     Alcotest.(check (list string)) "valid identities survive rejected prose"
+       [ "edgar.a.poe"; "keeper:MiXeD.Agent" ]
+       (List.map Board.Agent_id.to_string targets)
+   | Ok _ -> Alcotest.fail "valid mentions lost their target audience"
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  Alcotest.(check (pair int (float 0.0)))
+    "mixed mentions preserve rejection statistics"
+    before (Validation.get_rejection_stats ());
+  expect_validation_error "invalid external author"
+    (Board_dispatch.create_post ~author:"check·lint" ~content:"valid content"
+       ~post_kind:Board.Human_post ());
+  let count, timestamp = Validation.get_rejection_stats () in
+  Alcotest.(check int) "external identity rejection remains observable"
+    (fst before + 1) count;
+  Alcotest.(check bool) "external rejection has a timestamp" true
+    (timestamp > 0.0)
+;;
+
 (* Unlisted means "not in feeds, but accessible", and a keeper's feed is its
    attention collector: an unaddressed Unlisted post is thread activity, so
    no keeper pays an attention judgment for it. Verification verdict receipts
@@ -2411,6 +2449,8 @@ let () =
         (with_eio test_direct_post_requires_exact_targets);
       Alcotest.test_case "malformed target is read as prose" `Quick
         (with_eio test_malformed_target_is_read_as_prose);
+      Alcotest.test_case "prose reads preserve validation diagnostics" `Quick
+        (with_eio test_prose_mentions_do_not_record_validation_rejections);
       Alcotest.test_case "unlisted post is not discoverable" `Quick
         (with_eio test_unlisted_post_is_not_discoverable);
       Alcotest.test_case "write emits typed audience" `Quick

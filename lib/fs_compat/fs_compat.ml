@@ -308,6 +308,10 @@ let save_file_atomic_strict_staged path content =
   Atomic_write.save_file_atomic_strict_staged ~save_file:save_file_blocking path content
 ;;
 
+let write_file_atomic_strict_staged path ~write =
+  Atomic_write.write_file_atomic_strict_staged path ~write
+;;
+
 let save_file_atomic_strict path content =
   Atomic_write.save_file_atomic_strict ~save_file:save_file_blocking path content
 ;;
@@ -320,6 +324,14 @@ module Atomic_replace_for_testing = struct
       ~save_file:save_file_blocking
       path
       content
+  ;;
+
+  let write_file_atomic_strict_staged ?sync_file ~sync_parent path ~write =
+    Atomic_write.Atomic_replace_for_testing.write_file_atomic_strict_staged
+      ?sync_file
+      ~sync_parent
+      path
+      ~write
   ;;
 end
 

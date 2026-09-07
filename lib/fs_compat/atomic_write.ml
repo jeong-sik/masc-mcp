@@ -2622,12 +2622,11 @@ let atomic_replace_failure_to_string failure =
     (Printexc.to_string failure.exception_)
 ;;
 
-let save_file_atomic_with_parent_sync
+let write_file_atomic_with_parent_sync
   ~sync_file
   ~sync_parent
-  ~(save_file : string -> string -> unit)
+  ~(write_temp : string -> unit)
   (path : string)
-  (content : string)
   : (unit, atomic_replace_failure) Result.t
   =
   let dir = Stdlib.Filename.dirname path in
@@ -2656,7 +2655,7 @@ let save_file_atomic_with_parent_sync
     | Error _ as error -> error
     | Ok tmp ->
       (try
-         save_file tmp content;
+         write_temp tmp;
          sync_file tmp;
          Stdlib.Sys.rename tmp path;
          stage := After_rename;
@@ -2680,24 +2679,42 @@ let legacy_atomic_replace_result = function
 ;;
 
 let save_file_atomic ~save_file path content =
-  save_file_atomic_with_parent_sync
+  write_file_atomic_with_parent_sync
     ~sync_file:fsync_path
     ~sync_parent:(fun dir ->
       try fsync_path dir with
       | Unix.Unix_error _ -> ())
-    ~save_file
+    ~write_temp:(fun tmp -> save_file tmp content)
     path
-    content
   |> legacy_atomic_replace_result
 ;;
 
 let save_file_atomic_strict_staged ~save_file path content =
-  save_file_atomic_with_parent_sync
+  write_file_atomic_with_parent_sync
     ~sync_file:fsync_path_strict
     ~sync_parent:fsync_path_strict
-    ~save_file
+    ~write_temp:(fun tmp -> save_file tmp content)
     path
-    content
+;;
+
+let write_temp_channel ~write path =
+  let channel = Stdlib.open_out_bin path in
+  (* fun-protect-finally-ok: runs inside [blocking_syscalls], outside Eio;
+     closing the stdlib channel performs no fiber operation. *)
+  Fun.protect
+    ~finally:(fun () -> Stdlib.close_out_noerr channel)
+    (fun () ->
+       write channel;
+       (* A failed flush/close is a failed staged write, before the rename. *)
+       Stdlib.close_out channel)
+;;
+
+let write_file_atomic_strict_staged path ~write =
+  write_file_atomic_with_parent_sync
+    ~sync_file:fsync_path_strict
+    ~sync_parent:fsync_path_strict
+    ~write_temp:(write_temp_channel ~write)
+    path
 ;;
 
 let save_file_atomic_strict ~save_file path content =
@@ -2713,12 +2730,24 @@ module Atomic_replace_for_testing = struct
       path
       content
     =
-    save_file_atomic_with_parent_sync
+    write_file_atomic_with_parent_sync
       ~sync_file
       ~sync_parent
-      ~save_file
+      ~write_temp:(fun tmp -> save_file tmp content)
       path
-      content
+  ;;
+
+  let write_file_atomic_strict_staged
+      ?(sync_file = fsync_path_strict)
+      ~sync_parent
+      path
+      ~write
+    =
+    write_file_atomic_with_parent_sync
+      ~sync_file
+      ~sync_parent
+      ~write_temp:(write_temp_channel ~write)
+      path
   ;;
 end
 

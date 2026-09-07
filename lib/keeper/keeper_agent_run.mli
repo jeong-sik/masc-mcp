@@ -141,8 +141,9 @@ module For_testing : sig
 
   val dispatch_after_provider_transcript_admission
     :  messages:Agent_core.Types.message list
+    -> checkpoint:Agent_core.Checkpoint.t option
     -> dispatch:
-         (Agent_core.Types.message list -> ('a, Agent_core.Error.t) result)
+         (checkpoint:Agent_core.Checkpoint.t option -> Agent_core.Types.message list -> ('a, Agent_core.Error.t) result)
     -> ('a, Agent_core.Error.t) result
 
   (** Exact-run reference recorded on the turn record. Accepts a reference

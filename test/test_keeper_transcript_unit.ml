@@ -479,7 +479,7 @@ let test_provider_admission_quarantines_malformed_overlap () =
     ]
   in
   let provider_dispatches = ref 0 in
-  let dispatch _admitted =
+  let dispatch ~checkpoint:_ _admitted =
     incr provider_dispatches;
     Ok ()
   in
@@ -495,6 +495,7 @@ let test_provider_admission_quarantines_malformed_overlap () =
    | Ok () -> Alcotest.fail "malformed overlap reached provider admission");
   match Masc.Keeper_agent_run.For_testing.dispatch_after_provider_transcript_admission
           ~messages:poisoned
+          ~checkpoint:None
           ~dispatch
   with
   | Error error ->
@@ -535,13 +536,14 @@ let test_interrupted_tool_cycle_is_closed_and_dispatched () =
        (U.show_provider_transcript_error error)
    | Ok () -> Alcotest.fail "an open cycle must not validate as-is");
   let dispatched = ref None in
-  let dispatch admitted =
+  let dispatch ~checkpoint:_ admitted =
     dispatched := Some admitted;
     Ok ()
   in
   match
     Masc.Keeper_agent_run.For_testing.dispatch_after_provider_transcript_admission
       ~messages:interrupted
+      ~checkpoint:None
       ~dispatch
   with
   | Error error ->
@@ -733,13 +735,14 @@ let test_admission_dispatches_an_interrupted_history () =
     ]
   in
   let dispatched = ref [] in
-  let dispatch admitted =
+  let dispatch ~checkpoint:_ admitted =
     dispatched := admitted;
     Ok ()
   in
   match
     Masc.Keeper_agent_run.For_testing.dispatch_after_provider_transcript_admission
       ~messages:interrupted
+      ~checkpoint:None
       ~dispatch
   with
   | Error _ -> Alcotest.fail "an interrupted history must reach the provider"
@@ -768,9 +771,67 @@ let test_admission_dispatches_an_interrupted_history () =
 ;;
 
 
+let checkpoint_with_messages messages : Agent_core.Checkpoint.t =
+  {
+    Agent_core.Checkpoint.version = Agent_core.Checkpoint.checkpoint_version;
+    session_id = "session-test";
+    agent_name = "agent-test";
+    model = "model-test";
+    system_prompt = None;
+    messages;
+    usage = Agent_core.Types.empty_usage;
+    turn_count = 1;
+    created_at = 0.0;
+    tools = [];
+    tool_choice = None;
+    disable_parallel_tool_use = false;
+    temperature = None;
+    top_p = None;
+    top_k = None;
+    min_p = None;
+    reasoning_effort = None;
+    enable_thinking = None;
+    preserve_thinking = None;
+    response_format = Agent_core.Types.Off;
+    thinking_budget = None;
+    cache_system_prompt = false;
+
+    context = Agent_core.Context.create_sync ();
+    mcp_sessions = [];
+    working_context = None;
+  }
+
+let test_admission_repairs_resume_checkpoint () =
+  let interrupted =
+    [ message T.Assistant [ use "missing" ]
+    ; text T.User "continue after interruption"
+    ; message T.Assistant [ use "next" ]
+    ]
+  in
+  let original = checkpoint_with_messages interrupted in
+  let dispatched = ref false in
+  let dispatch ~checkpoint admitted =
+    dispatched := true;
+    let checkpoint = Option.get checkpoint in
+    Alcotest.(check bool) "resume uses the admitted history" true
+      (checkpoint.Agent_core.Checkpoint.messages = admitted);
+    Alcotest.(check bool) "provider receives closed tool cycles" true
+      (U.validate_provider_transcript checkpoint.messages = Ok ());
+    Alcotest.(check bool) "other checkpoint state survives" true
+      ({ checkpoint with messages = original.messages } = original);
+    Ok ()
+  in
+  (match Masc.Keeper_agent_run.For_testing.dispatch_after_provider_transcript_admission
+      ~messages:interrupted ~checkpoint:(Some original) ~dispatch with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Agent_core.Error.to_string error));
+  Alcotest.(check bool) "resume dispatched" true !dispatched
+;;
+
 let () =
   Alcotest.run "keeper_transcript_unit"
-    [ ( "partition"
+    [ ( "resume admission", [ Alcotest.test_case "repairs the checkpoint used by resume" `Quick test_admission_repairs_resume_checkpoint ] )
+    ; ( "partition"
       , [ Alcotest.test_case "signed parallel cycle exact" `Quick
             test_signed_parallel_cycle_is_atomic
         ; Alcotest.test_case "open after assistant" `Quick

@@ -19,11 +19,17 @@ val reset_rejection_stats : unit -> unit
 module Id_shape : sig
   type t
 
+  val parse : string -> (t, string) result
+  (** Pure shape parsing with the same acceptance rules as [validate].
+      Does not log or change rejection statistics. Use for candidates read
+      from prose, where a non-identifier is expected input. *)
+
   val validate : string -> (t, string) result
-  (** Validates [a-zA-Z0-9_-]+ with optional single colon namespace
+  (** Validates [a-zA-Z0-9._-]+ with optional single colon namespace
       ([keeper:keeper-test-X]), length 1–64. Rejects path separators
       and traversal segments. Quoted or otherwise malformed values are
-      rejected unchanged. *)
+      rejected unchanged. Logs and records each rejection at an external
+      input boundary. *)
 
   val to_string : t -> string
 

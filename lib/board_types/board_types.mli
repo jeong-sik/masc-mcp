@@ -69,10 +69,13 @@ end
 
 module Agent_id : sig
   type t
+  val parse : string -> (t, board_error) result
+  (** Pure parsing of a trimmed Board identity, using {!Validation.Id_shape.parse}.
+      Rejected prose candidates do not emit validation diagnostics. *)
   val of_string : string -> (t, board_error) result
   (** Validates [a-zA-Z0-9._-]+(:[a-zA-Z0-9._-]+)?, length 1–64.
-      Strict superset of {!Validation.Id_shape} — see #8633 for the
-      colon-namespace fix and #8625 for the 32→64 length raise. *)
+      Trims input, delegates to {!Validation.Id_shape.validate}, and records
+      rejections. Use at external author or actor input boundaries. *)
   val to_string : t -> string
 end
 

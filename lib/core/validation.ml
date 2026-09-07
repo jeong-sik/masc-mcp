@@ -61,6 +61,7 @@ let log_rejection ~validator ~input ~reason =
     where a parser belonged, which cost 208 WARN lines in a day (#31815). *)
 module Id_shape : sig
   type t
+  val parse : string -> (t, string) result
   val validate : string -> (t, string) result
   val to_string : t -> string
   val of_string_unsafe : string -> t  (* For internal use only *)
@@ -88,7 +89,7 @@ end = struct
      previously made unreachable. *)
   let valid_pattern = Re.Pcre.re {|^[a-zA-Z0-9._-]+(:[a-zA-Z0-9._-]+)?$|} |> Re.compile
 
-  let strict s =
+  let parse s =
     if String.length s = 0 then
       Error "identifier cannot be empty"
     else if String.length s > 64 then
@@ -103,7 +104,7 @@ end = struct
       Ok s
 
   let validate s =
-    match strict s with
+    match parse s with
     | Ok t -> Ok t
     | Error reason ->
       log_rejection ~validator:"Id_shape" ~input:s ~reason;

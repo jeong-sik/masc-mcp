@@ -134,7 +134,19 @@ let composable_output_fields ~base_path ~stdout ~stderr ~output =
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn -> Error (Printexc.to_string exn)
 
+let secret_files_for_source ~source ~observed ~prepare =
+  match source with
+  | Keeper_gate.Observed_in_box _ -> Ok (observed ())
+  | Keeper_gate.One_shot_resolution _
+  | Keeper_gate.Exact_always_rule _
+  | Keeper_gate.Keeper_always_allow
+  | Keeper_gate.Workspace_always_allow
+  | Keeper_gate.Readonly_sandbox -> prepare ()
+;;
+
 module For_testing = struct
+  let secret_files_for_source = secret_files_for_source
+
   (* Test seam: when set, [handle_tool_execute_typed] routes its dispatch
      through this override instead of the real shell dispatch. The override
      returns a controlled [Execute_shell_ir.dispatch_error] so tests can
@@ -191,6 +203,7 @@ type dispatch_bundle =
   ; fields : (string * Yojson.Safe.t) list
   ; base_host_env : string array option
   ; github_secret_files : unit -> (string list, string) result
+  ; observed_github_secret_files : unit -> string list
   ; observe_route : unit -> Keeper_sandbox_shell_ir_target.observe_route
     (* Where this call can run boxed before the judge is asked (RFC-0422).
        Lazy: resolving it may acquire the guest. *)
@@ -323,6 +336,7 @@ let handle_tool_execute_typed
                      @ endpoint_fields
                  ; base_host_env = None
                  ; github_secret_files = (fun () -> Ok [])
+                 ; observed_github_secret_files = (fun () -> [])
                  ; observe_route = dispatch.observe_route
                  ; cleanup = Fun.id
                  })
@@ -347,6 +361,10 @@ let handle_tool_execute_typed
                   (fun () ->
                      Keeper_turn_sandbox_runtime.prepare_github_identity_secret_files
                        ~timeout_sec
+                       dispatch.runtime)
+              ; observed_github_secret_files =
+                  (fun () ->
+                     Keeper_turn_sandbox_runtime.github_identity_secret_files
                        dispatch.runtime)
               ; observe_route = dispatch.observe_route
               ; cleanup = Fun.id
@@ -544,7 +562,17 @@ let handle_tool_execute_typed
           let authorized result =
             Keeper_tool_execution.with_gate_authorization authorization result
           in
-          (match dispatch_bundle.github_secret_files () with
+          (* A boxed call already acquired a running guest and its identity.
+             Preparing again can fail a token refresh or replace that guest
+             after a partial write, discarding the real result as pre-effect.
+             Read the bound snapshot for redaction; prepare only a call that
+             still needs dispatch. *)
+          (match
+             secret_files_for_source
+               ~source:authorization.source
+               ~observed:dispatch_bundle.observed_github_secret_files
+               ~prepare:dispatch_bundle.github_secret_files
+           with
            | Error err ->
              authorized
                (typed_error_json

@@ -62,6 +62,14 @@ val handle_tool_execute_with_outcome :
   Keeper_tool_execution.t
 
 module For_testing : sig
+  val secret_files_for_source :
+    source:Keeper_gate.authorization_source ->
+    observed:(unit -> string list) ->
+    prepare:(unit -> (string list, string) result) ->
+    (string list, string) result
+  (** Production identity selection at the Execute boundary: an already
+      executed boxed result reads its bound identity instead of refreshing it. *)
+
   (* Test seam: when set, [handle_tool_execute_typed] routes its dispatch
      through this override instead of the real shell dispatch, so tests can
      drive each rejected-dispatch branch through the real production wiring

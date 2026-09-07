@@ -150,7 +150,10 @@ let with_execution_workspace f =
   f base_path
 ;;
 
-let execute_through_gate ~run ~script base_path =
+let execute_through_gate
+      ?(observed_secret_files = fun () -> [])
+      ?(prepare_secret_files = fun () -> Ok [])
+      ~run ~script base_path =
   let dispatch_count = ref 0 in
   let dispatch target =
     incr dispatch_count;
@@ -185,6 +188,12 @@ let execute_through_gate ~run ~script base_path =
     match decision with
     | Gate.Allow { source; _ } ->
       (match
+         Masc.Keeper_tool_execute_runtime.For_testing.secret_files_for_source
+           ~source ~observed:observed_secret_files ~prepare:prepare_secret_files
+       with
+       | Ok _ -> ()
+       | Error error -> fail ("identity preparation replaced the execution result: " ^ error));
+      (match
          Stage.dispatch_authorized ~source
            ~on_output_chunk:(fun chunk -> chunks := chunk :: !chunks)
            ~dispatch:(fun () -> dispatch target)
@@ -205,13 +214,19 @@ let execute_through_gate ~run ~script base_path =
 
 let test_guest_local_failure_returns_the_execution_once () =
   with_execution_workspace @@ fun base_path ->
+  let prepared = ref 0 in
+  let observed = ref 0 in
   let _, result, count, pending, chunks =
     execute_through_gate ~run:Keeper_types_profile_sandbox.Guest_local
+      ~observed_secret_files:(fun () -> incr observed; [ "bound-snapshot/hosts.yml" ])
+      ~prepare_secret_files:(fun () -> incr prepared; Error "github_app_token_refresh_failed")
       ~script:"printf x >> append.txt; printf 'partial output\\n'; printf 'network refused\\n' >&2; exit 23"
       base_path
   in
   check int "the full command was dispatched once" 1 count;
   check int "no approval can replay the command" 0 pending;
+  check int "the executed guest's identity is read once" 1 !observed;
+  check int "a later token refresh cannot overwrite the result" 0 !prepared;
   let ic = open_in_bin (Filename.concat base_path "append.txt") in
   let appended = Fun.protect ~finally:(fun () -> close_in ic) (fun () -> really_input_string ic (in_channel_length ic)) in
   check string "the completed prefix appended once" "x" appended;
@@ -261,6 +276,25 @@ let test_observe_failure_still_reaches_the_judge () =
   | Gate.Allow _ | Gate.Unavailable _ -> fail "Observe failure did not reach the Judge"
 ;;
 
+let test_manual_approval_does_not_prepare_identity () =
+  with_execution_workspace @@ fun base_path ->
+  (match
+     Masc.Keeper_gate_mode.set (Masc.Workspace.default_config base_path)
+       ~actor:"test" Masc.Keeper_gate_mode.Manual
+   with
+   | Ok _ -> ()
+   | Error error -> fail error);
+  let _, result, count, pending, _ =
+    execute_through_gate ~run:Keeper_types_profile_sandbox.Guest_local
+      ~observed_secret_files:(fun () -> fail "manual approval read an execution identity")
+      ~prepare_secret_files:(fun () -> fail "manual approval refreshed an identity")
+      ~script:"printf x >> append.txt" base_path
+  in
+  check int "not dispatched before approval" 0 count;
+  check int "the original approval remains pending" 1 pending;
+  check bool "no fabricated execution result" true (Option.is_none result)
+;;
+
 let () =
   run
     "keeper_tool_execute_observe"
@@ -280,6 +314,8 @@ let () =
             test_successful_boxed_results_are_not_reexecuted
         ; test_case "Observe failure still reaches the Judge" `Quick
             test_observe_failure_still_reaches_the_judge
+        ; test_case "manual approval does not prepare identity" `Quick
+            test_manual_approval_does_not_prepare_identity
         ] )
     ]
 ;;

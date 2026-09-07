@@ -57,14 +57,52 @@ let test_round_trip_preserves_exact_evidence () =
     ~elapsed_s:0.5
     ~selected_slot:(Some "librarian-primary")
     ~output:(`Assoc [ "fact_count", `Int 3 ]);
-  let replayed = R.replay path in
   let original = R.get registry ~run_id:"run-1" |> Option.get |> R.run_to_yojson in
+  let replayed = R.replay path in
   let restored = R.get replayed ~run_id:"run-1" |> Option.get |> R.run_to_yojson in
   check string "round trip" (Yojson.Safe.to_string original) (Yojson.Safe.to_string restored);
+  let replayed_again = R.replay path in
+  check string "second restart keeps the same original evidence"
+    (Yojson.Safe.to_string original)
+    (R.get replayed_again ~run_id:"run-1" |> Option.get |> R.run_to_yojson
+     |> Yojson.Safe.to_string);
   (match R.get replayed ~run_id:"run-1" |> Option.get with
    | { status = R.Completed { selected_slot = Some selected_slot; _ }; _ } ->
      check string "selected slot" "librarian-primary" selected_slot
    | _ -> fail "selected slot did not survive durable replay");
+  remove_if_exists path
+;;
+
+let test_replay_selects_latest_payloads_across_blank_rows () =
+  let path = Filename.temp_file "exact-lane-latest-" ".jsonl" in
+  let registry = R.create ~path () in
+  let register text =
+    R.register_running registry ~run_id:"same-id" ~lane:R.Librarian
+      ~actor:"keeper-a" ~started_at:10.0
+      ~input:(R.Exact_input (`Assoc [ "prompt", `String text ]))
+  in
+  register "old input";
+  mark_completed_exn registry ~run_id:"same-id" ~outcome:R.Succeeded
+    ~elapsed_s:0.5 ~output:(`String "old completion");
+  register "새 입력";
+  mark_completed_exn registry ~run_id:"same-id"
+    ~outcome:(R.Failed { code = "cancelled"; detail = "operator cancelled" })
+    ~elapsed_s:0.8 ~output:(`Assoc [ "result", `String "취소된 실행의 원문" ]);
+  let expected = R.get registry ~run_id:"same-id" |> Option.get |> R.run_to_yojson in
+  let rows = Fs_compat.load_file path |> String.split_on_char '\n' in
+  Fs_compat.save_file path ("\n \n" ^ String.concat "\n\n \n" rows);
+  for _ = 1 to 2 do
+    let replayed = R.replay path in
+    check string "latest registration and completion remain paired"
+      (Yojson.Safe.to_string expected)
+      (R.get replayed ~run_id:"same-id" |> Option.get |> R.run_to_yojson
+       |> Yojson.Safe.to_string)
+  done;
+  let retained =
+    Fs_compat.load_file path |> String.split_on_char '\n'
+    |> List.filter (fun line -> String.trim line <> "")
+  in
+  check int "only the retained register and complete survive" 2 (List.length retained);
   remove_if_exists path
 ;;
 
@@ -162,13 +200,14 @@ let test_hard_cut_artifact_does_not_poison_compaction_forever () =
     ~lane:R.Board_attention
     ~actor:"keeper-a"
     ~started_at:10.0
-    ~input:(R.Exact_input `Null);
+    ~input:(R.Exact_input (`Assoc [ "candidate_id", `String "retained-candidate" ]));
   mark_completed_exn
     registry
     ~run_id:"live-run"
     ~outcome:R.Succeeded
     ~elapsed_s:0.5
-    ~output:`Null;
+    ~output:(`Assoc [ "decision", `String "retained judgment" ]);
+  let expected = R.get registry ~run_id:"live-run" |> Option.get |> R.run_to_yojson in
   let live_lines =
     Fs_compat.load_file path
     |> String.split_on_char '\n'
@@ -216,6 +255,10 @@ let test_hard_cut_artifact_does_not_poison_compaction_forever () =
   in
   check int "nothing unreadable is left" 0 after_cut.malformed_lines;
   check int "the readable run survived the cut" 1 after_cut.retained_entries;
+  check string "cut preserves the original payload beside an unreadable row"
+    (Yojson.Safe.to_string expected)
+    (R.replay path |> R.get ~run_id:"live-run" |> Option.get |> R.run_to_yojson
+     |> Yojson.Safe.to_string);
   check
     (option string)
     "and still replays"
@@ -315,6 +358,10 @@ let test_replay_settles_running_as_server_restart_failure () =
   let path = Filename.temp_file "exact-lane-restart-" ".jsonl" in
   remove_if_exists path;
   let registry = R.create ~path () in
+  R.register_running registry ~run_id:"interrupted-run" ~lane:R.Librarian
+    ~actor:"keeper-a" ~started_at:1.0 ~input:(R.Exact_input (`String "older run"));
+  mark_completed_exn registry ~run_id:"interrupted-run" ~outcome:R.Succeeded
+    ~elapsed_s:0.5 ~output:(`String "completion preceding the latest registration");
   R.register_running
     registry
     ~run_id:"interrupted-run"
@@ -350,6 +397,15 @@ let test_replay_settles_running_as_server_restart_failure () =
      failf "replayed run stayed non-terminal: %s" (R.status_label run.status)
    | None -> fail "replayed running exact lane disappeared");
   let replayed_again = R.replay path in
+  let second = R.get replayed_again ~run_id:"interrupted-run" |> Option.get in
+  check bool "latest registration input survives both restarts" true
+    (second.input = R.Exact_input (`Assoc [ "message_count", `Int 4 ]));
+  (match second.status with
+   | R.Completed { output; _ } ->
+     check string "restart completion body survives the second compaction"
+       "server_restarted"
+       (Yojson.Safe.Util.member "reason" output |> Yojson.Safe.Util.to_string)
+   | _ -> fail "restart must remain terminal");
   check
     (option string)
     "the synthesized terminal event survives another replay"
@@ -799,6 +855,21 @@ let test_the_store_does_not_hold_the_payloads_it_retains () =
     (match (R.get registry ~run_id:"run-7" |> Option.get).R.input with
      | R.Exact_input (`Assoc [ "prompt", `String s ]) -> String.length s = payload_bytes
      | _ -> false);
+  for _ = 1 to 2 do
+    let replayed = R.replay path in
+    Gc.full_major ();
+    let held = Obj.reachable_words (Obj.repr replayed) * (Sys.word_size / 8) in
+    check bool "replay retains metadata without retaining the full payloads" true
+      (held < written / 10);
+    let detail = R.get replayed ~run_id:"run-7" |> Option.get in
+    check bool "full input remains readable after compaction" true
+      (detail.input = R.Exact_input (`Assoc [ "prompt", `String (String.make payload_bytes 'A') ]));
+    check bool "full output remains readable after compaction" true
+      (match detail.status with
+       | R.Completed { output; _ } ->
+         output = `Assoc [ "reply", `String (String.make payload_bytes 'B') ]
+       | _ -> false)
+  done;
   remove_if_exists path
 ;;
 
@@ -857,6 +928,8 @@ let () =
     "exact_lane_run_registry"
     [ ( "registry"
       , [ test_case "durable exact evidence" `Quick test_round_trip_preserves_exact_evidence
+        ; test_case "latest payloads survive blank rows and repeated replay" `Quick
+            test_replay_selects_latest_payloads_across_blank_rows
         ; test_case "missing receipt is explicit null" `Quick
             test_completion_without_slot_receipt_writes_explicit_null
         ; test_case "pre-v4 completion is not replayed as success" `Quick

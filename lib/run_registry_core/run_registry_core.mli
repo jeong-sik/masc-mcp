@@ -107,6 +107,11 @@ module Make (Payload : Payload) : sig
   val max_completed_retained : int
   val create : ?path:string -> unit -> t
   val replay : string -> t
+  (** Retains a lightweight in-memory projection while compaction streams the
+      selected original register/complete rows. Dropped payload fields are
+      never serialized from the projection over their durable source.
+      A replayed running entry gets the subsystem's explicit restart verdict.
+      As with {!cut_replay_log}, replay requires exclusive ownership of the log. *)
 
   val register
     :  t

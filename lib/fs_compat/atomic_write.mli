@@ -55,6 +55,17 @@ val save_file_atomic_strict_staged
     returned with its original backtrace so a transaction owner can repair
     publication state before re-raising it. *)
 
+val write_file_atomic_strict_staged
+  :  string
+  -> write:(out_channel -> unit)
+  -> (unit, atomic_replace_failure) Result.t
+(** Stream bytes into the replacement using the same strict staged protocol.
+    [write] runs synchronously in the blocking replacement job and must not
+    perform Eio effects, close the channel, or retain it after returning.
+    The writer closes the channel before syncing and publishing the file.
+    Callback exceptions, including cancellation, retain their failure stage
+    and original backtrace. *)
+
 (** Strict sibling of {!save_file_atomic}. Payload or parent-directory
     descriptor/fsync failure is returned as [Error] instead of being treated
     as best effort. *)
@@ -71,6 +82,13 @@ module Atomic_replace_for_testing : sig
     -> save_file:(string -> string -> unit)
     -> string
     -> string
+    -> (unit, atomic_replace_failure) Result.t
+
+  val write_file_atomic_strict_staged
+    :  ?sync_file:(string -> unit)
+    -> sync_parent:(string -> unit)
+    -> string
+    -> write:(out_channel -> unit)
     -> (unit, atomic_replace_failure) Result.t
 end
 

@@ -338,6 +338,17 @@ val save_file_atomic_strict_staged
     owners must converge any dependent in-memory publication before
     propagating an [After_rename] failure. *)
 
+val write_file_atomic_strict_staged
+  :  string
+  -> write:(out_channel -> unit)
+  -> (unit, atomic_replace_failure) Result.t
+(** Streaming sibling of {!save_file_atomic_strict_staged}. [write] receives a
+    binary channel and runs synchronously inside the blocking replacement job
+    (a system thread when called from Eio). It must not perform Eio effects,
+    close the channel, or retain it. The channel is closed before payload sync
+    and rename. Callback exceptions, including cancellation, preserve the
+    original exception and backtrace in a [Before_rename] failure. *)
+
 (** Atomic replacement whose payload and parent-directory fsyncs are mandatory. *)
 val save_file_atomic_strict : string -> string -> (unit, string) Result.t
 
@@ -347,6 +358,13 @@ module Atomic_replace_for_testing : sig
     -> sync_parent:(string -> unit)
     -> string
     -> string
+    -> (unit, atomic_replace_failure) Result.t
+
+  val write_file_atomic_strict_staged
+    :  ?sync_file:(string -> unit)
+    -> sync_parent:(string -> unit)
+    -> string
+    -> write:(out_channel -> unit)
     -> (unit, atomic_replace_failure) Result.t
 end
 

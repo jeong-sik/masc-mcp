@@ -308,18 +308,39 @@ let evidence_artifact_reader ~config ~(meta : keeper_meta) () =
   | Keeper_types_profile_sandbox.Endpoint_owned ->
       Some
         (fun ~worker ~relative ->
-           let max_bytes = Workspace_verification_store.verification_evidence_max_bytes in
+           let module Store = Workspace_verification_store in
+           let max_bytes = Store.verification_evidence_max_bytes in
            match
              Keeper_sandbox_read_backend.read_file ~config ~meta
                ~host_path:relative ~max_bytes ~timeout_sec:30. ()
            with
-           | Ok content ->
-               let bytes = String.length content in
-               Ok (content, bytes, bytes >= max_bytes)
            | Error reason ->
                Error
-                 (Workspace_verification_store.Evidence_read_error
-                    (Printf.sprintf "sandbox_backend_read: %s: %s" worker reason)))
+                 (Store.Evidence_read_error
+                    (Printf.sprintf "sandbox_backend_read: %s: %s" worker reason))
+           | Ok content -> (
+               (* The reader classifies its bytes with the store's own scan:
+                   text answers as text, and non-text bytes become a binary
+                   payload -- hash, size, format -- instead of being dropped
+                   (RFC-0436 §4.1). *)
+               match Store.scan_utf8 content with
+               | Store.Utf8_valid ->
+                   Ok (Store.Text_payload (content, String.length content, false))
+               | _ ->
+                   let format =
+                     let ext = String.lowercase_ascii (Filename.extension relative) in
+                     if ext = "" then "unknown" else ext
+                   in
+                   let sha256 =
+                     Digestif.SHA256.(digest_string content |> to_hex)
+                   in
+                   Ok
+                     (Store.Binary_payload
+                        { data = content
+                        ; bytes = String.length content
+                        ; sha256
+                        ; format
+                        })))
   | Keeper_types_profile_sandbox.Shared_mount -> None
 
 let evidence_artifact_total_bytes ~(config : Workspace.config)

@@ -156,6 +156,7 @@ let create_submit_request ~(config : Workspace.config)
   let evidence_snapshot =
     Workspace_verification_store.snapshot_submitted_evidence_json
       ?artifact_read
+      ~request_id:verification_id
       ~base_path
       ~worker:assignee
       spec.submitted_evidence

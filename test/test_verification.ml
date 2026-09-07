@@ -2388,7 +2388,7 @@ let test_transport_projection_bounds_the_evidence_total () =
           | VS.Evidence_artifact { truncated; _ } ->
             Alcotest.(check bool) "no item is truncated on its own" false truncated
           | VS.Evidence_note _ | VS.Evidence_invalid_reference
-          | VS.Evidence_artifact_unreadable _ -> ())
+          | VS.Evidence_artifact_unreadable _ | VS.Evidence_artifact_binary _ -> ())
         items;
       Alcotest.(check bool)
         "the stored snapshot carries every byte"
@@ -2941,7 +2941,7 @@ let test_injected_artifact_read_answers_the_snapshot () =
              if
                String.equal worker "endpoint-worker"
                && String.equal relative "evidence.txt"
-             then Ok ("captured-by-backend", 20, false)
+             then Ok (VS.Text_payload ("captured-by-backend", 20, false))
              else Error (VS.Evidence_read_error "backend: not found"))
       in
       let json =
@@ -2975,8 +2975,11 @@ let test_an_injected_reader_answers_under_the_text_line () =
           (fun ~worker ~relative ->
              ignore worker;
              if String.equal relative "logo.png" then
-               Ok ("\xff\xd8\xff\xe0garbage", 12, false)
-             else if String.equal relative "cut.txt" then Ok ("abc\xe2\x82", 5, true)
+               (* a reader that hands non-text bytes to the text payload
+                  still meets the store's own line *)
+               Ok (VS.Text_payload ("\xff\xd8\xff\xe0garbage", 12, false))
+             else if String.equal relative "cut.txt" then
+               Ok (VS.Text_payload ("abc\xe2\x82", 5, true))
              else Error (VS.Evidence_read_error "backend: not found"))
       in
       let json =
@@ -3005,7 +3008,7 @@ let test_artifact_reference_size_uses_the_injected_reader () =
         Some
           (fun ~worker ~relative ->
              ignore worker;
-             if String.equal relative "big.log" then Ok ("", 90_000, true)
+             if String.equal relative "big.log" then Ok (VS.Text_payload ("", 90_000, true))
              else Error (VS.Evidence_read_error "backend: not found"))
       in
       Alcotest.(check (option int))
@@ -3049,6 +3052,60 @@ let test_reader_routes_by_where_the_tree_lives () =
         (route "microvm");
       Alcotest.(check bool) "docker keeps the direct host read" false
         (route "docker"))
+
+(* RFC-0436 §4.1-4.2: a binary payload is adopted, not refused -- the
+   snapshot keeps the hash, size and format, and files the bytes as the
+   evidence body when the caller names the request. *)
+let test_a_binary_payload_is_adopted_and_filed () =
+  with_temp_dir (fun base_path ->
+      let png_bytes = "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR" in
+      let artifact_read =
+        Some
+          (fun ~worker ~relative ->
+             ignore worker;
+             if String.equal relative "shot.png" then
+               Ok
+                 (VS.Binary_payload
+                    { data = png_bytes
+                    ; bytes = String.length png_bytes
+                    ; sha256 = Digestif.SHA256.(digest_string png_bytes |> to_hex)
+                    ; format = "png"
+                    })
+             else Error (VS.Evidence_read_error "backend: not found"))
+      in
+      let filed =
+        VS.snapshot_submitted_evidence_json
+          ?artifact_read
+          ~request_id:"vrf-binary-test"
+          ~base_path
+          ~worker:"endpoint-worker"
+          [ "artifact:shot.png" ]
+      in
+      let open Yojson.Safe.Util in
+      let item = List.nth (filed |> to_list) 0 in
+      Alcotest.(check string) "adopted as a binary artifact"
+        "artifact_binary" (item |> member "kind" |> to_string);
+      Alcotest.(check int) "with its byte count"
+        (String.length png_bytes) (item |> member "bytes" |> to_int);
+      Alcotest.(check string) "with its format" "png"
+        (item |> member "format" |> to_string);
+      let body_path = item |> member "body" |> to_string in
+      Alcotest.(check string) "the body is filed under the request"
+        "evidence/vrf-binary-test/0.bin" body_path;
+      let masc_dir = CU.masc_dir_from_base_path ~base_path in
+      let filed_bytes = Fs_compat.load_file (Filename.concat masc_dir body_path) in
+      Alcotest.(check string) "the filed bytes are the read bytes" png_bytes filed_bytes;
+      let unfiled =
+        VS.snapshot_submitted_evidence_json
+          ?artifact_read
+          ~base_path
+          ~worker:"endpoint-worker"
+          [ "artifact:shot.png" ]
+      in
+      let open Yojson.Safe.Util in
+      let bare = List.nth (unfiled |> to_list) 0 in
+      Alcotest.(check bool) "without a request id there is no body field"
+        false (bare |> member "body" != `Null))
 
 let test_checkout_relative_artifact_is_not_guessed () =
   with_temp_dir (fun base_path ->
@@ -3374,5 +3431,7 @@ let () =
         test_reader_routes_by_where_the_tree_lives;
       Alcotest.test_case "an injected reader answers under the text line" `Quick
         test_an_injected_reader_answers_under_the_text_line;
+      Alcotest.test_case "a binary payload is adopted and filed" `Quick
+        test_a_binary_payload_is_adopted_and_filed;
     ];
   ]

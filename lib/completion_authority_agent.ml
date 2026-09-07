@@ -259,6 +259,11 @@ let evidence_posture_of_snapshot
            | Workspace_verification_store.Evidence_artifact
                { reference = _; content = _; bytes = _; truncated = false } ->
              true
+           | Workspace_verification_store.Evidence_artifact_binary _ ->
+             (* A binary item is judgeable on its own terms: the hash, the
+                size, and the filed body are the facts the verdict can rest
+                on (RFC-0436 §4.1). *)
+             true
            | _ -> false)
       |> List.length
   in

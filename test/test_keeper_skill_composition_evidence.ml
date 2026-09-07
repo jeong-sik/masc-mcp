@@ -20,18 +20,22 @@ let make_reference name revision =
        |> Result.get_ok)
 ;;
 
-let node () =
+let node ~node_id ~(schedule : Agent_core.Tool_contract.schedule) () =
   `Assoc
-    [ "node_id", `String "clock"
+    [ "node_id", `String node_id
     ; "execution_id", Ids.Execution_id.(generate () |> to_yojson)
     ; "tool_name", `String "keeper_time_now"
     ; "input", `Assoc []
     ; ( "schedule"
       , `Assoc
-          [ "planned_index", `Int 0
-          ; "batch_index", `Int 0
-          ; "batch_size", `Int 1
-          ; "execution_mode", `String "serial"
+          [ "planned_index", `Int schedule.planned_index
+          ; "batch_index", `Int schedule.batch_index
+          ; "batch_size", `Int schedule.batch_size
+          ; ( "execution_mode"
+            , `String
+                (match schedule.execution_mode with
+                 | Agent_core.Tool_contract.Serial -> "serial"
+                 | Agent_core.Tool_contract.Concurrent -> "concurrent") )
           ] )
     ; ( "result"
       , `Assoc
@@ -72,13 +76,35 @@ let test_latest_exact_reference_replaces_prior_publication () =
     (fun () ->
        let config = Workspace.default_config base_path in
        let reference = make_reference "indexed-proof" 'a' in
-       let settlement = node () in
+       let settlements =
+         [ node ~node_id:"first"
+             ~schedule:
+               { planned_index = 0; batch_index = 0; batch_size = 1
+               ; execution_mode = Agent_core.Tool_contract.Serial }
+             ()
+         ; node ~node_id:"second"
+             ~schedule:
+               { planned_index = 1; batch_index = 1; batch_size = 1
+               ; execution_mode = Agent_core.Tool_contract.Serial }
+             ()
+         ; node ~node_id:"left"
+             ~schedule:
+               { planned_index = 2; batch_index = 2; batch_size = 2
+               ; execution_mode = Agent_core.Tool_contract.Concurrent }
+             ()
+         ; node ~node_id:"right"
+             ~schedule:
+               { planned_index = 3; batch_index = 2; batch_size = 2
+               ; execution_mode = Agent_core.Tool_contract.Concurrent }
+             ()
+         ]
+       in
        let save composition_run_id =
          let result =
            Tool_result.make_ok
              ~tool_name:"keeper_compose_indexed-proof"
              ~start_time:(Time_compat.now ())
-             ~data:(`Assoc [ "actions", `List [ settlement ] ])
+             ~data:(`Assoc [ "actions", `List settlements ])
              ()
          in
          let evidence =
@@ -91,7 +117,7 @@ let test_latest_exact_reference_replaces_prior_publication () =
              ~composition_tool:"keeper_compose_indexed-proof"
              ~composition_execution:Keeper_tool_composition_catalog.Inline
              ~result
-             ~executor_settlements:[ settlement ]
+             ~executor_settlements:settlements
            |> Result.get_ok
          in
          Keeper_skill_composition_evidence.save_latest config evidence
@@ -117,8 +143,10 @@ let test_latest_exact_reference_replaces_prior_publication () =
          (loaded |> member "parent_tool_use_id" |> to_string);
        Alcotest.(check int) "parent turn" 7
          (loaded |> member "parent_turn" |> to_int);
-       Alcotest.(check int) "one typed settlement" 1
+       Alcotest.(check int) "all later batches remain published" 4
          (loaded |> member "executor_settlements" |> to_list |> List.length);
+       Alcotest.(check bool) "each published batch keeps its schedule" true
+         (loaded |> member "executor_settlements" |> to_list = settlements);
        Alcotest.(check bool) "another reference remains absent" true
          (Keeper_skill_composition_evidence.load_latest
             config

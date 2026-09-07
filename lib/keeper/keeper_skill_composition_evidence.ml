@@ -65,7 +65,8 @@ let valid_schedule = function
        ] ->
        batch_index >= 0
        && batch_size > 0
-       && batch_index < batch_size
+       (* batch_index identifies the batch in the whole plan. A later serial
+          batch has size 1 and a nonzero index; it is valid evidence. *)
        && planned_index >= 0
      | _ -> false)
   | _ -> false

@@ -7,14 +7,10 @@ type t =
       -> ( Masc_exec.Exec_dispatch.dispatch_result
          , Keeper_tooling.Execute_shell_ir.dispatch_error )
          result
-  ; observed : Masc_exec.Exec_dispatch.dispatch_result option ref
-    (* One call's stage lives on one fiber: the gate calls [observe] once,
-       the caller reads [observed_result] once, and neither yields between
-       the write and the read. A plain ref is the honest cell for that. *)
   ; outcome : Keeper_gate.observation option ref
   }
 
-let create ~route ~dispatch = { route; dispatch; observed = ref None; outcome = ref None }
+let create ~route ~dispatch = { route; dispatch; outcome = ref None }
 
 (* The typed gate's refusals, in the closed tags it already exports, so the
    gate log names the same reason the real dispatch would have logged. *)
@@ -34,16 +30,32 @@ let observe t () : Keeper_gate.observation =
       Keeper_gate.Observation_unavailable reason
     | Keeper_sandbox_shell_ir_target.Boxed { target = sandbox; run } ->
       (match t.dispatch sandbox with
-       | Ok ({ Masc_exec.Exec_dispatch.status = Unix.WEXITED 0; _ } as result) ->
-         t.observed := Some result;
-         Keeper_gate.Observed_clean { run }
-       | Ok { Masc_exec.Exec_dispatch.status; stderr; stdout = _ } ->
-         Keeper_gate.Observed_refused { status; stderr }
+       | Ok result ->
+         (match run, result.Masc_exec.Exec_dispatch.status with
+          | Keeper_types_profile_sandbox.Guest_local, _
+          | Keeper_types_profile_sandbox.Observe, Unix.WEXITED 0 ->
+            Keeper_gate.Observed_result { run; result }
+          | Keeper_types_profile_sandbox.Observe, status ->
+            Keeper_gate.Observed_refused { status; stderr = result.stderr })
        | Error error -> Keeper_gate.Observation_unavailable (unavailable_tag error))
   in
   t.outcome := Some outcome;
   outcome
 ;;
 
-let observed_result t = !(t.observed)
 let outcome t = !(t.outcome)
+
+let dispatch_authorized ~source ~on_output_chunk ~dispatch =
+  match source with
+  | Keeper_gate.Observed_in_box { result; run = _ } ->
+    if not (String.equal result.stdout "")
+    then on_output_chunk (`Stdout result.stdout);
+    if not (String.equal result.stderr "")
+    then on_output_chunk (`Stderr result.stderr);
+    Ok result
+  | Keeper_gate.One_shot_resolution _
+  | Keeper_gate.Exact_always_rule _
+  | Keeper_gate.Keeper_always_allow
+  | Keeper_gate.Workspace_always_allow
+  | Keeper_gate.Readonly_sandbox -> dispatch ()
+;;

@@ -63,16 +63,21 @@ let replayable_operation operation =
   else None
 ;;
 
+type boxed_execution =
+  { run : Keeper_types_profile_sandbox.observation_run
+  ; result : Masc_exec.Exec_dispatch.dispatch_result
+  }
+
 type authorization_source =
   | One_shot_resolution of string
   | Exact_always_rule of string
   | Keeper_always_allow
   | Workspace_always_allow
   | Readonly_sandbox
-  | Observed_in_box of Keeper_types_profile_sandbox.observation_run
+  | Observed_in_box of boxed_execution
 
 type observation =
-  | Observed_clean of { run : Keeper_types_profile_sandbox.observation_run }
+  | Observed_result of boxed_execution
   | Observed_refused of
       { status : Unix.process_status
       ; stderr : string
@@ -313,7 +318,7 @@ let source_fields = function
     [ "authorization_source", `String "workspace_always_allow" ]
   | Readonly_sandbox ->
     [ "authorization_source", `String "readonly_sandbox" ]
-  | Observed_in_box run ->
+  | Observed_in_box { run; result = _ } ->
     [ "authorization_source", `String "observed_in_box"
     ; ( "observation_run"
       , `String (Keeper_types_profile_sandbox.observation_run_to_string run) )
@@ -1978,20 +1983,17 @@ let status_label = function
   | Unix.WSTOPPED signal -> Printf.sprintf "stopped=%d" signal
 ;;
 
-(* RFC-0422: the box is asked only here, after every cheaper authority has
-   declined and before the judge is paid. Exit 0 is the whole criterion: the
-   guest kernel refused every write outside the scratch and every socket, so
-   a run that still ended 0 left nothing behind, and its output is the
-   answer. Anything else keeps the judge — the same deferral the request
-   would have had before this stage existed, so a box that cannot be built
-   is a request that is judged, never one that runs unboxed. *)
+(* The box is asked after every cheaper authority has declined. Observe
+   failures retain the judge. Guest_local results have already executed on
+   the keeper's tree, even when they failed: returning their exact result
+   avoids replaying an arbitrary script's completed prefix. *)
 let decide_after_observation request ~observe =
   match observe with
   | None -> defer request Judge_requested
   | Some run ->
     (match (run () : observation) with
-     | Observed_clean { run } ->
-       let source = Observed_in_box run in
+     | Observed_result execution ->
+       let source = Observed_in_box execution in
        let audit_receipt =
          audit_allow
            request

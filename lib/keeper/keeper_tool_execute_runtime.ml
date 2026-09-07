@@ -516,7 +516,7 @@ let handle_tool_execute_typed
                  , Keeper_approval_queue_rules_types.observed_refusal_to_yojson
                      (Keeper_gate.observed_refusal ~status ~stderr) )
                ]
-             | Some (Keeper_gate.Observed_clean _ | Keeper_gate.Observation_unavailable _)
+             | Some (Keeper_gate.Observed_result _ | Keeper_gate.Observation_unavailable _)
              | None -> []
            in
            Keeper_gate_deferred_payload.create
@@ -710,36 +710,10 @@ let handle_tool_execute_typed
             match !For_testing.dispatch_override with
             | Some override -> override ()
             | None ->
-              (match
-                 ( authorization.source
-                 , Keeper_tool_execute_observe.observed_result observation )
-               with
-               | Keeper_gate.Observed_in_box _, Some result ->
-                 (* The box already ran this call and the kernel says it
-                    changed nothing, so its output is the answer; running it
-                    again would be a second read for no new fact. Replayed
-                    through the stream so the operator surface sees what the
-                    keeper receives. *)
-                 if not (String.equal result.stdout "")
-                 then on_output_chunk (`Stdout result.stdout);
-                 if not (String.equal result.stderr "")
-                 then on_output_chunk (`Stderr result.stderr);
-                 Ok result
-               | Keeper_gate.Observed_in_box _, None ->
-                 (* Unreachable by construction: the stage stores the result
-                    before it answers clean. Should it ever happen, the call
-                    runs once unboxed -- the same thing an allow from the
-                    tables does -- and says so. *)
-                 Log.Keeper.warn
-                   ~keeper_name:meta.name
-                   "observed_in_box authorization without a stored result; running the call once";
-                 dispatch_unboxed ()
-               | ( Keeper_gate.One_shot_resolution _
-                 | Keeper_gate.Exact_always_rule _
-                 | Keeper_gate.Keeper_always_allow
-                 | Keeper_gate.Workspace_always_allow
-                 | Keeper_gate.Readonly_sandbox )
-               , _ -> dispatch_unboxed ())
+              Keeper_tool_execute_observe.dispatch_authorized
+                ~source:authorization.source
+                ~on_output_chunk
+                ~dispatch:dispatch_unboxed
           in
           let dispatch_result =
             match dispatch_sandbox with

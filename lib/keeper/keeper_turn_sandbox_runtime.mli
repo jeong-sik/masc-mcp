@@ -23,6 +23,14 @@ val create :
   t
 
 val host_root : t -> string
+
+val github_identity_secret_files : t -> string list
+(** Credential files of the microvm identity snapshots already bound to this
+    runtime, including retained snapshots. Reads the in-memory binding only:
+    no token refresh, boot or guest replacement. A boxed execution has already
+    acquired that binding; inspecting its output must not prepare a different
+    identity after the command ran. *)
+
 val prepare_github_identity_secret_files :
   ?timeout_sec:float -> t -> (string list, string) result
 (** After authorization, observe and bind the container to the current GitHub

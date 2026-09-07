@@ -597,10 +597,14 @@ let test_auto_judge_allows_a_clean_observe_run () =
       ~keeper_always_allow:false
       ~observe:(fun () ->
         incr asked;
-        Keeper_gate.Observed_clean { run = Keeper_types_profile_sandbox.Observe })
+        Keeper_gate.Observed_result
+          { run = Keeper_types_profile_sandbox.Observe
+          ; result = { Masc_exec.Exec_dispatch.status = Unix.WEXITED 0; stdout = "1\n"; stderr = "" }
+          })
       (boxed_request base_path)
   with
-  | Keeper_gate.Allow { source = Observed_in_box Keeper_types_profile_sandbox.Observe; _ } ->
+  | Keeper_gate.Allow
+      { source = Observed_in_box { run = Keeper_types_profile_sandbox.Observe; _ }; _ } ->
     check int "the box was asked exactly once" 1 !asked
   | Keeper_gate.Allow { source; _ } ->
     failf "a clean observe run was allowed through the wrong source: %s"

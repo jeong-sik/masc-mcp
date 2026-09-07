@@ -484,10 +484,20 @@ let provider_transcript_admission messages =
 
 (* [dispatch] receives the admitted history, which is the input list unless an
    interrupted turn's open cycle had to be closed first. *)
-let dispatch_after_provider_transcript_admission ~messages ~dispatch =
+let dispatch_after_provider_transcript_admission ~messages ~checkpoint ~dispatch =
   match provider_transcript_admission messages with
   | Error _ as error -> error
-  | Ok admitted -> dispatch admitted
+  | Ok admitted ->
+    (* Runtime_agent resumes from checkpoint.messages. Repairing only the
+       initial history leaves that resume path replaying the unanswered calls
+       that admission just closed. Preserve every other checkpoint field. *)
+    let checkpoint =
+      Option.map
+        (fun (checkpoint : Agent_core.Checkpoint.t) ->
+          { checkpoint with messages = admitted })
+        checkpoint
+    in
+    dispatch ~checkpoint admitted
 ;;
 
 (* [run_ref.agent_name] is the AGENT_CORE runtime identity, not the Keeper identity.
@@ -1244,7 +1254,8 @@ let run_turn
                    boundaries settle the lane, while usage remains observational. *)
                 dispatch_after_provider_transcript_admission
                   ~messages:initial_messages
-                  ~dispatch:(fun initial_messages ->
+                  ~checkpoint:resume_agent_core_checkpoint
+                  ~dispatch:(fun ~checkpoint initial_messages ->
                     Keeper_turn_driver.run_named
                       ~runtime_id:runtime_id_string
                       ~base_path:config.base_path
@@ -1291,7 +1302,7 @@ let run_turn
                       ~terminal_effect_state:s.terminal_effect_state
                       ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
                       ?cooperative_yield_probe
-                      ?agent_core_checkpoint:resume_agent_core_checkpoint
+                      ?agent_core_checkpoint:checkpoint
                       ?event_bus
                       ?trace_link
                       ~on_runtime_attempt:

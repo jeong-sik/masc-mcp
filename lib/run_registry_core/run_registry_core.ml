@@ -695,8 +695,7 @@ module Make (Payload : Payload) = struct
          first);
     if snapshot.reached_end && snapshot.malformed = [] && Payload.completed_retention <> `All
     then (
-      (* ignore-result-ok: replay publishes the parsed state whether compaction
-         succeeds or leaves the original log; the writer records its failure. *)
+      (* See [compact_replay_log]: it reports failure; replay still publishes the parsed state. *)
       ignore (compact_replay_log path snapshot));
     { entries = Atomic.make snapshot.retained_entries
     ; path = Some path

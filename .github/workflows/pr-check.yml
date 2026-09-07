@@ -186,6 +186,36 @@ jobs:
           bash scripts/ci/run-edited-tests.sh \
             "${{ github.event.pull_request.number }}"
 
+      # RFC-0428 step two. The step above runs what a pull request edits; this
+      # runs a fixed set regardless, because the five defects found on
+      # 2026-09-06 to 09-07 were not in a file their pull request touched.
+      # Every one was a suite that had gone red days earlier and stayed red:
+      # test_tui_row_wiring since 09-03, test_tool_name_prefix_boundary since
+      # 09-03, test_pr_open_script since 09-01, and two in
+      # test_tui_keeper_chat_history. Nothing was watching, because the
+      # nightly that would have has not finished inside its deadline since at
+      # least 09-04.
+      #
+      # A suite whose dune stanza names only unwrapped libraries under bin/,
+      # test_lib/ or lib/ needs no masc, and therefore no build: the runner
+      # compiles the modules it reaches with ocamlfind. 111 of the 1201
+      # suites qualify; measured at 119-199 s locally depending on load, and
+      # the other 1090 are named and skipped with the library that blocks
+      # them. No dune, no _build, so this neither uses nor spoils the cache
+      # the step above just filled.
+      #
+      # continue-on-error for one reason, which will expire: one of the 111 is
+      # red on purpose. test_tool_name_prefix_boundary reports that
+      # report_review_verdict sits outside the closed tool-name vocabulary
+      # (#33778), and every way to settle that costs a deploy, so it is a
+      # decision rather than a repair. Gating before it is made would block
+      # pull requests that have nothing to do with it. When #33778 lands, this
+      # becomes a gate by deleting one line.
+      - name: Run the suites that need no build
+        continue-on-error: true
+        timeout-minutes: 15
+        run: python3 scripts/run-standalone-suites.py --all-matching '*'
+
   # dashboard/ ships a `typecheck` script and no lane calls it.
   #
   # ci.yml's header records that its dashboard job was folded away on

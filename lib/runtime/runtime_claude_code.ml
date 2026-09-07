@@ -726,6 +726,21 @@ type assistant_block =
   | Assistant_text of string
   | Assistant_native_tool of Runtime_native_tools.observation
 
+type assistant_origin =
+  | Model_response
+  | Api_error_diagnostic
+
+(* Claude Code 2.1.263's assistant envelope declares this optional boolean;
+   its producer maps isApiErrorMessage=true to is_api_error_message=true.
+   The text of an API diagnostic is not a model response. Only the terminal
+   result classifies the failure; tool effects remain independent evidence. *)
+let assistant_origin ~stage fields =
+  match List.assoc_opt "is_api_error_message" fields with
+  | None | Some (`Bool false) -> Ok Model_response
+  | Some (`Bool true) -> Ok Api_error_diagnostic
+  | Some _ -> protocol_error stage "field \"is_api_error_message\" must be a boolean"
+;;
+
 let non_blank = function
   | Some value when String.trim value <> "" -> Some value
   | Some _ | None -> None
@@ -857,6 +872,7 @@ let parse_assistant ~expected_session_id ~tools fields =
   if session_id <> expected_session_id
   then protocol_error stage "session_id does not match the active Claude session"
   else
+    let* origin = assistant_origin ~stage fields in
     let* uuid = required_string stage "uuid" fields in
     let* message = required_member stage "message" fields in
     let* message_fields = assoc_at stage message in
@@ -874,7 +890,7 @@ let parse_assistant ~expected_session_id ~tools fields =
         ~mcp_tool_names:(List.map allowed_tool_name tools)
         content
     in
-    Ok (uuid, model, blocks, message_id, usage)
+    Ok (origin, uuid, model, blocks, message_id, usage)
 ;;
 
 let native_tool_result_ids ~expected_session_id fields =
@@ -1060,20 +1076,29 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
   | "control_response" ->
     protocol_error "turn" "received an unsolicited control response"
   | "assistant" ->
-    let* uuid, model, blocks, message_id, usage =
+    let* origin, uuid, model, blocks, message_id, usage =
       parse_assistant ~expected_session_id ~tools fields
     in
-    observe_assistant_usage assistant_usage ~message_id usage;
-    if not !stream_started
-    then (
-      stream_started := true;
-      emit_stream_event on_stream_event (Turn_started { turn_id = uuid; model }));
+    let assistant_model =
+      match origin with
+      | Api_error_diagnostic -> assistant_model
+      | Model_response ->
+        observe_assistant_usage assistant_usage ~message_id usage;
+        if not !stream_started
+        then (
+          stream_started := true;
+          emit_stream_event on_stream_event (Turn_started { turn_id = uuid; model }));
+        Some model
+    in
     let texts_rev = ref [] in
     List.iter
       (function
         | Assistant_text text ->
-          texts_rev := text :: !texts_rev;
-          emit_stream_event on_stream_event (Text_delta text)
+          (match origin with
+           | Api_error_diagnostic -> ()
+           | Model_response ->
+             texts_rev := text :: !texts_rev;
+             emit_stream_event on_stream_event (Text_delta text))
         | Assistant_native_tool observation ->
           native_tool_attempted := true;
           Option.iter
@@ -1086,7 +1111,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
-      ~rate_limit ~assistant_model:(Some model)
+      ~rate_limit ~assistant_model
       ~assistant_texts:(assistant_texts @ texts)
       ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
       ~stream_started ~response_emitted ~ignored

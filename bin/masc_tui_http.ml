@@ -5,9 +5,20 @@ let report_err prefix msg = Printf.sprintf "(%s: %s)" prefix msg
 (* A request, a mailbox wait or a loop gap at least this long is written to
    the TUI log with two clocks (RFC-0429 §3.0): elapsed time and process CPU
    time. A request that took ten seconds of elapsed and none of CPU was
-   waiting on something; the cadence's routine polls stay under this and out
-   of the log. This is measurement, not a fix: the stall it exists to place
-   has not been placed yet.
+   waiting on something. This is measurement, not a fix: the stall it exists
+   to place has been placed since -- #33772 timed it as the main loop's own
+   iteration cost, paid once per step of a reply -- and the fix, which is
+   render and I/O sharing one domain, is not here.
+
+   This threshold was written believing the cadence's routine polls would
+   stay under it and out of the log. They do not. Measured over the live
+   TUI logs on this host, 2026-09-07: 43 of the 72 lines are the three
+   requests that ride every tick -- /gate/keepers 29 (median 2972 ms),
+   /keepers/turns 12 (median 1298 ms), /keepers/tool-approvals 2. Which is
+   the same finding from the other side: the loop is what slows a request,
+   and a poll issued by that loop is slowed by it too. Raising the number
+   would only hide the majority case, so it stays and the premise is
+   written down as measured rather than as assumed.
 
    Elapsed is [Mtime_clock.elapsed_ns], which no NTP step moves. The stall
    being chased is around ten seconds, and a wall clock corrected by that
